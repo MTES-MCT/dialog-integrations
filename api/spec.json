@@ -1,0 +1,1320 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "DiaLog",
+        "description": "Int\u00e9gration de la r\u00e9glementation de circulation dans les solutions num\u00e9riques.",
+        "version": "1.0.0"
+    },
+    "paths": {
+        "/api/regulations": {
+            "get": {
+                "tags": [
+                    "Public"
+                ],
+                "operationId": "get_api_regulations_list",
+                "parameters": [
+                    {
+                        "name": "includePermanent",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    },
+                    {
+                        "name": "includeTemporary",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    },
+                    {
+                        "name": "includeExpired",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": ""
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Private"
+                ],
+                "operationId": "post_api_regulations_add",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "identifier": {
+                                        "type": "string",
+                                        "maxLength": 60,
+                                        "example": "F2025/001"
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "draft",
+                                            "published"
+                                        ],
+                                        "example": "draft"
+                                    },
+                                    "category": {
+                                        "type": "string",
+                                        "enum": [
+                                            "temporaryRegulation",
+                                            "permanentRegulation"
+                                        ],
+                                        "example": "temporaryRegulation"
+                                    },
+                                    "subject": {
+                                        "type": "string",
+                                        "enum": [
+                                            "roadMaintenance",
+                                            "incident",
+                                            "event",
+                                            "winterMaintenance",
+                                            "other"
+                                        ],
+                                        "example": "roadMaintenance",
+                                        "nullable": true
+                                    },
+                                    "otherCategoryText": {
+                                        "type": "string",
+                                        "maxLength": 100,
+                                        "example": null,
+                                        "nullable": true
+                                    },
+                                    "title": {
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "example": "Travaux de voirie rue Exemple"
+                                    },
+                                    "measures": {
+                                        "type": "array",
+                                        "items": {
+                                            "properties": {
+                                                "type": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                        "noEntry",
+                                                        "speedLimitation",
+                                                        "parkingProhibited"
+                                                    ],
+                                                    "example": "speedLimitation"
+                                                },
+                                                "maxSpeed": {
+                                                    "type": "integer",
+                                                    "example": 30,
+                                                    "nullable": true
+                                                },
+                                                "createdAt": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-09T08:00:00Z",
+                                                    "nullable": true
+                                                },
+                                                "vehicleSet": {
+                                                    "properties": {
+                                                        "allVehicles": {
+                                                            "type": "boolean",
+                                                            "example": false,
+                                                            "nullable": true
+                                                        },
+                                                        "restrictedTypes": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "heavyGoodsVehicle",
+                                                                    "dimensions",
+                                                                    "critair",
+                                                                    "hazardousMaterials",
+                                                                    "other"
+                                                                ]
+                                                            },
+                                                            "nullable": true
+                                                        },
+                                                        "exemptedTypes": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "commercial",
+                                                                    "emergencyServices",
+                                                                    "bicycle",
+                                                                    "pedestrians",
+                                                                    "taxi",
+                                                                    "carSharing",
+                                                                    "roadMaintenanceOrConstruction",
+                                                                    "cityLogistics",
+                                                                    "other"
+                                                                ]
+                                                            },
+                                                            "nullable": true
+                                                        },
+                                                        "otherRestrictedTypeText": {
+                                                            "type": "string",
+                                                            "nullable": true
+                                                        },
+                                                        "otherExemptedTypeText": {
+                                                            "type": "string",
+                                                            "nullable": true
+                                                        },
+                                                        "heavyweightMaxWeight": {
+                                                            "type": "number",
+                                                            "format": "float",
+                                                            "nullable": true
+                                                        },
+                                                        "maxWidth": {
+                                                            "type": "number",
+                                                            "format": "float",
+                                                            "nullable": true
+                                                        },
+                                                        "maxLength": {
+                                                            "type": "number",
+                                                            "format": "float",
+                                                            "nullable": true
+                                                        },
+                                                        "maxHeight": {
+                                                            "type": "number",
+                                                            "format": "float",
+                                                            "nullable": true
+                                                        },
+                                                        "critairTypes": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "critair2",
+                                                                    "critair3",
+                                                                    "critair4",
+                                                                    "critair5"
+                                                                ]
+                                                            },
+                                                            "nullable": true
+                                                        }
+                                                    },
+                                                    "type": "object",
+                                                    "nullable": true
+                                                },
+                                                "periods": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "required": [
+                                                            "startDate",
+                                                            "recurrenceType"
+                                                        ],
+                                                        "properties": {
+                                                            "startDate": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            },
+                                                            "startTime": {
+                                                                "description": "Obligatoire si isPermanent = false",
+                                                                "type": "string",
+                                                                "format": "date-time",
+                                                                "nullable": true
+                                                            },
+                                                            "endDate": {
+                                                                "description": "Obligatoire si isPermanent = false",
+                                                                "type": "string",
+                                                                "format": "date-time",
+                                                                "nullable": true
+                                                            },
+                                                            "endTime": {
+                                                                "description": "Obligatoire si isPermanent = false",
+                                                                "type": "string",
+                                                                "format": "date-time",
+                                                                "nullable": true
+                                                            },
+                                                            "recurrenceType": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "everyDay",
+                                                                    "certainDays"
+                                                                ]
+                                                            },
+                                                            "isPermanent": {
+                                                                "type": "boolean",
+                                                                "nullable": true
+                                                            },
+                                                            "dailyRange": {
+                                                                "properties": {
+                                                                    "recurrenceType": {
+                                                                        "type": "string",
+                                                                        "enum": [
+                                                                            "everyDay",
+                                                                            "certainDays"
+                                                                        ],
+                                                                        "nullable": true
+                                                                    },
+                                                                    "applicableDays": {
+                                                                        "type": "array",
+                                                                        "items": {
+                                                                            "type": "string",
+                                                                            "enum": [
+                                                                                "monday",
+                                                                                "tuesday",
+                                                                                "wednesday",
+                                                                                "thursday",
+                                                                                "friday",
+                                                                                "saturday",
+                                                                                "sunday"
+                                                                            ]
+                                                                        },
+                                                                        "nullable": true
+                                                                    }
+                                                                },
+                                                                "type": "object",
+                                                                "nullable": true
+                                                            },
+                                                            "timeSlots": {
+                                                                "type": "array",
+                                                                "items": {
+                                                                    "properties": {
+                                                                        "startTime": {
+                                                                            "type": "string",
+                                                                            "format": "date-time",
+                                                                            "nullable": true
+                                                                        },
+                                                                        "endTime": {
+                                                                            "type": "string",
+                                                                            "format": "date-time",
+                                                                            "nullable": true
+                                                                        }
+                                                                    },
+                                                                    "type": "object"
+                                                                },
+                                                                "nullable": true
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    },
+                                                    "nullable": true
+                                                },
+                                                "locations": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "roadType": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "lane",
+                                                                    "departmentalRoad",
+                                                                    "nationalRoad",
+                                                                    "rawGeoJSON"
+                                                                ],
+                                                                "example": "lane"
+                                                            },
+                                                            "namedStreet": {
+                                                                "properties": {
+                                                                    "cityCode": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "cityLabel": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "roadName": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "fromPointType": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "fromHouseNumber": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "fromRoadName": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "toPointType": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "toHouseNumber": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "toRoadName": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "direction": {
+                                                                        "type": "string",
+                                                                        "enum": [
+                                                                            "BOTH",
+                                                                            "A_TO_B",
+                                                                            "B_TO_A"
+                                                                        ],
+                                                                        "nullable": true
+                                                                    }
+                                                                },
+                                                                "type": "object",
+                                                                "nullable": true
+                                                            },
+                                                            "departmentalRoad": {
+                                                                "properties": {
+                                                                    "administrator": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "roadNumber": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "fromDepartmentCode": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "fromPointNumber": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "fromAbscissa": {
+                                                                        "type": "integer",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "fromSide": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "toDepartmentCode": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "toPointNumber": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "toAbscissa": {
+                                                                        "type": "integer",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "toSide": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "direction": {
+                                                                        "type": "string",
+                                                                        "enum": [
+                                                                            "BOTH",
+                                                                            "A_TO_B",
+                                                                            "B_TO_A"
+                                                                        ],
+                                                                        "nullable": true
+                                                                    }
+                                                                },
+                                                                "type": "object",
+                                                                "nullable": true
+                                                            },
+                                                            "nationalRoad": {
+                                                                "properties": {
+                                                                    "administrator": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "roadNumber": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "fromDepartmentCode": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "fromPointNumber": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "fromAbscissa": {
+                                                                        "type": "integer",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "fromSide": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "toDepartmentCode": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "toPointNumber": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "toAbscissa": {
+                                                                        "type": "integer",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "toSide": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "direction": {
+                                                                        "type": "string",
+                                                                        "enum": [
+                                                                            "BOTH",
+                                                                            "A_TO_B",
+                                                                            "B_TO_A"
+                                                                        ],
+                                                                        "nullable": true
+                                                                    }
+                                                                },
+                                                                "type": "object",
+                                                                "nullable": true
+                                                            },
+                                                            "rawGeoJSON": {
+                                                                "properties": {
+                                                                    "label": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "geometry": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    }
+                                                                },
+                                                                "type": "object",
+                                                                "nullable": true
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    },
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "nullable": false
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Cr\u00e9ation r\u00e9ussie",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "uuid": {
+                                            "type": "string",
+                                            "example": "123e4567-e89b-12d3-a456-426614174000"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Non authentifi\u00e9 / identifiants client invalides",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Erreur m\u00e9tier (g\u00e9ocodage / p\u00e9rim\u00e8tre g\u00e9ographique)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "detail": {
+                                            "type": "string",
+                                            "example": "Le g\u00e9ocodage de la voie a \u00e9chou\u00e9."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Erreur de validation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "integer",
+                                            "example": 422
+                                        },
+                                        "detail": {
+                                            "type": "string",
+                                            "example": "Validation failed"
+                                        },
+                                        "violations": {
+                                            "type": "array",
+                                            "items": {
+                                                "properties": {
+                                                    "propertyPath": {
+                                                        "type": "string",
+                                                        "example": "locations[0].organization"
+                                                    },
+                                                    "title": {
+                                                        "type": "string",
+                                                        "example": "Cette valeur ne doit pas \u00eatre vide."
+                                                    },
+                                                    "parameters": {
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/regulations/cifs": {
+            "get": {
+                "tags": [
+                    "Public"
+                ],
+                "operationId": "get_api_regulations_cifs",
+                "responses": {
+                    "default": {
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/organization/identifiers": {
+            "get": {
+                "tags": [
+                    "Private"
+                ],
+                "operationId": "get_api_organization_identifiers",
+                "responses": {
+                    "200": {
+                        "description": "Liste des identifiants existants pour l\u2019organisation authentifi\u00e9e",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "identifiers": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            },
+                                            "example": [
+                                                "F2025/001",
+                                                "F2025/002"
+                                            ]
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Non authentifi\u00e9 / identifiants client invalides",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/regulations/{uuid}/publish": {
+            "put": {
+                "tags": [
+                    "Private"
+                ],
+                "operationId": "put_api_regulations_publish",
+                "parameters": [
+                    {
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "pattern": "[0-9a-f]{8}-[0-9a-f]{4}-[13-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Arr\u00eat\u00e9 publi\u00e9",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "uuid": {
+                                            "type": "string",
+                                            "example": "e413a47e-5928-4353-a8b2-8b7dda27f9a5"
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "published"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Erreur m\u00e9tier (publication impossible)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "detail": {
+                                            "type": "string",
+                                            "example": "La r\u00e9glementation ne peut pas \u00eatre publi\u00e9e."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Non authentifi\u00e9 / identifiants client invalides",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Organisation non autoris\u00e9e \u00e0 modifier cet arr\u00eat\u00e9",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "integer",
+                                            "example": 403
+                                        },
+                                        "detail": {
+                                            "type": "string",
+                                            "example": "Forbidden"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Arr\u00eat\u00e9 introuvable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "detail": {
+                                            "type": "string",
+                                            "example": "Not Found"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/stats": {
+            "get": {
+                "tags": [
+                    "Public"
+                ],
+                "operationId": "get_api_stats_organizations_geometries",
+                "responses": {
+                    "200": {
+                        "description": "Zones g\u00e9ographiques fusionn\u00e9es au format GeoJSON",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "type": {
+                                            "type": "string",
+                                            "example": "FeatureCollection"
+                                        },
+                                        "features": {
+                                            "type": "array",
+                                            "items": {
+                                                "properties": {
+                                                    "type": {
+                                                        "type": "string",
+                                                        "example": "Feature"
+                                                    },
+                                                    "geometry": {
+                                                        "properties": {
+                                                            "type": {
+                                                                "type": "string",
+                                                                "example": "Polygon"
+                                                            },
+                                                            "coordinates": {
+                                                                "type": "array",
+                                                                "items": {
+                                                                    "type": "array",
+                                                                    "items": {
+                                                                        "type": "array",
+                                                                        "items": {
+                                                                            "type": "number"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    },
+                                                    "properties": {
+                                                        "properties": {
+                                                            "clusterName": {
+                                                                "description": "Nom agr\u00e9g\u00e9 des organisations incluses dans ce cluster",
+                                                                "type": "string",
+                                                                "example": "Ville de Paris, Ville de Lyon",
+                                                                "nullable": true
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "RegulationOrderRecordStatusEnum": {
+                "type": "string",
+                "enum": [
+                    "draft",
+                    "published"
+                ]
+            },
+            "MeasureTypeEnum": {
+                "type": "string",
+                "enum": [
+                    "noEntry",
+                    "speedLimitation",
+                    "parkingProhibited"
+                ]
+            },
+            "PeriodRecurrenceTypeEnum": {
+                "type": "string",
+                "enum": [
+                    "everyDay",
+                    "certainDays"
+                ]
+            },
+            "SaveTimeSlotDTO": {
+                "properties": {
+                    "startTime": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "endTime": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "SaveDailyRangeDTO": {
+                "properties": {
+                    "recurrenceType": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/PeriodRecurrenceTypeEnum"
+                            }
+                        ]
+                    },
+                    "applicableDays": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": []
+                    }
+                },
+                "type": "object"
+            },
+            "SavePeriodDTO": {
+                "properties": {
+                    "startDate": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "startTime": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "endDate": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "endTime": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "recurrenceType": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/PeriodRecurrenceTypeEnum"
+                            }
+                        ]
+                    },
+                    "isPermanent": {
+                        "type": "boolean",
+                        "default": false,
+                        "nullable": true
+                    },
+                    "timeSlots": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SaveTimeSlotDTO"
+                        },
+                        "default": [],
+                        "nullable": true
+                    },
+                    "dailyRange": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/SaveDailyRangeDTO"
+                            }
+                        ]
+                    }
+                },
+                "type": "object"
+            },
+            "RoadTypeEnum": {
+                "type": "string",
+                "enum": [
+                    "lane",
+                    "departmentalRoad",
+                    "nationalRoad",
+                    "rawGeoJSON"
+                ]
+            },
+            "DirectionEnum": {
+                "type": "string",
+                "enum": [
+                    "BOTH",
+                    "A_TO_B",
+                    "B_TO_A"
+                ]
+            },
+            "SaveNamedStreetDTO": {
+                "properties": {
+                    "cityCode": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "cityLabel": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "roadName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "fromPointType": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "fromHouseNumber": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "fromRoadName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "toPointType": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "toHouseNumber": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "toRoadName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "geometry": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "direction": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/DirectionEnum"
+                            }
+                        ]
+                    }
+                },
+                "type": "object"
+            },
+            "SaveNumberedRoadDTO": {
+                "properties": {
+                    "administrator": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "roadNumber": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "fromDepartmentCode": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "fromPointNumber": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "fromAbscissa": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "fromSide": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "toDepartmentCode": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "toPointNumber": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "toAbscissa": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "toSide": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "direction": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/DirectionEnum"
+                            }
+                        ]
+                    },
+                    "geometry": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "storageAreaUuid": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "SaveRawGeoJSONDTO": {
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "geometry": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "SaveLocationDTO": {
+                "properties": {
+                    "roadType": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RoadTypeEnum"
+                            }
+                        ]
+                    },
+                    "namedStreet": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/SaveNamedStreetDTO"
+                            }
+                        ]
+                    },
+                    "departmentalRoad": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/SaveNumberedRoadDTO"
+                            }
+                        ]
+                    },
+                    "nationalRoad": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/SaveNumberedRoadDTO"
+                            }
+                        ]
+                    },
+                    "rawGeoJSON": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/SaveRawGeoJSONDTO"
+                            }
+                        ]
+                    }
+                },
+                "type": "object"
+            },
+            "SaveVehicleSetDTO": {
+                "properties": {
+                    "allVehicles": {
+                        "type": "boolean",
+                        "nullable": true
+                    },
+                    "critairTypes": {
+                        "type": "array",
+                        "items": {},
+                        "default": []
+                    },
+                    "restrictedTypes": {
+                        "type": "array",
+                        "items": {},
+                        "default": []
+                    },
+                    "heavyweightMaxWeight": {
+                        "type": "number",
+                        "format": "float",
+                        "nullable": true
+                    },
+                    "maxWidth": {
+                        "type": "number",
+                        "format": "float",
+                        "nullable": true
+                    },
+                    "maxLength": {
+                        "type": "number",
+                        "format": "float",
+                        "nullable": true
+                    },
+                    "maxHeight": {
+                        "type": "number",
+                        "format": "float",
+                        "nullable": true
+                    },
+                    "otherRestrictedTypeText": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "exemptedTypes": {
+                        "type": "array",
+                        "items": {},
+                        "default": []
+                    },
+                    "otherExemptedTypeText": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "SaveMeasureDTO": {
+                "properties": {
+                    "type": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/MeasureTypeEnum"
+                            }
+                        ]
+                    },
+                    "maxSpeed": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "periods": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SavePeriodDTO"
+                        },
+                        "default": []
+                    },
+                    "locations": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SaveLocationDTO"
+                        },
+                        "default": []
+                    },
+                    "vehicleSet": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/SaveVehicleSetDTO"
+                            }
+                        ]
+                    }
+                },
+                "type": "object"
+            },
+            "RegulationGeneralInfoDTO": {
+                "required": [
+                    "status"
+                ],
+                "properties": {
+                    "identifier": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "category": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "subject": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "status": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RegulationOrderRecordStatusEnum"
+                            }
+                        ]
+                    },
+                    "otherCategoryText": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "title": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "measures": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SaveMeasureDTO"
+                        },
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            }
+        },
+        "securitySchemes": {
+            "ApiClientIdHeader": {
+                "type": "apiKey",
+                "description": "Client id",
+                "name": "X-Client-Id",
+                "in": "header"
+            },
+            "ApiClientSecretHeader": {
+                "type": "apiKey",
+                "description": "Client secret",
+                "name": "X-Client-Secret",
+                "in": "header"
+            }
+        }
+    },
+    "security": [
+        {
+            "ApiClientIdHeader": [],
+            "ApiClientSecretHeader": []
+        }
+    ],
+    "tags": [
+        {
+            "name": "Private"
+        },
+        {
+            "name": "Public"
+        }
+    ]
+}
