@@ -1,0 +1,24 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+jobs:
+  lint-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        enable-cache: true
+
+      - name: Install Python
+        run: make app:build-ci
+
+      - name: Lint
+        run: make app:lint
+
+      - name: Format check
+        run: make app:format-check

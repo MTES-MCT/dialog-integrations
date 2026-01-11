@@ -1,4 +1,4 @@
-include .env
+-include .env
 export
 
 api\:fetch-spec:
@@ -15,12 +15,19 @@ api\:update:
 app\:run:
 	dialog run
 
+app\:build-ci:
+	uv python install 3.11
+	uv sync --frozen
+
 app\:build:
 	uv sync
 
 app\:lint:
-	ruff check .
+	uv run ruff check .
 
 app\:format:
-	ruff format .
+	uv run ruff format .
+
+app\:format-check:
+	uv run ruff format --check .
 
