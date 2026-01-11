@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "dialog-integrations"
 version = "0.1.0"
@@ -9,10 +13,13 @@ dependencies = [
     "ipdb>=0.13.13",
     "jupyter>=1.1.1",
     "loguru>=0.7.3",
+    "numpy!=2.4.0",
     "openapi>=2.0.0",
     "openapi-python-client>=0.28.0",
     "polars>=1.36.1",
     "pyarrow>=22.0.0",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
     "python-dotenv>=1.2.1",
     "shapely>=2.1.2",
     "tabulate>=0.9.0",
@@ -23,4 +30,4 @@ dependencies = [
 dialog = "cli:app"
 
 [tool.setuptools]
-py-modules = ["cli"]
+py-modules = ["cli", "settings"]

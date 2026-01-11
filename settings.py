@@ -1,4 +1,3 @@
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,6 +6,6 @@ class Settings(BaseSettings):
         env_file=".env", env_prefix="DIALOG_", case_sensitive=False, extra="ignore"
     )
 
-    client_id: str = Field(...)
-    client_secret: str = Field(...)
-    base_url: str = Field(...)
+    client_id: str
+    client_secret: str
+    base_url: str
