@@ -58,7 +58,8 @@ class DialogIntegration:
         return getattr(module, "Integration")(organization, organization_settings, client)
 
     def integrate(self) -> None:
-        self.fetch_raw_data()
+        df = self.fetch_raw_data()
+        logger.info(f"Fetched {len(df)} records")
         self.get_identifiers()
 
     def publish(self):
@@ -84,7 +85,6 @@ class DialogIntegration:
             )
         else:
             logger.success("Finished publishing all measures")
-
 
     def fetch_raw_data(self) -> pl.DataFrame:
         """
