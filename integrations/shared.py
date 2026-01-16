@@ -1,5 +1,7 @@
+from datetime import datetime
 from importlib import util as importlib_util
 from pathlib import Path
+from typing import TypedDict, get_type_hints
 
 import polars as pl
 from loguru import logger
@@ -12,6 +14,29 @@ from api.dia_log_client.api.private.put_api_regulations_publish import (
     sync_detailed as publish_regulation,
 )
 from settings import OrganizationSettings, Settings
+
+PY_TO_POLARS = {
+    str: pl.Utf8,
+    int: pl.Int64,
+    float: pl.Float64,
+    bool: pl.Boolean,
+    datetime: pl.Datetime,
+}
+
+
+def typed_dict_to_polars_schema(td: type[TypedDict]) -> dict[str, pl.DataType]:  # type: ignore
+    schema = {}
+    for k, t in get_type_hints(td).items():
+        # Optional[T] → T
+        origin = getattr(t, "__origin__", None)
+        if origin is type(None):
+            continue
+        if origin is list or origin is dict:
+            raise NotImplementedError
+        if origin is None and hasattr(t, "__args__"):
+            t = t.__args__[0]
+        schema[k] = PY_TO_POLARS[t]
+    return schema
 
 
 class DialogIntegration:
@@ -32,6 +57,7 @@ class DialogIntegration:
         organization_settings = OrganizationSettings(Settings(), organization)
         client = Client(
             base_url=organization_settings.base_url,  # type: ignore
+            raise_on_unexpected_status=True,
             headers={
                 "X-Client-Id": organization_settings.client_id,
                 "X-Client-Secret": organization_settings.client_secret,
@@ -57,34 +83,29 @@ class DialogIntegration:
 
         return getattr(module, "Integration")(organization, organization_settings, client)
 
-    def integrate(self) -> None:
-        df = self.fetch_raw_data()
+    def integrate_measures(self) -> None:
+        df = self.fetch_raw_data().pipe(self.compute_clean_data)
         logger.info(f"Fetched {len(df)} records")
         self.get_identifiers()
 
-    def publish(self):
+    def publish_measures(self) -> None:
         identifiers = self.get_identifiers()
-
-        # Publish each identifier
         count_error = 0
         for index, identifier in enumerate(identifiers):
-            publish_resp = publish_regulation(identifier=identifier, client=self.client)
-
-            if publish_resp.status_code == 200:
+            try:
+                publish_regulation(identifier=identifier, client=self.client)
                 logger.success(
                     f"Measure {index}/{len(identifiers)} successfully published: {identifier}"
                 )
-            else:
+            except Exception:
                 logger.error(f"Measure {index}/{len(identifiers)} failed to publish: {identifier}")
                 count_error += 1
 
         if count_error > 0:
             logger.error(f"Failed to publish {count_error} identifier(s)")
-            logger.success(
-                f"Finished publishing {len(identifiers) - count_error} measures successfully"
-            )
-        else:
-            logger.success("Finished publishing all measures")
+        logger.success(
+            f"Finished publishing {len(identifiers) - count_error} measures successfully"
+        )
 
     def fetch_raw_data(self) -> pl.DataFrame:
         """
@@ -92,6 +113,13 @@ class DialogIntegration:
         Returns as typed polars dataframe.
         """
         raise NotImplementedError("Subclasses must implement fetch_data method")
+
+    def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
+        """
+        Clean and transform the raw data into the desired format.
+        Returns as typed polars dataframe.
+        """
+        raise NotImplementedError("Subclasses must implement compute_clean_data method")
 
     def get_identifiers(self) -> list[str]:
         logger.info(f"Fetching identifiers for organization: {self.organization}")

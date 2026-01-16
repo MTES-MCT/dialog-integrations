@@ -26,3 +26,6 @@ class Integration(DialogIntegration):
         return pl.read_csv(
             io.BytesIO(r.content), separator=";", encoding="utf8", ignore_errors=True
         )
+
+    def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
+        return pl.DataFrame()

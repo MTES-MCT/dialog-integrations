@@ -7,6 +7,7 @@ import polars as pl
 import requests
 from loguru import logger
 
+from integrations.co_brest.schema import BREST_SCHEMA, DESCRIPTION_CONFIG
 from integrations.shared import DialogIntegration
 
 URL = "https://www.data.gouv.fr/api/1/datasets/r/3ca7bd06-6489-45a2-aee9-efc6966121b2"
@@ -42,3 +43,26 @@ class Integration(DialogIntegration):
         # geometry -> WKT pour Polars
         gdf["geometry"] = gdf.geometry.to_wkt()
         return pl.from_pandas(gdf)
+
+    def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
+        return (
+            raw_data.with_columns(
+                [self.cast_boolean_column("CYCLO"), self.cast_boolean_column("VELO")]
+            )
+            .with_columns([pl.col(col).cast(dtype) for col, dtype in BREST_SCHEMA.items()])
+            .select(list(BREST_SCHEMA.keys()))
+            .filter(pl.col("DESCRIPTIF").is_in(DESCRIPTION_CONFIG.keys()))
+            .filter(
+                ~(pl.col("DESCRIPTIF").eq("Sens interdit / Sens unique") & pl.col("SENS").eq(1))
+            )
+        )
+
+    def cast_boolean_column(self, column_name: str) -> pl.Expr:
+        return (
+            pl.when(pl.col(column_name).str.to_uppercase() == "OUI")
+            .then(True)
+            .when(pl.col(column_name).str.to_uppercase() == "NON")
+            .then(False)
+            .cast(pl.Boolean)
+            .alias(column_name)
+        )
