@@ -19,8 +19,8 @@ jobs:
       - id: set-matrix
         run: |
           cd integrations
-          DIRS=$(ls -d */ | sed 's|/||' | grep -vE '^(shared|__pycache__)$' | jq -Rsc .)
-          echo "matrix={\"organization\": $DIRS}" >> $GITHUB_OUTPUT
+          MATRIX=$(ls -d */ | sed 's|/||' | grep -vE '^(shared|__pycache__)$' | jq -Rsc '{organizations: .}')
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
   integrate:
     needs: discover-integrations
@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false  # Continue even if one integration fails
       matrix: ${{ fromJson(needs.discover-integrations.outputs.matrix) }}
-    environment: ${{ matrix.organization }}  # Use GitHub Environment per organization
+    environment: ${{ matrix.organizations }}  # Use GitHub Environment per organization
 
     steps:
       - uses: actions/checkout@v4
