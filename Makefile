@@ -12,9 +12,6 @@ api\:update:
 	make api:fetch-spec
 	make api:generate-client
 
-app\:run:
-	dialog run
-
 app\:build-ci:
 	uv python install 3.11
 	uv sync --frozen

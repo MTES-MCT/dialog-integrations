@@ -33,4 +33,4 @@ jobs:
           DIALOG_BASE_URL: ${{ secrets.DIALOG_BASE_URL }}
           DIALOG_CLIENT_ID: ${{ secrets.DIALOG_CLIENT_ID }}
           DIALOG_CLIENT_SECRET: ${{ secrets.DIALOG_CLIENT_SECRET }}
-        run: dialog integrate ${{ matrix.organization }}
+        run: uv run dialog integrate ${{ matrix.organization }}
