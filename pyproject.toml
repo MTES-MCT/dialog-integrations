@@ -51,38 +51,6 @@ line-length = 100
 select = ["E", "F", "W", "I"]  # pycodestyle errors, pyflakes, warnings, isort
 ignore = []
 
-[tool.mypy]
-# Basic type checking settings
-python_version = "3.11"
-strict = false
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-
-# Exclude generated API client and directories
-exclude = [
-    "^api/",
-    "^.venv/",
-]
-
-# Per-module options for generated code
-[[tool.mypy.overrides]]
-module = "api.*"
-ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = "shapely.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "geopandas.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "polars.*"
-ignore_missing_imports = true
-
 [tool.pyright]
 # Pyright configuration (used by Pylance in VSCode)
 include = ["cli.py", "settings.py", "integrations"]

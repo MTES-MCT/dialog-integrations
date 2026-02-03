@@ -52,7 +52,6 @@ DESCRIPTION_CONFIG = {
     },
     "Sens interdit / Sens unique": {
         "measure_type": MeasureTypeEnum.NOENTRY,
-        "filter": lambda df: df["SENS"] == 0,
     },
 }
 
