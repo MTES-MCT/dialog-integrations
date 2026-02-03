@@ -9,26 +9,13 @@ on:
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
-  discover-integrations:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: set-matrix
-        run: |
-          cd integrations
-          MATRIX=$(ls -d */ | sed 's|/||' | grep -vE '^(shared|__pycache__)$' | jq -Rsc '{organizations: .}')
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
-
   integrate:
-    needs: discover-integrations
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false  # Continue even if one integration fails
-      matrix: ${{ fromJson(needs.discover-integrations.outputs.matrix) }}
-    environment: ${{ matrix.organizations }}  # Use GitHub Environment per organization
+      matrix:
+        organization: [co_brest, dp_sarthes]
+    environment: ${{ matrix.organization }}  # Use GitHub Environment per organization
 
     steps:
       - uses: actions/checkout@v4
