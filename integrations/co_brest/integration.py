@@ -26,7 +26,11 @@ from api.dia_log_client.models import (
     SaveRawGeoJSONDTO,
     SaveVehicleSetDTO,
 )
-from integrations.co_brest.schema import BREST_SCHEMA, DESCRIPTION_CONFIG, BrestMeasure
+from integrations.co_brest.schema import (
+    DESCRIPTION_CONFIG,
+    BrestMeasure,
+    BrestRawDataSchema,
+)
 from integrations.shared import DialogIntegration
 
 URL = "https://www.data.gouv.fr/api/1/datasets/r/3ca7bd06-6489-45a2-aee9-efc6966121b2"
@@ -37,6 +41,7 @@ transformer = Transformer.from_crs("EPSG:2154", "EPSG:4326", always_xy=True)
 
 class Integration(DialogIntegration):
     draft = False
+    raw_data_schema = BrestRawDataSchema
 
     def fetch_raw_data(self) -> pl.DataFrame:
         logger.info(f"Downloading and reading shapefile data from {URL}")
@@ -65,14 +70,20 @@ class Integration(DialogIntegration):
         gdf["geometry"] = gdf.geometry.to_wkt()
         return pl.from_pandas(gdf)
 
+    def preprocess_raw_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
+        """
+        Apply Brest-specific preprocessing: cast boolean columns.
+        """
+        return raw_data.with_columns(
+            [
+                self.cast_boolean_column("CYCLO"),
+                self.cast_boolean_column("VELO"),
+            ]
+        )
+
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         return (
-            raw_data.with_columns(
-                [self.cast_boolean_column("CYCLO"), self.cast_boolean_column("VELO")]
-            )
-            .with_columns([pl.col(col).cast(dtype) for col, dtype in BREST_SCHEMA.items()])
-            .select(list(BREST_SCHEMA.keys()))
-            .filter(pl.col("DESCRIPTIF").is_in(DESCRIPTION_CONFIG.keys()))
+            raw_data.filter(pl.col("DESCRIPTIF").is_in(DESCRIPTION_CONFIG.keys()))
             .filter(
                 ~(pl.col("DESCRIPTIF").eq("Sens interdit / Sens unique") & pl.col("SENS").eq(1))
             )
@@ -88,6 +99,7 @@ class Integration(DialogIntegration):
             .then(False)
             .cast(pl.Boolean)
             .alias(column_name)
+            .fill_null(False)
         )
 
     def create_regulations(self, clean_data: pl.DataFrame) -> list[PostApiRegulationsAddBody]:
@@ -140,8 +152,8 @@ class Integration(DialogIntegration):
         params = {
             "type_": cfg["measure_type"],
             "max_speed": measure["VITEMAX"],
-            "periods": [self.create_save_period_dto(measure)],
-            "locations": [self.create_save_location_dto(measure)],
+            "periods": [self.create_save_period_dto(measure)],  # type: ignore
+            "locations": [self.create_save_location_dto(measure)],  # type: ignore
             "vehicle_set": self.create_save_vehicle_dto(
                 measure, cfg.get("exempted_types"), cfg.get("restricted_types")
             ),
@@ -242,21 +254,19 @@ def compute_save_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     # Count rows with null DT_MAT before filtering
     n_null_dt_mat = df.select(pl.col("DT_MAT").is_null().sum()).item()
     if n_null_dt_mat > 0:
-        logger.warning(
-            f"Dropping {n_null_dt_mat} rows with null DT_MAT (no start date available)"
-        )
+        logger.warning(f"Dropping {n_null_dt_mat} rows with null DT_MAT (no start date available)")
 
     # Filter out rows where DT_MAT is null
     df = df.filter(pl.col("DT_MAT").is_not_null())
 
     # Compute all period fields
-    return df.with_columns([
-        pl.col("DT_MAT")
-        .dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-        .alias("period_start_date"),
-        pl.lit(None).alias("period_end_date"),
-        pl.lit(None).alias("period_start_time"),
-        pl.lit(None).alias("period_end_time"),
-        pl.lit("everyDay").alias("period_recurrence_type"),
-        pl.lit(True).alias("period_is_permanent"),
-    ])
+    return df.with_columns(
+        [
+            pl.col("DT_MAT").dt.strftime("%Y-%m-%dT%H:%M:%SZ").alias("period_start_date"),
+            pl.lit(None).alias("period_end_date"),
+            pl.lit(None).alias("period_start_time"),
+            pl.lit(None).alias("period_end_time"),
+            pl.lit("everyDay").alias("period_recurrence_type"),
+            pl.lit(True).alias("period_is_permanent"),
+        ]
+    )

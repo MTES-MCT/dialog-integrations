@@ -17,6 +17,7 @@ dependencies = [
     "numpy!=2.4.0",
     "openapi>=2.0.0",
     "openapi-python-client>=0.28.0",
+    "pandera>=0.20.0",
     "polars>=1.36.1",
     "pyarrow>=22.0.0",
     "pydantic>=2.12.5",

@@ -4,6 +4,7 @@ from importlib import util as importlib_util
 from pathlib import Path
 from typing import TypedDict, get_type_hints
 
+import pandera.polars as pa
 import polars as pl
 from loguru import logger
 
@@ -51,6 +52,7 @@ class DialogIntegration:
     client: Client
     draft_status: bool = False
     organization_settings: OrganizationSettings
+    raw_data_schema: type[pa.DataFrameModel] | None = None  # Subclasses must set this
 
     def __init__(self, organization_settings: OrganizationSettings, client: Client):  # type: ignore
         self.organization_settings = organization_settings
@@ -102,7 +104,8 @@ class DialogIntegration:
     def integrate_regulations(self) -> None:
         raw_data = self.fetch_raw_data()
         logger.info(f"Fetched {raw_data.shape[0]} raw records")
-        clean_data = raw_data.pipe(self.compute_clean_data)
+        validated_data = self.validate_raw_data(raw_data)
+        clean_data = validated_data.pipe(self.compute_clean_data)
         logger.info(f"After cleaning, got {clean_data.shape[0]} records")
 
         regulations = self.create_regulations(clean_data)
@@ -168,6 +171,43 @@ class DialogIntegration:
         Returns as typed polars dataframe.
         """
         raise NotImplementedError("Subclasses must implement fetch_data method")
+
+    def preprocess_raw_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
+        """
+        Apply minimal preprocessing transformations before validation.
+        Default implementation returns data unchanged.
+        Override in subclasses for integration-specific preprocessing (e.g., boolean casting).
+        """
+        return raw_data
+
+    def validate_raw_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
+        """
+        Validate raw data schema and keep only columns we need.
+        Applies minimal transformations via preprocess_raw_data, then validates.
+        """
+        if self.raw_data_schema is None:
+            raise NotImplementedError("Subclasses must set raw_data_schema class attribute")
+
+        logger.info(f"Validating raw data schema with {raw_data.shape[0]} rows")
+
+        # Select only the columns we need
+        columns_to_keep = list(self.raw_data_schema.to_schema().columns.keys())
+        logger.info(f"Keeping {len(columns_to_keep)} columns: {columns_to_keep}")
+        logger.info(f"Discarding columns: {set(raw_data.columns) - set(columns_to_keep)}")
+        df = raw_data.select(columns_to_keep)
+
+        # Apply integration-specific preprocessing (e.g., boolean casting)
+        df = self.preprocess_raw_data(df)
+
+        # Validate with pandera schema
+        validated_df = self.raw_data_schema.validate(df)
+
+        logger.info(
+            f"Raw data validation successful: {validated_df.shape[0]} rows, "
+            f"{validated_df.shape[1]} columns"
+        )
+
+        return validated_df
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         """

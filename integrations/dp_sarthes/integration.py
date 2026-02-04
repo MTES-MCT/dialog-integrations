@@ -7,7 +7,6 @@ from loguru import logger
 
 from api.dia_log_client.models import (
     MeasureTypeEnum,
-    PeriodRecurrenceTypeEnum,
     PostApiRegulationsAddBody,
     PostApiRegulationsAddBodyCategory,
     PostApiRegulationsAddBodyStatus,
@@ -15,11 +14,10 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
     SaveLocationDTO,
     SaveMeasureDTO,
-    SavePeriodDTO,
     SaveRawGeoJSONDTO,
     SaveVehicleSetDTO,
 )
-from integrations.dp_sarthes.schema import SarthesMeasure
+from integrations.dp_sarthes.schema import SarthesMeasure, SarthesRawDataSchema
 from integrations.shared import DialogIntegration
 
 URL = (
@@ -31,6 +29,7 @@ URL = (
 
 class Integration(DialogIntegration):
     draft = True
+    raw_data_schema = SarthesRawDataSchema
 
     def fetch_raw_data(self) -> pl.DataFrame:
         # download
@@ -104,7 +103,7 @@ class Integration(DialogIntegration):
         return SaveMeasureDTO(
             type_=MeasureTypeEnum.SPEEDLIMITATION,
             max_speed=int(measure["max_speed"]),
-            periods=[self.create_save_period_dto(measure)],
+            periods=[self.create_save_period_dto(measure)],  # type: ignore
             locations=[self.create_save_location_dto(measure)],
             vehicle_set=SaveVehicleSetDTO(all_vehicles=True),
         )
@@ -192,23 +191,23 @@ def compute_start_date(df: pl.DataFrame) -> pl.DataFrame:
     # Log how many rows are using fallback date
     n_missing_annee = df.select(pl.col("annee").is_null().sum()).item()
     if n_missing_annee > 0:
-        logger.info(
-            f"Using date_modif as fallback for {n_missing_annee} rows with missing annee"
-        )
+        logger.info(f"Using date_modif as fallback for {n_missing_annee} rows with missing annee")
 
-    return df.with_columns([
-        # Start date from annee or date_modif
-        pl.when(pl.col("annee").is_not_null())
-        .then(pl.col("annee").cast(pl.Int64).cast(pl.Utf8) + pl.lit("-01-01T00:00:00Z"))
-        .otherwise(pl.col("date_modif"))
-        .alias("period_start_date"),
-        # Other period fields
-        pl.lit(None).alias("period_end_date"),
-        pl.lit(None).alias("period_start_time"),
-        pl.lit(None).alias("period_end_time"),
-        pl.lit("everyDay").alias("period_recurrence_type"),
-        pl.lit(True).alias("period_is_permanent"),
-    ])
+    return df.with_columns(
+        [
+            # Start date from annee or date_modif
+            pl.when(pl.col("annee").is_not_null())
+            .then(pl.col("annee").cast(pl.Int64).cast(pl.Utf8) + pl.lit("-01-01T00:00:00Z"))
+            .otherwise(pl.col("date_modif"))
+            .alias("period_start_date"),
+            # Other period fields
+            pl.lit(None).alias("period_end_date"),
+            pl.lit(None).alias("period_start_time"),
+            pl.lit(None).alias("period_end_time"),
+            pl.lit("everyDay").alias("period_recurrence_type"),
+            pl.lit(True).alias("period_is_permanent"),
+        ]
+    )
 
 
 def compute_location_label(df: pl.DataFrame) -> pl.DataFrame:
