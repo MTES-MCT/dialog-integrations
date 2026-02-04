@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from importlib import util as importlib_util
 from pathlib import Path
@@ -152,6 +153,7 @@ class DialogIntegration:
                 assert resp.status_code == 201, f"got status {resp.status_code}"
             except Exception as e:
                 logger.error(f"Failed to create: {regulation.identifier} - {e}")
+                logger.error(json.loads(resp.content))
                 count_error += 1
 
         count_success = len(regulations) - count_error
