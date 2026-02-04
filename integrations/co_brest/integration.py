@@ -2,7 +2,7 @@ import json
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import geopandas as gpd
 import polars as pl
@@ -12,7 +12,9 @@ from pyproj import Transformer
 from shapely.geometry import mapping
 
 from api.dia_log_client.models import (
-    MeasureTypeEnum,
+    MeasureTypeEnum as MTE,
+)
+from api.dia_log_client.models import (
     PostApiRegulationsAddBodyCategory,
     PostApiRegulationsAddBodyStatus,
     PostApiRegulationsAddBodySubject,
@@ -31,53 +33,32 @@ FILENAME = "DEP_ARR_CIRC_STAT_L_V.shp"
 
 transformer = Transformer.from_crs("EPSG:2154", "EPSG:4326", always_xy=True)
 
+
+class C(NamedTuple):
+    measure_type: MTE
+    exempted_types: list[str] | None = None
+
+
 DESCRIPTION_CONFIG = {
     # Limitations de vitesse
-    "Limitation Vitesse": {
-        "measure_type": MeasureTypeEnum.SPEEDLIMITATION,
-    },
+    "Limitation Vitesse": C(MTE.SPEEDLIMITATION),
     # Stationnement
-    "Stationnement interdit": {
-        "measure_type": MeasureTypeEnum.PARKINGPROHIBITED,
-    },
-    "Arrêt interdit": {
-        "measure_type": MeasureTypeEnum.PARKINGPROHIBITED,
-    },
-    "Stationnement gênant": {
-        "measure_type": MeasureTypeEnum.PARKINGPROHIBITED,
-    },
-    "Stationnement interdit aux poids-lourds": {
-        "measure_type": MeasureTypeEnum.PARKINGPROHIBITED,
-    },
+    "Stationnement interdit": C(MTE.PARKINGPROHIBITED),
+    "Arrêt interdit": C(MTE.PARKINGPROHIBITED),
+    "Stationnement gênant": C(MTE.PARKINGPROHIBITED),
+    "Stationnement interdit aux poids-lourds": C(MTE.PARKINGPROHIBITED),
     # noEntry – limitations dimensionnelles (poids / hauteur)
-    "Limitation Poids": {
-        "measure_type": MeasureTypeEnum.NOENTRY,
-    },
-    "Limitation Hauteur": {
-        "measure_type": MeasureTypeEnum.NOENTRY,
-    },
-    "Interdit aux transports de marchandises": {
-        "measure_type": MeasureTypeEnum.NOENTRY,
-    },
+    "Limitation Poids": C(MTE.NOENTRY),
+    "Limitation Hauteur": C(MTE.NOENTRY),
+    "Interdit aux transports de marchandises": C(MTE.NOENTRY),
     # noEntry – catégories particulières
-    "Interdit dans les 2 sens": {
-        "measure_type": MeasureTypeEnum.NOENTRY,
-    },
-    "Interdit à  tous véhicules à moteur": {
-        "measure_type": MeasureTypeEnum.NOENTRY,
-        "exempted_types": ["bicycle", "pedestrians"],
-    },
-    "Interdit aux véhicules à moteur sauf cyclos": {
-        # motorisés interdits, sauf cyclomoteurs (et vélos + piétons)
-        "measure_type": MeasureTypeEnum.NOENTRY,
-        "exempted_types": ["bicycle", "pedestrians", "other"],
-    },
-    "Limitation Largeur": {
-        "measure_type": MeasureTypeEnum.NOENTRY,
-    },
-    "Sens interdit / Sens unique": {
-        "measure_type": MeasureTypeEnum.NOENTRY,
-    },
+    "Interdit dans les 2 sens": C(MTE.NOENTRY),
+    "Interdit à  tous véhicules à moteur": C(MTE.NOENTRY, ["bicycle", "pedestrians"]),
+    "Interdit aux véhicules à moteur sauf cyclos": C(
+        MTE.NOENTRY, ["bicycle", "pedestrians", "other"]
+    ),
+    "Limitation Largeur": C(MTE.NOENTRY),
+    "Sens interdit / Sens unique": C(MTE.NOENTRY),
 }
 
 
@@ -144,19 +125,19 @@ class Integration(DialogIntegration):
         )
 
     def create_measure(self, measure: BrestMeasure) -> SaveMeasureDTO:
-        cfg = DESCRIPTION_CONFIG.get(measure["DESCRIPTIF"], {})
+        cfg = DESCRIPTION_CONFIG.get(measure["DESCRIPTIF"])
 
         params = {
-            "type_": MeasureTypeEnum(measure["measure_type_"]),
+            "type_": MTE(measure["measure_type_"]),
             "periods": [self.create_save_period_dto(measure)],  # type: ignore
             "locations": [self.create_save_location_dto(measure)],  # type: ignore
             "vehicle_set": self.create_save_vehicle_dto(
-                measure, cfg.get("exempted_types"), cfg.get("restricted_types")
+                measure, cfg.exempted_types if cfg else None, None
             ),
         }
 
         # Add max_speed for SPEEDLIMITATION measures
-        if measure["measure_type_"] == MeasureTypeEnum.SPEEDLIMITATION.value:
+        if measure["measure_type_"] == MTE.SPEEDLIMITATION.value:
             params["max_speed"] = measure["measure_max_speed"]
 
         return SaveMeasureDTO(**params)
@@ -240,7 +221,7 @@ class Integration(DialogIntegration):
         first_row_titles = df.filter(pl.col("_row_num_in_regulation") == 1).select(
             [
                 pl.col("NOARR"),
-                (pl.col("DESCRIPTIF") + pl.lit(" – ") + pl.col("LIBRU")).alias("_regulation_title"),
+                (pl.col("DESCRIPTIF") + pl.lit(" – ") + pl.col("LIBRU")).alias("regulation_title"),
             ]
         )
 
@@ -256,13 +237,16 @@ class Integration(DialogIntegration):
                     "regulation_category"
                 ),
                 pl.lit(PostApiRegulationsAddBodySubject.OTHER.value).alias("regulation_subject"),
-                pl.col("_regulation_title").alias("regulation_title"),
                 pl.lit("Circulation").alias("regulation_other_category_text"),
             ]
         )
 
+        num_null_titles = df.select(pl.col("regulation_title").is_null().sum()).item()
+        logger.warning(f"Dropping {num_null_titles} rows with null regulation_title")
+        df = df.filter(pl.col("regulation_title").is_not_null())
+
         # Drop helper columns
-        return df.drop(["_row_num_in_regulation", "_regulation_title"])
+        return df
 
 
 def compute_save_period_fields(df: pl.DataFrame) -> pl.DataFrame:
@@ -344,8 +328,7 @@ def compute_measure_type(df: pl.DataFrame) -> pl.DataFrame:
     """
     # Create mapping dict from DESCRIPTIF to measure type enum value
     type_mapping = {
-        descriptif: config["measure_type"].value
-        for descriptif, config in DESCRIPTION_CONFIG.items()
+        descriptif: config.measure_type.value for descriptif, config in DESCRIPTION_CONFIG.items()
     }
     return (
         df.filter(pl.col("DESCRIPTIF").is_in(DESCRIPTION_CONFIG.keys()))
@@ -362,7 +345,7 @@ def compute_measure_max_speed(df: pl.DataFrame) -> pl.DataFrame:
     Filters out SPEEDLIMITATION rows with invalid VITEMAX.
     """
     # Filter out invalid speed limitations
-    invalid_speed = (pl.col("measure_type_") == MeasureTypeEnum.SPEEDLIMITATION.value) & (
+    invalid_speed = (pl.col("measure_type_") == MTE.SPEEDLIMITATION.value) & (
         (pl.col("VITEMAX").is_null()) | (pl.col("VITEMAX") <= 0)
     )
     n_invalid = df.select(invalid_speed.sum()).item()
@@ -373,7 +356,7 @@ def compute_measure_max_speed(df: pl.DataFrame) -> pl.DataFrame:
 
     # Compute max_speed: use VITEMAX for SPEEDLIMITATION, None otherwise
     return df.with_columns(
-        pl.when(pl.col("measure_type_") == MeasureTypeEnum.SPEEDLIMITATION.value)
+        pl.when(pl.col("measure_type_") == MTE.SPEEDLIMITATION.value)
         .then(pl.col("VITEMAX"))
         .otherwise(None)
         .alias("measure_max_speed")

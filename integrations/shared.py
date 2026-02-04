@@ -238,7 +238,7 @@ class DialogIntegration:
         """
         regulations = []
 
-        for regulation_id, group_df in clean_data.group_by("regulation_identifier"):
+        for _, group_df in clean_data.group_by("regulation_identifier"):
             # Create measures for all rows in this regulation
             measures = []
             for row in group_df.iter_rows(named=True):
