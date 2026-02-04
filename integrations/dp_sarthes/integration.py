@@ -1,3 +1,4 @@
+import hashlib
 import io
 from typing import cast
 
@@ -140,6 +141,10 @@ def build_id_and_drop_duplicates(df: pl.DataFrame) -> pl.DataFrame:
     Drop ALL rows involved in duplicated fallback hashes.
     """
 
+    def deterministic_hash(s: str) -> str:
+        """Create deterministic MD5 hash."""
+        return hashlib.md5(s.encode()).hexdigest()
+
     df = df.with_columns(
         pl.concat_str(
             [
@@ -149,9 +154,7 @@ def build_id_and_drop_duplicates(df: pl.DataFrame) -> pl.DataFrame:
             ],
             separator="|",
         )
-        .hash(seed=0)
-        .cast(pl.Utf8)
-        .str.slice(0, 32)
+        .map_elements(deterministic_hash, return_dtype=pl.Utf8)
         .alias("id")
     )
 

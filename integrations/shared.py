@@ -115,6 +115,7 @@ class DialogIntegration:
         logger.info(f"Created {len(regulations)} regulations with a total of {num_measures}")
 
         integrated_regulation_ids = self.fetch_regulation_ids()
+
         regulation_ids_to_integrate = set([r.identifier for r in regulations]) - set(
             integrated_regulation_ids
         )
