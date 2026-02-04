@@ -35,3 +35,9 @@ app\:prepare-commit:
 	uv run ruff format .
 	uv run ruff check . --fix
 	uv run pyright
+
+app\:test:
+	uv run pytest -v
+
+app\:test-watch:
+	uv run pytest -v --watch

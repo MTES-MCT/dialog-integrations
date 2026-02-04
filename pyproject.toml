@@ -23,6 +23,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
     "pyright>=1.1.408",
+    "pytest>=8.0.0",
     "python-dotenv>=1.2.1",
     "ruff>=0.14.11",
     "shapely>=2.1.2",

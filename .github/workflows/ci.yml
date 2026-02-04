@@ -8,6 +8,10 @@ on:
 jobs:
   check-quality:
     runs-on: ubuntu-latest
+    env:
+      DIALOG_BASE_URL: "https://api.example.com"
+      DIALOG_CLIENT_ID: "test-client-id"
+      DIALOG_CLIENT_SECRET: "test-client-secret"
     steps:
       - uses: actions/checkout@v4
 
@@ -27,3 +31,6 @@ jobs:
 
       - name: Check typing
         run: make app:type
+
+      - name: Run tests
+        run: make app:test
