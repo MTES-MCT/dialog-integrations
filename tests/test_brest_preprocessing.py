@@ -269,3 +269,20 @@ def test_compute_measure_type_filters_sens_unique():
     assert result.height == 2
     assert result["DESCRIPTIF"].to_list() == ["Sens interdit / Sens unique", "Limitation Vitesse"]
     assert result["SENS"].to_list() == [2, 1]
+
+
+def test_full_pipeline_integration(integration, monkeypatch):
+    """Test the full pipeline with actual CSV data, mocking only API calls."""
+
+    # Mock fetch_raw_data to load actual CSV data
+    def mock_fetch_raw_data():
+        return pl.read_csv("tests/data/co_brest/data.csv")
+
+    monkeypatch.setattr(integration, "fetch_raw_data", mock_fetch_raw_data)
+
+    # Mock API-related methods
+    monkeypatch.setattr(integration, "_integrate_regulations", lambda regs: None)
+    monkeypatch.setattr(integration, "fetch_regulation_ids", lambda: [])
+
+    # Run the full pipeline
+    integration.integrate_regulations()

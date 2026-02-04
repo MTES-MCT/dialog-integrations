@@ -94,7 +94,7 @@ def compute_max_speed(df: pl.DataFrame) -> pl.DataFrame:
 def build_id_and_drop_duplicates(df: pl.DataFrame) -> pl.DataFrame:
     """
     Use `infobulle` as id when present.
-    Otherwise build a deterministic 32-char hash from (loc_txt, VITESSE, longueur).
+    Otherwise build a deterministic 32-char hash from (loc_txt, measure_max_speed, longueur).
     Drop ALL rows involved in duplicated fallback hashes.
     """
 
@@ -106,7 +106,7 @@ def build_id_and_drop_duplicates(df: pl.DataFrame) -> pl.DataFrame:
         pl.concat_str(
             [
                 pl.col("loc_txt"),
-                pl.col("VITESSE").cast(pl.Utf8),
+                pl.col("measure_max_speed").cast(pl.Utf8),
                 pl.col("longueur").cast(pl.Utf8),
             ],
             separator="|",

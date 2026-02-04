@@ -349,7 +349,7 @@ def compute_save_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     # Compute other_exempted_type_text based on exempted_types
     def compute_other_text(exempted_types):
-        if not exempted_types:
+        if exempted_types is None or len(exempted_types) == 0:
             return None
         if "other" in exempted_types:
             return "cyclomoteur"

@@ -180,3 +180,24 @@ def test_compute_regulation_fields(integration):
     assert result["regulation_identifier"].to_list() == ["reg-1", "reg-2"]
     assert result["regulation_title"].to_list() == ["Speed limit 50", "Speed limit 30"]
     assert result["regulation_other_category_text"][0] == "Limitation de vitesse"
+
+
+def test_full_pipeline_integration(integration, monkeypatch):
+    """Test the full pipeline with actual CSV data, mocking only API calls."""
+
+    # Mock fetch_raw_data to load actual CSV data
+    def mock_fetch_raw_data():
+        df = pl.read_csv("tests/data/dp_sarthes/data.csv")
+        # Drop index column if present
+        if df.columns[0] in ["", "column_1"] or df.columns[0].isdigit():
+            df = df.drop(df.columns[0])
+        return df
+
+    monkeypatch.setattr(integration, "fetch_raw_data", mock_fetch_raw_data)
+
+    # Mock API-related methods
+    monkeypatch.setattr(integration, "_integrate_regulations", lambda regs: None)
+    monkeypatch.setattr(integration, "fetch_regulation_ids", lambda: [])
+
+    # Run the full pipeline
+    integration.integrate_regulations()

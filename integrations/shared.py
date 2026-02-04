@@ -79,47 +79,6 @@ class RegulationMeasure(TypedDict):
     vehicle_other_exempted_type_text: str | None
 
 
-def typed_dict_to_polars_schema(td: type[TypedDict]) -> dict[str, pl.DataType]:  # type: ignore
-    import types
-    from typing import Union
-
-    schema = {}
-    for k, t in get_type_hints(td).items():
-        origin = getattr(t, "__origin__", None)
-
-        # Skip NoneType
-        if origin is type(None):
-            continue
-
-        # Handle Union types (including Optional[T] which is Union[T, None])
-        # In Python 3.10+, `X | Y` creates a types.UnionType instead of typing.Union
-        if origin is Union or isinstance(t, types.UnionType):
-            # Get non-None types from the Union
-            args = [arg for arg in t.__args__ if arg is not type(None)]
-            if not args:
-                continue
-            # Use the first non-None type
-            t = args[0]
-            origin = getattr(t, "__origin__", None)
-
-        # Handle dict types
-        if origin is dict:
-            raise NotImplementedError
-
-        # Handle list types: list[str] → List(Utf8)
-        if origin is list:
-            if hasattr(t, "__args__") and len(t.__args__) > 0:
-                inner_type = t.__args__[0]
-                schema[k] = pl.List(PY_TO_POLARS.get(inner_type, pl.Utf8))
-            else:
-                schema[k] = pl.List(pl.Utf8)
-            continue
-
-        # Handle simple types
-        schema[k] = PY_TO_POLARS[t]
-    return schema
-
-
 class DialogIntegration:
     client: Client
     draft_status: bool = False
@@ -228,6 +187,7 @@ class DialogIntegration:
         count_error = 0
         for index, regulation in enumerate(regulations):
             logger.info(f"Creating regulation {index}/{len(regulations)}: {regulation.identifier}")
+            logger.info(f"Contains {len(regulation.measures)} measures.") # type: ignore
             try:
                 resp = add_regulation(client=self.client, body=regulation)
                 assert resp.status_code == 201, f"got status {resp.status_code}"
