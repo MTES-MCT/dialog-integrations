@@ -45,3 +45,11 @@ class SarthesMeasure(TypedDict):
     # Measure fields
     measure_type_: str
     measure_max_speed: int
+    # Vehicle fields (prefixed with vehicle_)
+    vehicle_all_vehicles: bool
+    vehicle_heavyweight_max_weight: float | None
+    vehicle_max_height: float | None
+    vehicle_max_width: float | None
+    vehicle_exempted_types: list[str] | None
+    vehicle_restricted_types: list[str] | None
+    vehicle_other_exempted_type_text: str | None

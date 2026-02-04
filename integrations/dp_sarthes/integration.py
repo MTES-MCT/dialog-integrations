@@ -12,7 +12,6 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
     SaveMeasureDTO,
-    SaveVehicleSetDTO,
 )
 from integrations.dp_sarthes.schema import SarthesMeasure, SarthesRawDataSchema
 from integrations.shared import DialogIntegration
@@ -48,6 +47,7 @@ class Integration(DialogIntegration):
             .pipe(compute_save_location_fields)
             .pipe(self.compute_regulation_fields)
             .pipe(compute_measure_type)
+            .pipe(compute_save_vehicle_fields)
             .select(
                 [
                     # Period fields
@@ -71,6 +71,14 @@ class Integration(DialogIntegration):
                     # Measure fields
                     pl.col("measure_type_"),
                     pl.col("measure_max_speed"),
+                    # Vehicle fields
+                    pl.col("vehicle_all_vehicles"),
+                    pl.col("vehicle_heavyweight_max_weight"),
+                    pl.col("vehicle_max_height"),
+                    pl.col("vehicle_max_width"),
+                    pl.col("vehicle_exempted_types"),
+                    pl.col("vehicle_restricted_types"),
+                    pl.col("vehicle_other_exempted_type_text"),
                 ]
             )
         )
@@ -81,7 +89,7 @@ class Integration(DialogIntegration):
             max_speed=int(measure["measure_max_speed"]),
             periods=[self.create_save_period_dto(measure)],  # type: ignore
             locations=[self.create_save_location_dto(measure)],  # type: ignore
-            vehicle_set=SaveVehicleSetDTO(all_vehicles=True),
+            vehicle_set=self.create_save_vehicle_dto(measure),  # type: ignore
         )
 
     def compute_regulation_fields(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -274,3 +282,21 @@ def compute_measure_type(df: pl.DataFrame) -> pl.DataFrame:
     All measures are SPEEDLIMITATION.
     """
     return df.with_columns(pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value).alias("measure_type_"))
+
+
+def compute_save_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Compute all vehicle fields for SaveVehicleSetDTO.
+    For Sarthes, all measures apply to all vehicles with no restrictions.
+    """
+    return df.with_columns(
+        [
+            pl.lit(True).alias("vehicle_all_vehicles"),
+            pl.lit(None).cast(pl.Float64).alias("vehicle_heavyweight_max_weight"),
+            pl.lit(None).cast(pl.Float64).alias("vehicle_max_height"),
+            pl.lit(None).cast(pl.Float64).alias("vehicle_max_width"),
+            pl.lit(None).cast(pl.List(pl.Utf8)).alias("vehicle_exempted_types"),
+            pl.lit(None).cast(pl.List(pl.Utf8)).alias("vehicle_restricted_types"),
+            pl.lit(None).cast(pl.Utf8).alias("vehicle_other_exempted_type_text"),
+        ]
+    )

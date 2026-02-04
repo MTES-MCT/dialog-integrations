@@ -27,6 +27,7 @@ from api.dia_log_client.models import (
     SaveLocationDTO,
     SavePeriodDTO,
     SaveRawGeoJSONDTO,
+    SaveVehicleSetDTO,
 )
 from settings import OrganizationSettings
 
@@ -40,16 +41,42 @@ PY_TO_POLARS = {
 
 
 def typed_dict_to_polars_schema(td: type[TypedDict]) -> dict[str, pl.DataType]:  # type: ignore
+    import types
+    from typing import Union
+
     schema = {}
     for k, t in get_type_hints(td).items():
-        # Optional[T] → T
         origin = getattr(t, "__origin__", None)
+
+        # Skip NoneType
         if origin is type(None):
             continue
-        if origin is list or origin is dict:
+
+        # Handle Union types (including Optional[T] which is Union[T, None])
+        # In Python 3.10+, `X | Y` creates a types.UnionType instead of typing.Union
+        if origin is Union or isinstance(t, types.UnionType):
+            # Get non-None types from the Union
+            args = [arg for arg in t.__args__ if arg is not type(None)]
+            if not args:
+                continue
+            # Use the first non-None type
+            t = args[0]
+            origin = getattr(t, "__origin__", None)
+
+        # Handle dict types
+        if origin is dict:
             raise NotImplementedError
-        if origin is None and hasattr(t, "__args__"):
-            t = t.__args__[0]
+
+        # Handle list types: list[str] → List(Utf8)
+        if origin is list:
+            if hasattr(t, "__args__") and len(t.__args__) > 0:
+                inner_type = t.__args__[0]
+                schema[k] = pl.List(PY_TO_POLARS.get(inner_type, pl.Utf8))
+            else:
+                schema[k] = pl.List(pl.Utf8)
+            continue
+
+        # Handle simple types
         schema[k] = PY_TO_POLARS[t]
     return schema
 
@@ -297,6 +324,29 @@ class DialogIntegration:
                 geometry=measure["location_geometry"],
             ),
         )
+
+    def create_save_vehicle_dto(self, measure: dict) -> SaveVehicleSetDTO:
+        """
+        Create a SaveVehicleSetDTO from a measure with vehicle_ prefixed fields.
+        Intelligently handles the all_vehicles flag:
+        - If all_vehicles=True and no restrictions/dimensions, only passes all_vehicles
+        - Otherwise, includes all relevant fields
+        """
+        # Extract vehicle fields
+        vehicle_fields = {}
+        for key, value in measure.items():
+            if key.startswith("vehicle_"):
+                field_name = key.replace("vehicle_", "", 1)
+                vehicle_fields[field_name] = value
+
+        # Clean params: remove None, empty lists
+        cleaned = {k: v for k, v in vehicle_fields.items() if v not in (None, [], {})}
+
+        # If all_vehicles is True and there are no other constraints, simplify
+        if cleaned.get("all_vehicles") is True and len(cleaned) == 1:
+            return SaveVehicleSetDTO(all_vehicles=True)
+
+        return SaveVehicleSetDTO(**cleaned)
 
     def fetch_regulation_ids(self) -> list[str]:
         logger.info(f"Fetching identifiers for organization: {self.organization}")

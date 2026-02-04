@@ -2,7 +2,7 @@ import json
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import geopandas as gpd
 import polars as pl
@@ -20,7 +20,6 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
     SaveMeasureDTO,
-    SaveVehicleSetDTO,
 )
 from integrations.co_brest.schema import (
     BrestMeasure,
@@ -111,6 +110,7 @@ class Integration(DialogIntegration):
             .pipe(compute_save_location_fields)
             .pipe(self.compute_regulation_fields)
             .pipe(compute_measure_max_speed)
+            .pipe(compute_save_vehicle_fields)
         )
 
     def cast_boolean_column(self, column_name: str) -> pl.Expr:
@@ -125,15 +125,11 @@ class Integration(DialogIntegration):
         )
 
     def create_measure(self, measure: BrestMeasure) -> SaveMeasureDTO:
-        cfg = DESCRIPTION_CONFIG.get(measure["DESCRIPTIF"])
-
         params = {
             "type_": MTE(measure["measure_type_"]),
             "periods": [self.create_save_period_dto(measure)],  # type: ignore
             "locations": [self.create_save_location_dto(measure)],  # type: ignore
-            "vehicle_set": self.create_save_vehicle_dto(
-                measure, cfg.exempted_types if cfg else None, None
-            ),
+            "vehicle_set": self.create_save_vehicle_dto(measure),  # type: ignore
         }
 
         # Add max_speed for SPEEDLIMITATION measures
@@ -141,63 +137,6 @@ class Integration(DialogIntegration):
             params["max_speed"] = measure["measure_max_speed"]
 
         return SaveMeasureDTO(**params)
-
-    def create_save_vehicle_dto(
-        self,
-        measure: BrestMeasure,
-        exempted_types: list[str] | None,
-        restricted_types: list[str] | None,
-    ) -> SaveVehicleSetDTO:
-        def to_float(val):
-            if val is None or val == 0:
-                return None
-            try:
-                return float(val)
-            except Exception:
-                return None
-
-        # Dimensions
-        poids = to_float(measure.get("POIDS"))
-        hauteur = to_float(measure.get("HAUTEUR"))
-        largeur = to_float(measure.get("LARGEUR"))
-
-        # Start building params
-        params: dict[str, Any] = {
-            "all_vehicles": True,
-            "heavyweight_max_weight": poids,
-            "max_height": hauteur,
-            "max_width": largeur,
-            "exempted_types": exempted_types,
-            "restricted_types": restricted_types,
-        }
-
-        # Auto-fill exempted types from columns
-        if params["exempted_types"] is None:
-            params["exempted_types"] = []
-            if measure.get("CYCLO") is True:
-                params["exempted_types"].append("other")
-            if measure.get("VELO") is True:
-                params["exempted_types"].append("bicycle")
-
-        if params["exempted_types"]:
-            if "other" in params["exempted_types"]:
-                params["other_exempted_type_text"] = "cyclomoteur"
-            else:
-                params["other_exempted_type_text"] = "autres véhicules autorisés"
-
-        if params["heavyweight_max_weight"]:
-            params["restricted_types"] = ["heavyGoodsVehicle"]
-
-        # If we have dimensions or exemptions or restrictions → not all vehicles
-        if params["restricted_types"]:
-            params["all_vehicles"] = False
-        else:
-            params["all_vehicles"] = True
-
-        # Clean params: remove empty lists / None
-        cleaned = {k: v for k, v in params.items() if v not in (None, [], {})}
-
-        return SaveVehicleSetDTO(**cleaned)
 
     def compute_regulation_fields(self, df: pl.DataFrame) -> pl.DataFrame:
         """
@@ -361,3 +300,100 @@ def compute_measure_max_speed(df: pl.DataFrame) -> pl.DataFrame:
         .otherwise(None)
         .alias("measure_max_speed")
     )
+
+
+def compute_save_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Compute all vehicle fields for SaveVehicleSetDTO.
+    - vehicle_heavyweight_max_weight: from POIDS (0 or null → None)
+    - vehicle_max_height: from HAUTEUR (0 or null → None)
+    - vehicle_max_width: from LARGEUR (0 or null → None)
+    - vehicle_exempted_types: from DESCRIPTION_CONFIG and CYCLO/VELO columns
+    - vehicle_restricted_types: ["heavyGoodsVehicle"] if weight limit
+    - vehicle_other_exempted_type_text: based on exempted_types
+    - vehicle_all_vehicles: True if no restrictions
+    """
+    # Create exempted_types mapping from DESCRIPTION_CONFIG
+    exempted_types_mapping = {
+        descriptif: config.exempted_types for descriptif, config in DESCRIPTION_CONFIG.items()
+    }
+
+    # Convert dimensions: set 0 or None to None
+    df = df.with_columns(
+        [
+            pl.when((pl.col("POIDS").is_null()) | (pl.col("POIDS") == 0))
+            .then(None)
+            .otherwise(pl.col("POIDS"))
+            .alias("vehicle_heavyweight_max_weight"),
+            pl.when((pl.col("HAUTEUR").is_null()) | (pl.col("HAUTEUR") == 0))
+            .then(None)
+            .otherwise(pl.col("HAUTEUR"))
+            .alias("vehicle_max_height"),
+            pl.when((pl.col("LARGEUR").is_null()) | (pl.col("LARGEUR") == 0))
+            .then(None)
+            .otherwise(pl.col("LARGEUR"))
+            .alias("vehicle_max_width"),
+        ]
+    )
+
+    # Get exempted_types from config (as JSON string for now, we'll parse it)
+    df = df.with_columns(
+        pl.col("DESCRIPTIF")
+        .map_elements(lambda x: exempted_types_mapping.get(x), return_dtype=pl.List(pl.Utf8))
+        .alias("_config_exempted_types")
+    )
+
+    # Build exempted_types: use config if available, otherwise build from CYCLO/VELO
+    def build_exempted_types(config_types, cyclo, velo):
+        if config_types is not None:
+            return config_types
+        types = []
+        if cyclo:
+            types.append("other")
+        if velo:
+            types.append("bicycle")
+        return types if types else None
+
+    df = df.with_columns(
+        pl.struct(["_config_exempted_types", "CYCLO", "VELO"])
+        .map_elements(
+            lambda row: build_exempted_types(
+                row["_config_exempted_types"], row["CYCLO"], row["VELO"]
+            ),
+            return_dtype=pl.List(pl.Utf8),
+        )
+        .alias("vehicle_exempted_types")
+    )
+
+    # Compute other_exempted_type_text based on exempted_types
+    def compute_other_text(exempted_types):
+        if not exempted_types:
+            return None
+        if "other" in exempted_types:
+            return "cyclomoteur"
+        return "autres véhicules autorisés"
+
+    df = df.with_columns(
+        pl.col("vehicle_exempted_types")
+        .map_elements(compute_other_text, return_dtype=pl.Utf8)
+        .alias("vehicle_other_exempted_type_text")
+    )
+
+    # Set restricted_types to ["heavyGoodsVehicle"] if weight limit
+    df = df.with_columns(
+        pl.when(pl.col("vehicle_heavyweight_max_weight").is_not_null())
+        .then(pl.lit(["heavyGoodsVehicle"]))
+        .otherwise(None)
+        .alias("vehicle_restricted_types")
+    )
+
+    # Compute all_vehicles: False if there are restrictions, True otherwise
+    df = df.with_columns(
+        pl.when(pl.col("vehicle_restricted_types").is_not_null())
+        .then(False)
+        .otherwise(True)
+        .alias("vehicle_all_vehicles")
+    )
+
+    # Drop helper column
+    return df.drop("_config_exempted_types")
