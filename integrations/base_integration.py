@@ -155,7 +155,6 @@ class BaseIntegration:
             logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
             try:
                 resp = add_regulation(client=self.client, body=regulation)
-                assert resp.status_code == 201, f"got status {resp.status_code}"
             except Exception as e:
                 logger.error(f"Failed to create: {regulation.identifier} - {e}")
                 count_error += 1

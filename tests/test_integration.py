@@ -22,7 +22,7 @@ def test_full_pipeline_integration(organization, monkeypatch):
     for data_source_integration in integration.data_sources:
 
         def mock_fetch_raw_data(_, name=data_source_integration.name):
-            return pl.read_csv(f"tests/{organization}/{name}.csv")
+            return pl.read_csv(f"tests/{organization}/{name}.csv", separator=",")
 
         monkeypatch.setattr(data_source_integration, "fetch_raw_data", mock_fetch_raw_data)
 
