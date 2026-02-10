@@ -103,12 +103,11 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         return (
-            raw_data.pipe(compute_measure_type)
-            .pipe(compute_save_period_fields)
-            .pipe(compute_save_location_fields)
+            raw_data.pipe(compute_measure_fields)
+            .pipe(ccompute_period_fields)
+            .pipe(compute_location_fields)
             .pipe(self.compute_regulation_fields)
-            .pipe(compute_measure_max_speed)
-            .pipe(compute_save_vehicle_fields)
+            .pipe(compute_vehicle_fields)
         )
 
     def cast_boolean_column(self, column_name: str) -> pl.Expr:
@@ -170,7 +169,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         return df
 
 
-def compute_save_period_fields(df: pl.DataFrame) -> pl.DataFrame:
+def ccompute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all period fields for SavePeriodDTO.
     - period_start_date: from DT_MAT field
@@ -200,7 +199,7 @@ def compute_save_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def compute_save_location_fields(df: pl.DataFrame) -> pl.DataFrame:
+def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all location fields for SaveLocationDTO.
     - location_road_type: always RoadTypeEnum.RAWGEOJSON for Brest
@@ -243,28 +242,30 @@ def compute_save_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def compute_measure_type(df: pl.DataFrame) -> pl.DataFrame:
+def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
-    Compute measure_type_ field from DESCRIPTIF using DESCRIPTION_CONFIG.
+    Compute measure_type_ and measure_max_speed fields.
+
+    - measure_type_: from DESCRIPTIF using DESCRIPTION_CONFIG
+    - measure_max_speed: from VITEMAX for SPEEDLIMITATION (must be not null and > 0), None otherwise
+
+    Filters out:
+    - Rows with DESCRIPTIF not in DESCRIPTION_CONFIG
+    - "Sens interdit / Sens unique" with SENS=1
+    - SPEEDLIMITATION rows with invalid VITEMAX
     """
     # Create mapping dict from DESCRIPTIF to measure type enum value
     type_mapping = {
         descriptif: config.measure_type.value for descriptif, config in DESCRIPTION_CONFIG.items()
     }
-    return (
+
+    # Filter and compute measure_type_
+    df = (
         df.filter(pl.col("DESCRIPTIF").is_in(DESCRIPTION_CONFIG.keys()))
         .filter(~(pl.col("DESCRIPTIF").eq("Sens interdit / Sens unique") & pl.col("SENS").eq(1)))
         .with_columns(pl.col("DESCRIPTIF").replace(type_mapping).alias("measure_type_"))
     )
 
-
-def compute_measure_max_speed(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute measure_max_speed field from VITEMAX with validation.
-    - For SPEEDLIMITATION: use VITEMAX, must be not null and > 0
-    - For other types: set to None
-    Filters out SPEEDLIMITATION rows with invalid VITEMAX.
-    """
     # Filter out invalid speed limitations
     invalid_speed = (pl.col("measure_type_") == MTE.SPEEDLIMITATION.value) & (
         (pl.col("VITEMAX").is_null()) | (pl.col("VITEMAX") <= 0)
@@ -284,7 +285,7 @@ def compute_measure_max_speed(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def compute_save_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
+def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all vehicle fields for SaveVehicleSetDTO.
     - vehicle_heavyweight_max_weight: from POIDS (0 or null → None)

@@ -92,7 +92,9 @@ class BaseIntegration:
         all_clean_data = []
         for data_source in self.data_sources:
             logger.info(f"Processing data source: {data_source.name}")
-            clean_data = data_source(self.organization_settings, self.client).compute_data_regulations()
+            clean_data = data_source(
+                self.organization_settings, self.client
+            ).compute_data_regulations()
             all_clean_data.append(clean_data)
 
         # Concatenate all data

@@ -8,7 +8,7 @@ import pytest
 from integrations.co_brest.integration import Integration
 from integrations.co_brest.permanent_lineaire.data_source_integration import (
     DataSourceIntegration,
-    compute_save_period_fields,
+    ccompute_period_fields,
 )
 from integrations.co_brest.permanent_lineaire.schema import Schema
 
@@ -84,8 +84,8 @@ def test_cast_boolean_column_null_to_false(data_source):
     assert result["test_col"].to_list() == [True, False, False]
 
 
-def test_compute_save_period_fields():
-    """Test that compute_save_period_fields creates all required fields."""
+def test_ccompute_period_fields():
+    """Test that ccompute_period_fields creates all required fields."""
 
     df = pl.DataFrame(
         {
@@ -94,7 +94,7 @@ def test_compute_save_period_fields():
         }
     )
 
-    result = compute_save_period_fields(df)
+    result = ccompute_period_fields(df)
 
     # Check all period fields exist
     assert "period_start_date" in result.columns
@@ -111,12 +111,12 @@ def test_compute_save_period_fields():
     assert result["period_is_permanent"][0] is True
 
 
-def test_compute_save_period_fields_filters_null_dt_mat():
+def test_ccompute_period_fields_filters_null_dt_mat():
     """Test that rows with null DT_MAT are filtered out."""
     from datetime import datetime
 
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
-        compute_save_period_fields,
+        ccompute_period_fields,
     )
 
     df = pl.DataFrame(
@@ -126,17 +126,17 @@ def test_compute_save_period_fields_filters_null_dt_mat():
         }
     )
 
-    result = compute_save_period_fields(df)
+    result = ccompute_period_fields(df)
 
     assert result.height == 2
     assert result["NOARR"].to_list() == ["A", "C"]
 
 
-def test_compute_save_location_fields():
-    """Test that compute_save_location_fields creates all required fields."""
+def test_compute_location_fields():
+    """Test that compute_location_fields creates all required fields."""
     from api.dia_log_client.models import RoadTypeEnum
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
-        compute_save_location_fields,
+        compute_location_fields,
     )
 
     df = pl.DataFrame(
@@ -150,7 +150,7 @@ def test_compute_save_location_fields():
         }
     )
 
-    result = compute_save_location_fields(df)
+    result = compute_location_fields(df)
 
     # Check all location fields exist
     assert "location_road_type" in result.columns
@@ -173,10 +173,10 @@ def test_compute_save_location_fields():
     assert "coordinates" in geom0
 
 
-def test_compute_save_location_fields_filters_null_geometry():
+def test_compute_location_fields_filters_null_geometry():
     """Test that rows with null geometry are filtered out."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
-        compute_save_location_fields,
+        compute_location_fields,
     )
 
     df = pl.DataFrame(
@@ -191,7 +191,7 @@ def test_compute_save_location_fields_filters_null_geometry():
         }
     )
 
-    result = compute_save_location_fields(df)
+    result = compute_location_fields(df)
 
     assert result.height == 2
     assert result["location_label"].to_list() == ["Commune A – Rue 1", "Commune C – Rue 3"]
@@ -224,53 +224,60 @@ def test_compute_regulation_fields(data_source):
     assert result["regulation_other_category_text"][0] == "Circulation"
 
 
-def test_compute_measure_type():
-    """Test that compute_measure_type maps DESCRIPTIF to measure_type_."""
+def test_compute_measure_fields():
+    """Test that compute_measure_fields computes both measure_type_ and measure_max_speed."""
     from api.dia_log_client.models import MeasureTypeEnum
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
-        compute_measure_type,
+        compute_measure_fields,
     )
 
     df = pl.DataFrame(
         {
             "DESCRIPTIF": ["Limitation Vitesse", "Stationnement interdit", "Limitation Poids"],
             "SENS": [1, 1, 1],
+            "VITEMAX": [50, 0, 0],
         }
     )
 
-    result = compute_measure_type(df)
+    result = compute_measure_fields(df)
 
     assert "measure_type_" in result.columns
+    assert "measure_max_speed" in result.columns
     assert result.height == 3
     assert result["measure_type_"][0] == MeasureTypeEnum.SPEEDLIMITATION.value
     assert result["measure_type_"][1] == MeasureTypeEnum.PARKINGPROHIBITED.value
     assert result["measure_type_"][2] == MeasureTypeEnum.NOENTRY.value
+    # Check measure_max_speed: only set for SPEEDLIMITATION
+    assert result["measure_max_speed"][0] == 50
+    assert result["measure_max_speed"][1] is None
+    assert result["measure_max_speed"][2] is None
 
 
-def test_compute_measure_type_filters_invalid_descriptif():
-    """Test that compute_measure_type filters out rows with invalid DESCRIPTIF."""
+def test_compute_measure_fields_filters_invalid_descriptif():
+    """Test that compute_measure_fields filters out rows with invalid DESCRIPTIF."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
-        compute_measure_type,
+        compute_measure_fields,
     )
 
     df = pl.DataFrame(
         {
             "DESCRIPTIF": ["Limitation Vitesse", "Invalid Description", "Stationnement interdit"],
             "SENS": [1, 1, 1],
+            "VITEMAX": [50, 30, 0],
         }
     )
 
-    result = compute_measure_type(df)
+    result = compute_measure_fields(df)
 
     # Should filter out the invalid description
     assert result.height == 2
     assert result["DESCRIPTIF"].to_list() == ["Limitation Vitesse", "Stationnement interdit"]
 
 
-def test_compute_measure_type_filters_sens_unique():
-    """Test that compute_measure_type filters Sens interdit/Sens unique with SENS=1."""
+def test_compute_measure_fields_filters_sens_unique():
+    """Test that compute_measure_fields filters Sens interdit/Sens unique with SENS=1."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
-        compute_measure_type,
+        compute_measure_fields,
     )
 
     df = pl.DataFrame(
@@ -281,12 +288,34 @@ def test_compute_measure_type_filters_sens_unique():
                 "Limitation Vitesse",
             ],
             "SENS": [1, 2, 1],  # First should be filtered, second kept
+            "VITEMAX": [0, 0, 50],
         }
     )
 
-    result = compute_measure_type(df)
+    result = compute_measure_fields(df)
 
     # Should filter out "Sens interdit / Sens unique" with SENS=1
     assert result.height == 2
     assert result["DESCRIPTIF"].to_list() == ["Sens interdit / Sens unique", "Limitation Vitesse"]
     assert result["SENS"].to_list() == [2, 1]
+
+
+def test_compute_measure_fields_filters_invalid_speed():
+    """Test that compute_measure_fields filters out SPEEDLIMITATION with invalid VITEMAX."""
+    from integrations.co_brest.permanent_lineaire.data_source_integration import (
+        compute_measure_fields,
+    )
+
+    df = pl.DataFrame(
+        {
+            "DESCRIPTIF": ["Limitation Vitesse", "Limitation Vitesse", "Limitation Vitesse"],
+            "SENS": [1, 1, 1],
+            "VITEMAX": [50, 0, None],  # Second and third are invalid
+        }
+    )
+
+    result = compute_measure_fields(df)
+
+    # Should filter out invalid speed limitations
+    assert result.height == 1
+    assert result["measure_max_speed"][0] == 50

@@ -4,8 +4,10 @@ import polars as pl
 import pytest
 
 from integrations.dp_sarthes.integration import Integration
+from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+    DataSourceIntegration,
+)
 from integrations.dp_sarthes.limitations_vitesse.schema import SarthesRawDataSchema
-from integrations.dp_sarthes.limitations_vitesse.data_source_integration import DataSourceIntegration
 
 
 @pytest.fixture
@@ -118,11 +120,11 @@ def test_compute_start_date_creates_all_period_fields():
     assert result["period_end_date"][0] is None
 
 
-def test_compute_save_location_fields():
-    """Test that compute_save_location_fields creates all required fields."""
+def test_compute_location_fields():
+    """Test that compute_location_fields creates all required fields."""
     from api.dia_log_client.models import RoadTypeEnum
     from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
-        compute_save_location_fields,
+        compute_location_fields,
     )
 
     df = pl.DataFrame(
@@ -137,7 +139,7 @@ def test_compute_save_location_fields():
         }
     )
 
-    result = compute_save_location_fields(df)
+    result = compute_location_fields(df)
 
     # Check all location fields exist
     assert "location_road_type" in result.columns
@@ -158,10 +160,10 @@ def test_compute_save_location_fields():
     assert result["location_geometry"][0] == '{"type": "Point", "coordinates": [0, 0]}'
 
 
-def test_compute_save_location_fields_filters_null_geometry():
+def test_compute_location_fields_filters_null_geometry():
     """Test that rows with null geometry are filtered out."""
     from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
-        compute_save_location_fields,
+        compute_location_fields,
     )
 
     df = pl.DataFrame(
@@ -172,17 +174,19 @@ def test_compute_save_location_fields_filters_null_geometry():
         }
     )
 
-    result = compute_save_location_fields(df)
+    result = compute_location_fields(df)
 
     assert result.height == 2
     assert result["location_label"].to_list() == ["Route 1", "Route 3"]
 
 
 def test_compute_regulation_fields(data_source):
-    """Test that compute_regulation_fields creates all required fields."""
+    """Test that compute_regulation_fields creates all required fields and builds id."""
     df = pl.DataFrame(
         {
-            "id": ["reg-1", "reg-2"],
+            "loc_txt": ["Route A", "Route B"],
+            "measure_max_speed": [50, 30],
+            "longueur": [100, 200],
             "title": ["Speed limit 50", "Speed limit 30"],
         }
     )
@@ -195,8 +199,96 @@ def test_compute_regulation_fields(data_source):
     assert "regulation_subject" in result.columns
     assert "regulation_title" in result.columns
     assert "regulation_other_category_text" in result.columns
+    assert "id" in result.columns
 
     # Check values
-    assert result["regulation_identifier"].to_list() == ["reg-1", "reg-2"]
+    assert result.height == 2
     assert result["regulation_title"].to_list() == ["Speed limit 50", "Speed limit 30"]
     assert result["regulation_other_category_text"][0] == "Limitation de vitesse"
+    # Check that id was created from hash
+    assert all(len(id_val) == 32 for id_val in result["id"].to_list())  # MD5 hash is 32 chars
+
+
+def test_compute_regulation_fields_drops_duplicates(data_source):
+    """Test that compute_regulation_fields drops duplicate ids."""
+    df = pl.DataFrame(
+        {
+            "loc_txt": ["Route A", "Route A", "Route B"],
+            "measure_max_speed": [50, 50, 30],
+            "longueur": [100, 100, 200],  # First two will have same hash
+            "title": ["Speed limit 50", "Speed limit 50 duplicate", "Speed limit 30"],
+        }
+    )
+
+    result = data_source.compute_regulation_fields(df)
+
+    # Should drop the duplicates (both rows with same hash)
+    assert result.height == 1
+    assert result["regulation_title"][0] == "Speed limit 30"
+
+
+def test_compute_measure_fields():
+    """Test that compute_measure_fields computes both measure_max_speed and measure_type_."""
+    from api.dia_log_client.models import MeasureTypeEnum
+    from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+        compute_measure_fields,
+    )
+
+    df = pl.DataFrame(
+        {
+            "VITESSE": [50, 30, 90],
+        }
+    )
+
+    result = compute_measure_fields(df)
+
+    # Check both fields are created
+    assert "measure_max_speed" in result.columns
+    assert "measure_type_" in result.columns
+    assert result.height == 3
+
+    # Check measure_max_speed values
+    assert result["measure_max_speed"].to_list() == [50, 30, 90]
+
+    # Check all measures are SPEEDLIMITATION
+    assert all(
+        mt == MeasureTypeEnum.SPEEDLIMITATION.value for mt in result["measure_type_"].to_list()
+    )
+
+
+def test_compute_measure_fields_filters_invalid_vitesse():
+    """Test that compute_measure_fields filters out rows with invalid VITESSE."""
+    from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+        compute_measure_fields,
+    )
+
+    df = pl.DataFrame(
+        {
+            "VITESSE": [50, 0, None, -10, 150, 130],  # 0, None, -10, 150 are invalid; 130 is valid
+        }
+    )
+
+    result = compute_measure_fields(df)
+
+    # Should keep only valid values (50 and 130)
+    assert result.height == 2
+    assert result["measure_max_speed"].to_list() == [50, 130]
+
+
+def test_compute_measure_fields_casts_vitesse_to_int():
+    """Test that compute_measure_fields casts VITESSE to int."""
+    from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+        compute_measure_fields,
+    )
+
+    df = pl.DataFrame(
+        {
+            "VITESSE": ["50", "30", "90"],  # String values
+        }
+    )
+
+    result = compute_measure_fields(df)
+
+    # Should cast to int
+    assert result["measure_max_speed"].dtype == pl.Int64
+    assert result["measure_max_speed"].to_list() == [50, 30, 90]

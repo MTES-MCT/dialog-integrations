@@ -40,25 +40,58 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         return (
-            raw_data.pipe(compute_max_speed)
-            .pipe(build_id_and_drop_duplicates)
+            raw_data.pipe(compute_measure_fields)
             .pipe(compute_title)
             .pipe(compute_start_date)
-            .pipe(compute_save_location_fields)
+            .pipe(compute_location_fields)
             .pipe(self.compute_regulation_fields)
-            .pipe(compute_measure_type)
-            .pipe(compute_save_vehicle_fields)
+            .pipe(compute_vehicle_fields)
         )
 
     def compute_regulation_fields(self, df: pl.DataFrame) -> pl.DataFrame:
         """
         Compute all regulation fields for PostApiRegulationsAddBody.
-        - regulation_identifier: from id field
+        - regulation_identifier: from id field (built from hash of loc_txt,
+        measure_max_speed, longueur)
         - regulation_category: PERMANENTREGULATION
         - regulation_subject: OTHER
         - regulation_title: from title field
         - regulation_other_category_text: "Limitation de vitesse"
+
+        Also builds the id field and drops duplicates.
         """
+
+        # Build id from deterministic hash
+        def deterministic_hash(s: str) -> str:
+            """Create deterministic MD5 hash."""
+            return hashlib.md5(s.encode()).hexdigest()
+
+        df = df.with_columns(
+            pl.concat_str(
+                [
+                    pl.col("loc_txt"),
+                    pl.col("measure_max_speed").cast(pl.Utf8),
+                    pl.col("longueur").cast(pl.Utf8),
+                ],
+                separator="|",
+            )
+            .map_elements(deterministic_hash, return_dtype=pl.Utf8)
+            .alias("id")
+        )
+
+        # Find and drop duplicated hashes
+        dup_ids = df.group_by("id").len().filter(pl.col("len") > 1).select("id")
+
+        if dup_ids.height > 0:
+            logger.warning(
+                "Found %d duplicated fallback ids, dropping ALL corresponding rows",
+                dup_ids.height,
+            )
+            logger.debug("Duplicated ids: %s", dup_ids["id"].to_list())
+
+        df = df.join(dup_ids, on="id", how="anti")
+
+        # Compute regulation fields
         return df.with_columns(
             [
                 pl.col("id").alias("regulation_identifier"),
@@ -72,12 +105,19 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         )
 
 
-def compute_max_speed(df: pl.DataFrame) -> pl.DataFrame:
+def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
-    Cast VITESSE to int, drop rows where VITESSE is invalid, and rename to max_speed.
+    Compute measure_max_speed and measure_type_ fields.
+
+    - measure_max_speed: from VITESSE (cast to int, must be > 0 and <= 130)
+    - measure_type_: always SPEEDLIMITATION for Sarthes
+
+    Filters out rows with invalid VITESSE.
     """
+    # Cast VITESSE to int
     df = df.with_columns(pl.col("VITESSE").cast(pl.Int64))
 
+    # Filter out invalid speed values
     invalid = pl.col("VITESSE").is_null() | (pl.col("VITESSE") <= 0) | (pl.col("VITESSE") > 130)
     n_removed = df.select(invalid.sum()).item()
 
@@ -86,45 +126,10 @@ def compute_max_speed(df: pl.DataFrame) -> pl.DataFrame:
 
     df = df.filter(~invalid)
 
-    # Rename VITESSE to max_speed
-    return df.rename({"VITESSE": "measure_max_speed"})
-
-
-def build_id_and_drop_duplicates(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Use `infobulle` as id when present.
-    Otherwise build a deterministic 32-char hash from (loc_txt, measure_max_speed, longueur).
-    Drop ALL rows involved in duplicated fallback hashes.
-    """
-
-    def deterministic_hash(s: str) -> str:
-        """Create deterministic MD5 hash."""
-        return hashlib.md5(s.encode()).hexdigest()
-
-    df = df.with_columns(
-        pl.concat_str(
-            [
-                pl.col("loc_txt"),
-                pl.col("measure_max_speed").cast(pl.Utf8),
-                pl.col("longueur").cast(pl.Utf8),
-            ],
-            separator="|",
-        )
-        .map_elements(deterministic_hash, return_dtype=pl.Utf8)
-        .alias("id")
+    # Rename VITESSE to measure_max_speed and add measure_type_
+    return df.rename({"VITESSE": "measure_max_speed"}).with_columns(
+        pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value).alias("measure_type_")
     )
-
-    # find duplicated hashes ONLY among fallback-generated ids
-    dup_ids = df.group_by("id").len().filter(pl.col("len") > 1).select("id")
-
-    if dup_ids.height > 0:
-        logger.warning(
-            "Found %d duplicated fallback ids, dropping ALL corresponding rows",
-            dup_ids.height,
-        )
-        logger.debug("Duplicated ids: %s", dup_ids["id"].to_list())
-
-    return df.join(dup_ids, on="id", how="anti")
 
 
 def compute_title(df: pl.DataFrame) -> pl.DataFrame:
@@ -169,29 +174,7 @@ def compute_start_date(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def compute_regulation_fields(df: pl.DataFrame, draft: bool) -> pl.DataFrame:
-    """
-    Compute all regulation fields for PostApiRegulationsAddBody.
-    - regulation_identifier: from id field
-    - regulation_category: PERMANENTREGULATION
-    - regulation_subject: OTHER
-    - regulation_title: from title field
-    - regulation_other_category_text: "Limitation de vitesse"
-    """
-    return df.with_columns(
-        [
-            pl.col("id").alias("regulation_identifier"),
-            pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(
-                "regulation_category"
-            ),
-            pl.lit(PostApiRegulationsAddBodySubject.OTHER.value).alias("regulation_subject"),
-            pl.col("title").alias("regulation_title"),
-            pl.lit("Limitation de vitesse").alias("regulation_other_category_text"),
-        ]
-    )
-
-
-def compute_save_location_fields(df: pl.DataFrame) -> pl.DataFrame:
+def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all location fields for SaveLocationDTO.
     - location_road_type: always RoadTypeEnum.RAWGEOJSON for Sarthes
@@ -224,15 +207,7 @@ def compute_save_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def compute_measure_type(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute measure_type_ field for Sarthes.
-    All measures are SPEEDLIMITATION.
-    """
-    return df.with_columns(pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value).alias("measure_type_"))
-
-
-def compute_save_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
+def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all vehicle fields for SaveVehicleSetDTO.
     For Sarthes, all measures apply to all vehicles with no restrictions.
