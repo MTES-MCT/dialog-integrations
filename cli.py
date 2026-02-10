@@ -3,7 +3,7 @@ from typing import Annotated
 import typer
 from loguru import logger
 
-from integrations.shared import DialogIntegration
+from integrations.base_integration import BaseIntegration
 from settings import Organization
 
 app = typer.Typer(help="Dialog CLI")
@@ -18,7 +18,7 @@ def integrate(
     env: EnvOption = "dev",
 ):
     """Sync data for a specific organization to Dialog API."""
-    dialog_integration = DialogIntegration.from_organization(organization.name, env=env)
+    dialog_integration = BaseIntegration.from_organization(organization.name, env=env)
     logger.info(f"Integrating measures for organization: {organization.name} (env: {env})")
     dialog_integration.integrate_regulations()
 
@@ -29,6 +29,6 @@ def publish(
     env: EnvOption = "dev",
 ):
     """Publish all measures"""
-    dialog_integration = DialogIntegration.from_organization(organization.name, env=env)
+    dialog_integration = BaseIntegration.from_organization(organization.name, env=env)
     logger.info(f"Publishing measures for organization: {organization.name} (env: {env})")
     dialog_integration.publish_regulations()
