@@ -213,7 +213,7 @@ def test_compute_vehicle_fields_with_height():
     """Test that compute_vehicle_fields handles hauteur correctly."""
     df = pl.DataFrame(
         {
-            "tonnage": [5.0, 3.5],  # Must be non-zero to pass filter
+            "tonnage": [5.0, 3.5],
             "hauteur": [3.9, 3.7],
             "largeur": [0.0, 0.0],
         }
@@ -237,7 +237,7 @@ def test_compute_vehicle_fields_with_width():
     """Test that compute_vehicle_fields handles largeur correctly."""
     df = pl.DataFrame(
         {
-            "tonnage": [5.0, 3.5],  # Must be non-zero to pass filter
+            "tonnage": [5.0, 3.5],
             "hauteur": [0.0, 0.0],
             "largeur": [2.5, 2.7],
         }
@@ -257,8 +257,8 @@ def test_compute_vehicle_fields_with_width():
     assert result["vehicle_max_height"][0] is None
 
 
-def test_compute_vehicle_fields_filters_tonnage_zero():
-    """Test that rows with tonnage == 0 are filtered out."""
+def test_compute_vehicle_fields_with_restricted_types():
+    """Test that vehicle_restricted_types is set based on restriction type."""
     df = pl.DataFrame(
         {
             "tonnage": [7.5, 0.0, 3.5, 0.0],
@@ -269,10 +269,29 @@ def test_compute_vehicle_fields_filters_tonnage_zero():
 
     result = compute_vehicle_fields(df)
 
-    # Should keep only rows where tonnage != 0
-    assert result.height == 2
-    # First and third rows have non-zero tonnage
-    assert result["vehicle_heavyweight_max_weight"].to_list() == [7500.0, 3500.0]
+    # All rows should be kept (no filtering)
+    assert result.height == 4
+
+    # Check that restricted_types is set correctly
+    assert "vehicle_restricted_types" in result.columns
+
+    # Convert to list for easier testing
+    restricted_types = result["vehicle_restricted_types"].to_list()
+    weights = result["vehicle_heavyweight_max_weight"].to_list()
+
+    # Rows with tonnage > 0 should have "heavyGoodsVehicle"
+    assert restricted_types[0] == ["heavyGoodsVehicle"]
+    assert restricted_types[2] == ["heavyGoodsVehicle"]
+
+    # Rows with tonnage == 0 should have "dimensions"
+    assert restricted_types[1] == ["dimensions"]
+    assert restricted_types[3] == ["dimensions"]
+
+    # Check heavyweight_max_weight is set only for tonnage > 0
+    assert weights[0] == 7500.0
+    assert weights[1] is None
+    assert weights[2] == 3500.0
+    assert weights[3] is None
 
 
 def test_compute_regulation_fields(data_source):

@@ -180,20 +180,9 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     - vehicle_max_height: hauteur if defined and not 0
     - vehicle_max_width: largeur if defined and not 0
     - vehicle_exempted_types: []
-    - vehicle_restricted_types: []
+    - vehicle_restricted_types: ["heavyGoodsVehicle"] if tonnage > 0, ["dimensions"] otherwise
     - vehicle_other_exempted_type_text: None
-
-    Filter out rows where tonnage == 0.
     """
-    # Filter out rows where tonnage is 0
-    tonnage_is_zero = pl.col("tonnage") == 0
-
-    n_filtered = df.select(tonnage_is_zero.sum()).item()
-    if n_filtered > 0:
-        logger.warning(f"Dropping {n_filtered} rows where tonnage is 0")
-
-    df = df.filter(~tonnage_is_zero)
-
     return df.with_columns(
         [
             pl.lit(False).alias("vehicle_all_vehicles"),
@@ -211,7 +200,13 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
             .otherwise(None)
             .alias("vehicle_max_width"),
             pl.lit([]).cast(pl.List(pl.Utf8)).alias("vehicle_exempted_types"),
-            pl.lit(["heavyGoodsVehicle"]).cast(pl.List(pl.Utf8)).alias("vehicle_restricted_types"),
+            # Set restricted_types based on restriction type:
+            # - "heavyGoodsVehicle" for weight restrictions (tonnage > 0)
+            # - "dimensions" for height/width restrictions (tonnage == 0)
+            pl.when((pl.col("tonnage").is_not_null()) & (pl.col("tonnage") > 0))
+            .then(pl.lit(["heavyGoodsVehicle"]).cast(pl.List(pl.Utf8)))
+            .otherwise(pl.lit(["dimensions"]).cast(pl.List(pl.Utf8)))
+            .alias("vehicle_restricted_types"),
             pl.lit(None).cast(pl.Utf8).alias("vehicle_other_exempted_type_text"),
         ]
     )
