@@ -1,8 +1,8 @@
 import pandera.polars as pa
 
 
-class SarthesRawDataSchema(pa.DataFrameModel):
-    """Schema for raw data from Sarthes API - only columns we actually use."""
+class SartheRawDataSchema(pa.DataFrameModel):
+    """Schema for raw data from Sarthe API - only columns we actually use."""
 
     infobulle: str | None = pa.Field(nullable=True)
     VITESSE: float | None = pa.Field(nullable=True)  # Will be cast to int during validation

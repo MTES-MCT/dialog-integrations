@@ -13,8 +13,8 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
-from integrations.dp_sarthes.restrictions_gabarits.schema import (
-    SarthesRestrictionGabaritsRawDataSchema,
+from integrations.dp_sarthe.restrictions_gabarits.schema import (
+    SartheRestrictionGabaritsRawDataSchema,
 )
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_restrictions_gabarits/exports/csv?lang=fr&timezone=Europe%2FLondon&use_labels=true&delimiter=%3B"
@@ -23,7 +23,7 @@ URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_restri
 class DataSourceIntegration(BaseDataSourceIntegration):
     """Data source for Sarthe restriction gabarits CSV data."""
 
-    raw_data_schema = SarthesRestrictionGabaritsRawDataSchema
+    raw_data_schema = SartheRestrictionGabaritsRawDataSchema
     name = "restrictions_gabarits"
 
     def fetch_raw_data(self) -> pl.DataFrame:

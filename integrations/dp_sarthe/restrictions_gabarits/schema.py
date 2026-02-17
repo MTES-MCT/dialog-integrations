@@ -3,7 +3,7 @@
 import pandera.polars as pa
 
 
-class SarthesRestrictionGabaritsRawDataSchema(pa.DataFrameModel):
+class SartheRestrictionGabaritsRawDataSchema(pa.DataFrameModel):
     """Schema for the raw Sarthe restriction gabarits data."""
 
     objectid: int

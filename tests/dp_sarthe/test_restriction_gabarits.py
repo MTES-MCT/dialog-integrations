@@ -3,29 +3,29 @@
 import polars as pl
 import pytest
 
-from integrations.dp_sarthes.integration import Integration
-from integrations.dp_sarthes.restrictions_gabarits.data_source_integration import (
+from integrations.dp_sarthe.integration import Integration
+from integrations.dp_sarthe.restrictions_gabarits.data_source_integration import (
     DataSourceIntegration,
     compute_location_fields,
     compute_measure_fields,
     compute_period_fields,
     compute_vehicle_fields,
 )
-from integrations.dp_sarthes.restrictions_gabarits.schema import (
-    SarthesRestrictionGabaritsRawDataSchema,
+from integrations.dp_sarthe.restrictions_gabarits.schema import (
+    SartheRestrictionGabaritsRawDataSchema,
 )
 
 
 @pytest.fixture
 def raw_data():
     """Load test data from restrictions_gabarits.csv."""
-    return pl.read_csv("tests/dp_sarthes/restrictions_gabarits.csv", separator=",")
+    return pl.read_csv("tests/dp_sarthe/restrictions_gabarits.csv", separator=",")
 
 
 @pytest.fixture
 def integration():
     """Create Sarthe integration instance."""
-    return Integration.from_organization("dp_sarthes")
+    return Integration.from_organization("dp_sarthe")
 
 
 @pytest.fixture
@@ -38,14 +38,14 @@ def test_validate_raw_data(data_source, raw_data):
     """Test that validation succeeds and produces expected columns."""
     validated = data_source.validate_raw_data(raw_data)
 
-    expected_columns = set(SarthesRestrictionGabaritsRawDataSchema.to_schema().columns.keys())
+    expected_columns = set(SartheRestrictionGabaritsRawDataSchema.to_schema().columns.keys())
     assert set(validated.columns) == expected_columns
     assert validated.height > 0
 
 
 def test_preprocess_is_identity(data_source, raw_data):
     """Test that Sarthe has no preprocessing (identity function)."""
-    schema_columns = list(SarthesRestrictionGabaritsRawDataSchema.to_schema().columns.keys())
+    schema_columns = list(SartheRestrictionGabaritsRawDataSchema.to_schema().columns.keys())
     df = raw_data.select(schema_columns)
 
     preprocessed = data_source.preprocess_raw_data(df)

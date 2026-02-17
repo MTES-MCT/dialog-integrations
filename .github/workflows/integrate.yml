@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false  # Continue even if one integration fails
       matrix:
-        organization: [co_brest, dp_sarthes]
+        organization: [co_brest, dp_sarthe]
     environment: ${{ matrix.organization }}  # Use GitHub Environment per organization
 
     steps:

@@ -12,7 +12,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
-from integrations.dp_sarthes.limitations_vitesse.schema import SarthesRawDataSchema
+from integrations.dp_sarthe.limitations_vitesse.schema import SartheRawDataSchema
 
 URL = (
     "https://data.sarthe.fr"
@@ -22,9 +22,9 @@ URL = (
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
-    """Data source for Sarthes limitations vitesse CSV data."""
+    """Data source for Sarthe limitations vitesse CSV data."""
 
-    raw_data_schema = SarthesRawDataSchema
+    raw_data_schema = SartheRawDataSchema
     name = "limitations_vitesse"
 
     def fetch_raw_data(self) -> pl.DataFrame:
@@ -110,7 +110,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     Compute measure_max_speed and measure_type_ fields.
 
     - measure_max_speed: from VITESSE (cast to int, must be > 0 and <= 130)
-    - measure_type_: always SPEEDLIMITATION for Sarthes
+    - measure_type_: always SPEEDLIMITATION for Sarthe
 
     Filters out rows with invalid VITESSE.
     """
@@ -177,7 +177,7 @@ def compute_start_date(df: pl.DataFrame) -> pl.DataFrame:
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all location fields for SaveLocationDTO.
-    - location_road_type: always RoadTypeEnum.RAWGEOJSON for Sarthes
+    - location_road_type: always RoadTypeEnum.RAWGEOJSON for Sarthe
     - location_label: from loc_txt field, fallback to title
     - location_geometry: from geo_shape field (already in GeoJSON format)
     Filter out rows where geo_shape is null.
@@ -210,7 +210,7 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all vehicle fields for SaveVehicleSetDTO.
-    For Sarthes, all measures apply to all vehicles with no restrictions.
+    For Sarthe, all measures apply to all vehicles with no restrictions.
     """
     return df.with_columns(
         [

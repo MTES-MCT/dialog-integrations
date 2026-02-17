@@ -1,20 +1,20 @@
-"""Tests for Sarthes preprocessing."""
+"""Tests for Sarthe preprocessing."""
 
 import polars as pl
 import pytest
 
-from integrations.dp_sarthes.integration import Integration
-from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+from integrations.dp_sarthe.integration import Integration
+from integrations.dp_sarthe.limitations_vitesse.data_source_integration import (
     DataSourceIntegration,
 )
-from integrations.dp_sarthes.limitations_vitesse.schema import SarthesRawDataSchema
+from integrations.dp_sarthe.limitations_vitesse.schema import SartheRawDataSchema
 
 
 @pytest.fixture
 def raw_data():
     """Load test data from limitations_vitesse.csv."""
     # CSV has index column, read and drop it
-    df = pl.read_csv("tests/dp_sarthes/limitations_vitesse.csv")
+    df = pl.read_csv("tests/dp_sarthe/limitations_vitesse.csv")
     # Drop the index column (first column which has no name or is numeric)
     if df.columns[0] in ["", "column_1"] or df.columns[0].isdigit():
         df = df.drop(df.columns[0])
@@ -23,13 +23,13 @@ def raw_data():
 
 @pytest.fixture
 def integration():
-    """Create Sarthes integration instance."""
-    return Integration.from_organization("dp_sarthes")
+    """Create Sarthe integration instance."""
+    return Integration.from_organization("dp_sarthe")
 
 
 @pytest.fixture
 def data_source(integration):
-    """Create Sarthes limitations_vitesse data source instance."""
+    """Create Sarthe limitations_vitesse data source instance."""
     return DataSourceIntegration(integration.organization_settings, integration.client)
 
 
@@ -37,14 +37,14 @@ def test_validate_raw_data(data_source, raw_data):
     """Test that validation succeeds and produces expected columns."""
     validated = data_source.validate_raw_data(raw_data)
 
-    expected_columns = set(SarthesRawDataSchema.to_schema().columns.keys())
+    expected_columns = set(SartheRawDataSchema.to_schema().columns.keys())
     assert set(validated.columns) == expected_columns
     assert validated.height > 0
 
 
 def test_preprocess_is_identity(data_source, raw_data):
-    """Test that Sarthes has no preprocessing (identity function)."""
-    schema_columns = list(SarthesRawDataSchema.to_schema().columns.keys())
+    """Test that Sarthe has no preprocessing (identity function)."""
+    schema_columns = list(SartheRawDataSchema.to_schema().columns.keys())
     df = raw_data.select(schema_columns)
 
     preprocessed = data_source.preprocess_raw_data(df)
@@ -55,7 +55,7 @@ def test_preprocess_is_identity(data_source, raw_data):
 
 def test_compute_start_date_uses_annee():
     """Test that compute_start_date uses annee when present."""
-    from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+    from integrations.dp_sarthe.limitations_vitesse.data_source_integration import (
         compute_start_date,
     )
 
@@ -74,7 +74,7 @@ def test_compute_start_date_uses_annee():
 
 def test_compute_start_date_falls_back_to_date_modif():
     """Test that compute_start_date uses date_modif when annee is null."""
-    from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+    from integrations.dp_sarthe.limitations_vitesse.data_source_integration import (
         compute_start_date,
     )
 
@@ -93,7 +93,7 @@ def test_compute_start_date_falls_back_to_date_modif():
 
 def test_compute_start_date_creates_all_period_fields():
     """Test that compute_start_date creates all required period fields."""
-    from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+    from integrations.dp_sarthe.limitations_vitesse.data_source_integration import (
         compute_start_date,
     )
 
@@ -123,7 +123,7 @@ def test_compute_start_date_creates_all_period_fields():
 def test_compute_location_fields():
     """Test that compute_location_fields creates all required fields."""
     from api.dia_log_client.models import RoadTypeEnum
-    from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+    from integrations.dp_sarthe.limitations_vitesse.data_source_integration import (
         compute_location_fields,
     )
 
@@ -162,7 +162,7 @@ def test_compute_location_fields():
 
 def test_compute_location_fields_filters_null_geometry():
     """Test that rows with null geometry are filtered out."""
-    from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+    from integrations.dp_sarthe.limitations_vitesse.data_source_integration import (
         compute_location_fields,
     )
 
@@ -230,7 +230,7 @@ def test_compute_regulation_fields_drops_duplicates(data_source):
 def test_compute_measure_fields():
     """Test that compute_measure_fields computes both measure_max_speed and measure_type_."""
     from api.dia_log_client.models import MeasureTypeEnum
-    from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+    from integrations.dp_sarthe.limitations_vitesse.data_source_integration import (
         compute_measure_fields,
     )
 
@@ -258,7 +258,7 @@ def test_compute_measure_fields():
 
 def test_compute_measure_fields_filters_invalid_vitesse():
     """Test that compute_measure_fields filters out rows with invalid VITESSE."""
-    from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+    from integrations.dp_sarthe.limitations_vitesse.data_source_integration import (
         compute_measure_fields,
     )
 
@@ -277,7 +277,7 @@ def test_compute_measure_fields_filters_invalid_vitesse():
 
 def test_compute_measure_fields_casts_vitesse_to_int():
     """Test that compute_measure_fields casts VITESSE to int."""
-    from integrations.dp_sarthes.limitations_vitesse.data_source_integration import (
+    from integrations.dp_sarthe.limitations_vitesse.data_source_integration import (
         compute_measure_fields,
     )
 
