@@ -31,6 +31,7 @@ class RegulationMeasure(TypedDict):
     regulation_subject: str
     regulation_title: str
     regulation_other_category_text: str
+    regulation_document_url: str | None
     # Measure fields
     measure_type_: str
     measure_max_speed: int | None

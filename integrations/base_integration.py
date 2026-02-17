@@ -214,17 +214,23 @@ class BaseIntegration:
             # Get regulation fields from first row (all rows have same values)
             first_row = group_df.row(0, named=True)
 
-            regulations.append(
-                PostApiRegulationsAddBody(
-                    identifier=first_row["regulation_identifier"],
-                    category=PostApiRegulationsAddBodyCategory(first_row["regulation_category"]),
-                    status=PostApiRegulationsAddBodyStatus(self.status),
-                    subject=PostApiRegulationsAddBodySubject(first_row["regulation_subject"]),
-                    title=first_row["regulation_title"],
-                    other_category_text=first_row["regulation_other_category_text"],
-                    measures=measures,  # type: ignore
-                )
+            regulation = PostApiRegulationsAddBody(
+                identifier=first_row["regulation_identifier"],
+                category=PostApiRegulationsAddBodyCategory(first_row["regulation_category"]),
+                status=PostApiRegulationsAddBodyStatus(self.status),
+                subject=PostApiRegulationsAddBodySubject(first_row["regulation_subject"]),
+                title=first_row["regulation_title"],
+                other_category_text=first_row["regulation_other_category_text"],
+                measures=measures,  # type: ignore
             )
+
+            # Add document URL to additional_properties if present
+            if first_row.get("regulation_document_url"):
+                regulation.additional_properties["documentUrl"] = first_row[
+                    "regulation_document_url"
+                ]
+
+            regulations.append(regulation)
 
         return regulations
 

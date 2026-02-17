@@ -204,6 +204,7 @@ def test_compute_regulation_fields(data_source):
             "NOARR": ["REG001", "REG001", "REG002"],
             "DESCRIPTIF": ["Limitation Vitesse", "Limitation Vitesse", "Stationnement interdit"],
             "LIBRU": ["Rue A", "Rue B", "Rue C"],
+            "LIEN_URL": [None, None, None],
         }
     )
 
@@ -215,6 +216,7 @@ def test_compute_regulation_fields(data_source):
     assert "regulation_subject" in result.columns
     assert "regulation_title" in result.columns
     assert "regulation_other_category_text" in result.columns
+    assert "regulation_document_url" in result.columns
 
     # Check values - all rows with same NOARR should have same regulation_title (from first row)
     assert result["regulation_identifier"].to_list() == ["REG001", "REG001", "REG002"]
@@ -222,6 +224,36 @@ def test_compute_regulation_fields(data_source):
     assert result["regulation_title"][1] == "Limitation Vitesse – Rue A"  # Same as first row
     assert result["regulation_title"][2] == "Stationnement interdit – Rue C"
     assert result["regulation_other_category_text"][0] == "Circulation"
+    # Without URL, should be None
+    assert result["regulation_document_url"][0] is None
+
+
+def test_compute_regulation_fields_with_url(data_source):
+    """Test that compute_regulation_fields includes URL
+    in regulation_document_url when available."""
+    df = pl.DataFrame(
+        {
+            "NOARR": ["REG001", "REG001", "REG002"],
+            "DESCRIPTIF": ["Limitation Vitesse", "Limitation Vitesse", "Stationnement interdit"],
+            "LIBRU": ["Rue A", "Rue B", "Rue C"],
+            "LIEN_URL": [
+                "https://example.com/arrete1.pdf",
+                "https://example.com/arrete1.pdf",
+                None,
+            ],
+        }
+    )
+
+    result = data_source.compute_regulation_fields(df)
+
+    # Check that URL is in regulation_document_url
+    assert result["regulation_document_url"][0] == "https://example.com/arrete1.pdf"
+    assert result["regulation_document_url"][1] == "https://example.com/arrete1.pdf"
+    # Without URL, should be None
+    assert result["regulation_document_url"][2] is None
+    # other_category_text should always be "Circulation"
+    assert result["regulation_other_category_text"][0] == "Circulation"
+    assert result["regulation_other_category_text"][2] == "Circulation"
 
 
 def test_compute_measure_fields():

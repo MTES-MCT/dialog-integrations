@@ -131,23 +131,25 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         - regulation_subject: OTHER
         - regulation_title: "{DESCRIPTIF} – {LIBRU}"
         - regulation_other_category_text: "Circulation"
+        - regulation_document_url: from LIEN_URL if available
         """
-        # For each NOARR, we need the first row's DESCRIPTIF and LIBRU for the title
+        # For each NOARR, we need the first row's DESCRIPTIF, LIBRU, and LIEN_URL
         # Add a row number per NOARR group to identify first row
         df = df.with_columns(
             pl.col("NOARR").cum_count().over("NOARR").alias("_row_num_in_regulation")
         )
 
-        # Get the first row's title for each regulation
-        first_row_titles = df.filter(pl.col("_row_num_in_regulation") == 1).select(
+        # Get the first row's title and URL for each regulation
+        first_row_data = df.filter(pl.col("_row_num_in_regulation") == 1).select(
             [
                 pl.col("NOARR"),
                 (pl.col("DESCRIPTIF") + pl.lit(" – ") + pl.col("LIBRU")).alias("regulation_title"),
+                pl.col("LIEN_URL"),
             ]
         )
 
-        # Join back to get title for all rows
-        df = df.join(first_row_titles, on="NOARR", how="left")
+        # Join back to get title and URL for all rows
+        df = df.join(first_row_data, on="NOARR", how="left")
 
         # Add regulation fields
         df = df.with_columns(
@@ -158,6 +160,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
                 ),
                 pl.lit(PostApiRegulationsAddBodySubject.OTHER.value).alias("regulation_subject"),
                 pl.lit("Circulation").alias("regulation_other_category_text"),
+                pl.col("LIEN_URL").alias("regulation_document_url"),
             ]
         )
 
