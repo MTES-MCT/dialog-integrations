@@ -10,6 +10,6 @@ from .restrictions_gabarits.data_source_integration import (
 class Integration(BaseIntegration):
     """Main integration class for Sarthe - coordinates multiple data sources."""
 
-    status = PostApiRegulationsAddBodyStatus.DRAFT
+    status = PostApiRegulationsAddBodyStatus.PUBLISHED
 
     data_sources = [LimitationsVitesse, RestrictionGabarits]
