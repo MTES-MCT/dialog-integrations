@@ -203,7 +203,7 @@ def test_compute_vehicle_fields_with_tonnage():
     # Check tonnage is converted from tons to kg (multiply by 1000)
     assert result["vehicle_heavyweight_max_weight"][0] == 7.5  # 7.5 tons
     assert result["vehicle_heavyweight_max_weight"][1] == 3.5  # 3.5 tons
-    assert result["vehicle_heavyweight_max_weight"][2] == 10.0  # 10.0 tons 
+    assert result["vehicle_heavyweight_max_weight"][2] == 10.0  # 10.0 tons
 
     # Check all_vehicles is False
     assert all(not v for v in result["vehicle_all_vehicles"].to_list())
