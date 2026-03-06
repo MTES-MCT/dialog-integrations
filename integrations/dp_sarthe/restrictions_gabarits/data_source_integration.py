@@ -176,7 +176,7 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all vehicle fields for SaveVehicleSetDTO.
     - vehicle_all_vehicles: false
-    - vehicle_heavyweight_max_weight: tonnage * 1000 (convert tons to kg) if defined and not 0
+    - vehicle_heavyweight_max_weight: tonnage if defined and not 0
     - vehicle_max_height: hauteur if defined and not 0
     - vehicle_max_width: largeur if defined and not 0
     - vehicle_exempted_types: []
@@ -186,9 +186,8 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     return df.with_columns(
         [
             pl.lit(False).alias("vehicle_all_vehicles"),
-            # Convert tonnage from tons to kg (multiply by 1000)
             pl.when((pl.col("tonnage").is_not_null()) & (pl.col("tonnage") > 0))
-            .then(pl.col("tonnage") * 1000)
+            .then(pl.col("tonnage"))
             .otherwise(None)
             .alias("vehicle_heavyweight_max_weight"),
             pl.when((pl.col("hauteur").is_not_null()) & (pl.col("hauteur") > 0))
