@@ -183,7 +183,7 @@ def test_compute_location_fields_filters_null_geometry():
 
 
 def test_compute_vehicle_fields_with_tonnage():
-    """Test that compute_vehicle_fields handles tonnage correctly (converts to kg)."""
+    """Test that compute_vehicle_fields handles tonnage correctly (keeps in ton)."""
     df = pl.DataFrame(
         {
             "tonnage": [7.5, 3.5, 10.0],
@@ -201,9 +201,9 @@ def test_compute_vehicle_fields_with_tonnage():
     assert "vehicle_max_width" in result.columns
 
     # Check tonnage is converted from tons to kg (multiply by 1000)
-    assert result["vehicle_heavyweight_max_weight"][0] == 7500.0  # 7.5 tons = 7500 kg
-    assert result["vehicle_heavyweight_max_weight"][1] == 3500.0  # 3.5 tons = 3500 kg
-    assert result["vehicle_heavyweight_max_weight"][2] == 10000.0  # 10.0 tons = 10000 kg
+    assert result["vehicle_heavyweight_max_weight"][0] == 7.5  # 7.5 tons
+    assert result["vehicle_heavyweight_max_weight"][1] == 3.5  # 3.5 tons
+    assert result["vehicle_heavyweight_max_weight"][2] == 10.0  # 10.0 tons 
 
     # Check all_vehicles is False
     assert all(not v for v in result["vehicle_all_vehicles"].to_list())
@@ -225,9 +225,9 @@ def test_compute_vehicle_fields_with_height():
     assert result["vehicle_max_height"][0] == 3.9
     assert result["vehicle_max_height"][1] == 3.7
 
-    # Check tonnage is converted to kg
-    assert result["vehicle_heavyweight_max_weight"][0] == 5000.0
-    assert result["vehicle_heavyweight_max_weight"][1] == 3500.0
+    # Check tonnage is kept in tons
+    assert result["vehicle_heavyweight_max_weight"][0] == 5.0
+    assert result["vehicle_heavyweight_max_weight"][1] == 3.5
 
     # Check width is None
     assert result["vehicle_max_width"][0] is None
@@ -249,9 +249,9 @@ def test_compute_vehicle_fields_with_width():
     assert result["vehicle_max_width"][0] == 2.5
     assert result["vehicle_max_width"][1] == 2.7
 
-    # Check tonnage is converted to kg
-    assert result["vehicle_heavyweight_max_weight"][0] == 5000.0
-    assert result["vehicle_heavyweight_max_weight"][1] == 3500.0
+    # Check tonnage is kept in tons
+    assert result["vehicle_heavyweight_max_weight"][0] == 5.0
+    assert result["vehicle_heavyweight_max_weight"][1] == 3.5
 
     # Check height is None
     assert result["vehicle_max_height"][0] is None
@@ -288,9 +288,9 @@ def test_compute_vehicle_fields_with_restricted_types():
     assert restricted_types[3] == ["dimensions"]
 
     # Check heavyweight_max_weight is set only for tonnage > 0
-    assert weights[0] == 7500.0
+    assert weights[0] == 7.5
     assert weights[1] is None
-    assert weights[2] == 3500.0
+    assert weights[2] == 3.5
     assert weights[3] is None
 
 
