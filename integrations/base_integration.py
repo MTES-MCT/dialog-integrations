@@ -5,6 +5,9 @@ import polars as pl
 from loguru import logger
 
 from api.dia_log_client import Client
+from api.dia_log_client.api.private.delete_api_regulations_delete import (
+    sync_detailed as delete_regulation,
+)
 from api.dia_log_client.api.private.get_api_organization_identifiers import (
     sync_detailed as _get_identifiers,
 )
@@ -82,7 +85,7 @@ class BaseIntegration:
 
         return getattr(module, "Integration")(organization_settings, client)
 
-    def integrate_regulations(self) -> None:
+    def integrate_regulations(self, limit_to=[], update_existing: bool | None = None) -> None:
         """
         Integrate regulations from all data sources.
         Iterates over data sources, collects data, and integrates.
@@ -100,6 +103,11 @@ class BaseIntegration:
         # Concatenate all data
         combined_data = pl.concat(all_clean_data, how="vertical")
 
+        # Only process whitelisted identifiers
+        if limit_to and len(limit_to) > 0:
+            logger.info(f"Limiting processing to following ids : {limit_to}")
+            combined_data = combined_data.filter(pl.col("regulation_identifier").is_in(limit_to))
+
         logger.info(f"Total records from all sources: {combined_data.shape[0]}")
 
         # Create regulations from combined data
@@ -113,19 +121,34 @@ class BaseIntegration:
         # Get existing regulation IDs
         integrated_regulation_ids = self.fetch_regulation_ids()
 
-        # Filter to only new regulations
-        regulation_ids_to_integrate = set([r.identifier for r in regulations]) - set(
+        # Filter regulations to create
+        regulation_ids_to_create = set([r.identifier for r in regulations]) - set(
             integrated_regulation_ids
         )
-        regulations_to_integrate = [
+        regulations_to_create = [
             regulation
             for regulation in regulations
-            if regulation.identifier in regulation_ids_to_integrate
+            if regulation.identifier in regulation_ids_to_create
         ]
-        logger.info(f"Found {len(regulations_to_integrate)} new regulations to integrate")
+        logger.info(f"Found {len(regulations_to_create)} new regulations to integrate")
 
         # Integrate new regulations
-        self._integrate_regulations(regulations_to_integrate)
+        self._integrate_regulations_add(regulations_to_create)
+
+        if update_existing:
+            # Filter regulations to update
+            regulation_ids_to_update = set([r.identifier for r in regulations]) & set(
+                integrated_regulation_ids
+            )
+            regulations_to_update = [
+                regulation
+                for regulation in regulations
+                if regulation.identifier in regulation_ids_to_update
+            ]
+            logger.info(f"Found {len(regulations_to_update)} regulations to update")
+
+            # Integrate updated regulations
+            self._integrate_regulations_update(regulations_to_update)
 
     def publish_regulations(self) -> None:
         regulation_ids = self.fetch_regulation_ids()
@@ -148,10 +171,12 @@ class BaseIntegration:
             f"Finished publishing {len(regulation_ids) - count_error} measures successfully"
         )
 
-    def _integrate_regulations(self, regulations: list[PostApiRegulationsAddBody]) -> None:
+    def _integrate_regulations_add(self, regulations: list[PostApiRegulationsAddBody]) -> None:
         count_error = 0
         for index, regulation in enumerate(regulations):
-            logger.info(f"Creating regulation {index}/{len(regulations)}: {regulation.identifier}")
+            logger.info(
+                f"Creating regulation {index + 1}/{len(regulations)}: {regulation.identifier}"
+            )
             logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
             try:
                 resp = add_regulation(client=self.client, body=regulation)
@@ -169,6 +194,32 @@ class BaseIntegration:
         count_success = len(regulations) - count_error
         logger.success(
             f"Finished integrating {count_success}/{len(regulations)} regulations successfully"
+        )
+
+    def _integrate_regulations_update(self, regulations: list[PostApiRegulationsAddBody]) -> None:
+        count_error = 0
+        for index, regulation in enumerate(regulations):
+            logger.info(
+                f"Updating regulation {index + 1}/{len(regulations)}: {regulation.identifier}"
+            )
+            logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
+
+            try:
+                delete_regulation(identifier=str(regulation.identifier), client=self.client)
+                resp = add_regulation(client=self.client, body=regulation)
+            except Exception as e:
+                logger.error(f"Failed to create: {regulation.identifier} - {e}")
+                count_error += 1
+            else:
+                if resp.status_code != 201:
+                    logger.error(
+                        f"Failed to create: {regulation.identifier} - got status {resp.status_code}"
+                    )
+                    logger.error(json.loads(resp.content))
+                    count_error += 1
+        count_success = len(regulations) - count_error
+        logger.success(
+            f"Finished updating {count_success}/{len(regulations)} regulations successfully"
         )
 
     def create_measure(self, measure: RegulationMeasure) -> SaveMeasureDTO:

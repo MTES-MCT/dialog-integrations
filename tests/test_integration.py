@@ -27,7 +27,7 @@ def test_full_pipeline_integration(organization, monkeypatch):
         monkeypatch.setattr(data_source_integration, "fetch_raw_data", mock_fetch_raw_data)
 
     # Mock API-related methods
-    monkeypatch.setattr(integration, "_integrate_regulations", lambda regs: None)
+    monkeypatch.setattr(integration, "_integrate_regulations_add", lambda regs: None)
     monkeypatch.setattr(integration, "fetch_regulation_ids", lambda: [])
 
     # Run the full pipeline
