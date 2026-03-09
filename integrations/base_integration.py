@@ -5,15 +5,14 @@ import polars as pl
 from loguru import logger
 
 from api.dia_log_client import Client
+from api.dia_log_client.api.private.delete_api_regulations_delete import (
+    sync_detailed as delete_regulation,
+)
 from api.dia_log_client.api.private.get_api_organization_identifiers import (
     sync_detailed as _get_identifiers,
 )
 from api.dia_log_client.api.private.post_api_regulations_add import (
     sync_detailed as add_regulation,
-)
-
-from api.dia_log_client.api.private.delete_api_regulations_delete import (
-    sync_detailed as delete_regulation
 )
 from api.dia_log_client.api.private.put_api_regulations_publish import (
     sync_detailed as publish_regulation,
@@ -121,7 +120,7 @@ class BaseIntegration:
 
         # Get existing regulation IDs
         integrated_regulation_ids = self.fetch_regulation_ids()
-        
+
 
         # Filter regulations to create
         regulation_ids_to_create = set([r.identifier for r in regulations]) - set(
@@ -176,7 +175,9 @@ class BaseIntegration:
     def _integrate_regulations_add(self, regulations: list[PostApiRegulationsAddBody]) -> None:
         count_error = 0
         for index, regulation in enumerate(regulations):
-            logger.info(f"Creating regulation {index+1}/{len(regulations)}: {regulation.identifier}")
+            logger.info(
+                f"Creating regulation {index+1}/{len(regulations)}: {regulation.identifier}"
+            )
             logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
             try:
                 resp = add_regulation(client=self.client, body=regulation)
@@ -199,11 +200,13 @@ class BaseIntegration:
     def _integrate_regulations_update(self, regulations: list[PostApiRegulationsAddBody]) -> None:
         count_error = 0
         for index, regulation in enumerate(regulations):
-            logger.info(f"Updating regulation {index+1}/{len(regulations)}: {regulation.identifier}")
+            logger.info(
+                f"Updating regulation {index+1}/{len(regulations)}: {regulation.identifier}"
+            )
             logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
 
             try:
-                delresp = delete_regulation(identifier=str(regulation.identifier), client=self.client)
+                delete_regulation(identifier=str(regulation.identifier), client=self.client)
                 resp = add_regulation(client=self.client, body=regulation)
             except Exception as e:
                 logger.error(f"Failed to create: {regulation.identifier} - {e}")

@@ -11,8 +11,14 @@ app = typer.Typer(help="Dialog CLI")
 # Shared CLI parameter
 def comma_list(raw: str) -> list[str]:
     return raw.split(",")
-IdsOption = Annotated[list | None, typer.Option(parser=comma_list, help="List of ids to restrict to.")]
-UpdateOption = Annotated[bool| None, typer.Option(help="Update existing regulations")]
+IdsOption = Annotated[
+    list | None,
+    typer.Option(parser=comma_list, help="List of ids to restrict to.")
+]
+UpdateOption = Annotated[
+    bool| None,
+    typer.Option(help="Update existing regulations")
+]
 EnvOption = Annotated[str, typer.Option(help="Environment: dev or prod")]
 
 
