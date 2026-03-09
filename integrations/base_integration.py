@@ -85,7 +85,7 @@ class BaseIntegration:
 
         return getattr(module, "Integration")(organization_settings, client)
 
-    def integrate_regulations(self, limit_to=[], update_existing:bool|None=None) -> None:
+    def integrate_regulations(self, limit_to=[], update_existing: bool | None = None) -> None:
         """
         Integrate regulations from all data sources.
         Iterates over data sources, collects data, and integrates.
@@ -120,7 +120,6 @@ class BaseIntegration:
 
         # Get existing regulation IDs
         integrated_regulation_ids = self.fetch_regulation_ids()
-
 
         # Filter regulations to create
         regulation_ids_to_create = set([r.identifier for r in regulations]) - set(
@@ -176,7 +175,7 @@ class BaseIntegration:
         count_error = 0
         for index, regulation in enumerate(regulations):
             logger.info(
-                f"Creating regulation {index+1}/{len(regulations)}: {regulation.identifier}"
+                f"Creating regulation {index + 1}/{len(regulations)}: {regulation.identifier}"
             )
             logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
             try:
@@ -201,7 +200,7 @@ class BaseIntegration:
         count_error = 0
         for index, regulation in enumerate(regulations):
             logger.info(
-                f"Updating regulation {index+1}/{len(regulations)}: {regulation.identifier}"
+                f"Updating regulation {index + 1}/{len(regulations)}: {regulation.identifier}"
             )
             logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
 
