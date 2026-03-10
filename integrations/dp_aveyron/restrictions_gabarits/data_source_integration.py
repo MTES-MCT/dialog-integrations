@@ -28,7 +28,7 @@ URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/prescriptio
 
 class DataSourceIntegration(BaseDataSourceIntegration):
     """Data source for Prescription Routière du Département"""
-    raw_data_scheme = AveyronPrescriptionsRoutieresRawDataSchema
+    raw_data_schema = AveyronPrescriptionsRoutieresRawDataSchema
     name = "restrictions_gabarits"
 
     def fetch_raw_data(self):
@@ -138,7 +138,7 @@ def compute_period_fields(df: pl.DataFrame):
     return df.with_columns(
         [
             (
-                pl.col("date_maj").str.to_date().dt.strftime("%Y-%m-%dT%H:%M:%S")
+                pl.col("date_maj").str.to_date().dt.strftime("%Y-%m-%d")
              + pl.lit("T00:00:00")
             ).alias("period_start_date"),
             pl.lit(None).alias("period_end_date"),
@@ -207,10 +207,11 @@ def compute_regulation_fields(df: pl.DataFrame):
                 (
                     pl.col("arrete").cast(pl.Utf8)
                     + pl.lit(" - ")
-                    + pl.col("nature").fill_null("")
+                    + pl.col("prescript").fill_null("")
                     + pl.lit(" - ")
-                    + pl.col("site").fill_null("")
+                    + pl.col("commune").fill_null("")
                 ).alias("regulation_title"),
+                pl.col("prescript").alias("regulation_other_category_text"),
             ]
         )
 

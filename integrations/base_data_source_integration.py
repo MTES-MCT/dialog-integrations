@@ -40,6 +40,7 @@ class RegulationMeasure(TypedDict):
     vehicle_heavyweight_max_weight: float | None
     vehicle_max_height: float | None
     vehicle_max_width: float | None
+    vehicle_max_length: float | None
     vehicle_exempted_types: list[str] | None
     vehicle_restricted_types: list[str] | None
     vehicle_other_exempted_type_text: str | None

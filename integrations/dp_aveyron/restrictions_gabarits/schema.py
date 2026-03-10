@@ -6,14 +6,14 @@ import pandera.polars as pa
 class AveyronPrescriptionsRoutieresRawDataSchema(pa.DataFrameModel):
     """Schema for the raw Sarthe restriction gabarits data."""
 
-    geo_point_2d: str | None = pa.Field(nullable=True)
-    geo_shape: str | None = pa.Field(nullable=True)
+    geo_point_2d: bytes | None = pa.Field(nullable=True)
+    geo_shape: bytes | None = pa.Field(nullable=True)
     objectid: int
     idroute: str | None = pa.Field(nullable=True)
     debut:  int | None = pa.Field(nullable=True)
     fin:  int | None = pa.Field(nullable=True)
-    prdebut:  int | None = pa.Field(nullable=True)
-    absdebut:  int | None = pa.Field(nullable=True)
+    prdeb:  int | None = pa.Field(nullable=True)
+    absdeb:  int | None = pa.Field(nullable=True)
     prfin:  int | None = pa.Field(nullable=True)
     absfin:  int | None = pa.Field(nullable=True)
     commune: str | None = pa.Field(nullable=True)
