@@ -8,7 +8,7 @@ import pytest
 from integrations.co_brest.integration import Integration
 from integrations.co_brest.permanent_lineaire.data_source_integration import (
     DataSourceIntegration,
-    ccompute_period_fields,
+    compute_period_fields,
 )
 from integrations.co_brest.permanent_lineaire.schema import Schema
 
@@ -84,8 +84,8 @@ def test_cast_boolean_column_null_to_false(data_source):
     assert result["test_col"].to_list() == [True, False, False]
 
 
-def test_ccompute_period_fields():
-    """Test that ccompute_period_fields creates all required fields."""
+def test_compute_period_fields():
+    """Test that compute_period_fields creates all required fields."""
 
     df = pl.DataFrame(
         {
@@ -94,7 +94,7 @@ def test_ccompute_period_fields():
         }
     )
 
-    result = ccompute_period_fields(df)
+    result = compute_period_fields(df)
 
     # Check all period fields exist
     assert "period_start_date" in result.columns
@@ -111,12 +111,12 @@ def test_ccompute_period_fields():
     assert result["period_is_permanent"][0] is True
 
 
-def test_ccompute_period_fields_filters_null_dt_mat():
+def test_compute_period_fields_filters_null_dt_mat():
     """Test that rows with null DT_MAT are filtered out."""
     from datetime import datetime
 
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
-        ccompute_period_fields,
+        compute_period_fields,
     )
 
     df = pl.DataFrame(
@@ -126,7 +126,7 @@ def test_ccompute_period_fields_filters_null_dt_mat():
         }
     )
 
-    result = ccompute_period_fields(df)
+    result = compute_period_fields(df)
 
     assert result.height == 2
     assert result["NOARR"].to_list() == ["A", "C"]

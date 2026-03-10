@@ -113,7 +113,7 @@ class BaseIntegration:
         # Create regulations from combined data
         regulations = self.create_regulations(combined_data)
         for regulation in regulations:
-            regulation.identifier = f"{regulation.identifier}-0"
+            regulation.identifier = f"{regulation.identifier}"
             regulation.status = self.status
         num_measures = sum([len(regulation.measures or []) for regulation in regulations])
         logger.info(f"Created {len(regulations)} regulations with a total of {num_measures}")

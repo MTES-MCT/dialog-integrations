@@ -109,6 +109,7 @@
                                                 "type": {
                                                     "type": "string",
                                                     "enum": [
+                                                        "alternateRoad",
                                                         "noEntry",
                                                         "speedLimitation",
                                                         "parkingProhibited"
@@ -926,6 +927,7 @@
             "MeasureTypeEnum": {
                 "type": "string",
                 "enum": [
+                    "alternateRoad",
                     "noEntry",
                     "speedLimitation",
                     "parkingProhibited"

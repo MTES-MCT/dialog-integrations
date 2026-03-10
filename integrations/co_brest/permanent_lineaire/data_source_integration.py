@@ -104,9 +104,9 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         return (
             raw_data.pipe(compute_measure_fields)
-            .pipe(ccompute_period_fields)
+            .pipe(compute_period_fields)
             .pipe(compute_location_fields)
-            .pipe(self.compute_regulation_fields)
+            .pipe(compute_regulation_fields)
             .pipe(compute_vehicle_fields)
         )
 
@@ -121,58 +121,58 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .fill_null(False)
         )
 
-    def compute_regulation_fields(self, df: pl.DataFrame) -> pl.DataFrame:
-        """
-        Compute all regulation fields for PostApiRegulationsAddBody.
-        For Brest, each NOARR (regulation ID) can have multiple measures.
-        Regulation title is built from first row's DESCRIPTIF and LIBRU.
-        - regulation_identifier: from NOARR field
-        - regulation_category: PERMANENTREGULATION
-        - regulation_subject: OTHER
-        - regulation_title: "{DESCRIPTIF} – {LIBRU}"
-        - regulation_other_category_text: "Circulation"
-        - regulation_document_url: from LIEN_URL if available
-        """
-        # For each NOARR, we need the first row's DESCRIPTIF, LIBRU, and LIEN_URL
-        # Add a row number per NOARR group to identify first row
-        df = df.with_columns(
-            pl.col("NOARR").cum_count().over("NOARR").alias("_row_num_in_regulation")
-        )
+def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Compute all regulation fields for PostApiRegulationsAddBody.
+    For Brest, each NOARR (regulation ID) can have multiple measures.
+    Regulation title is built from first row's DESCRIPTIF and LIBRU.
+    - regulation_identifier: from NOARR field
+    - regulation_category: PERMANENTREGULATION
+    - regulation_subject: OTHER
+    - regulation_title: "{DESCRIPTIF} – {LIBRU}"
+    - regulation_other_category_text: "Circulation"
+    - regulation_document_url: from LIEN_URL if available
+    """
+    # For each NOARR, we need the first row's DESCRIPTIF, LIBRU, and LIEN_URL
+    # Add a row number per NOARR group to identify first row
+    df = df.with_columns(
+        pl.col("NOARR").cum_count().over("NOARR").alias("_row_num_in_regulation")
+    )
 
-        # Get the first row's title and URL for each regulation
-        first_row_data = df.filter(pl.col("_row_num_in_regulation") == 1).select(
-            [
-                pl.col("NOARR"),
-                (pl.col("DESCRIPTIF") + pl.lit(" – ") + pl.col("LIBRU")).alias("regulation_title"),
-                pl.col("LIEN_URL"),
-            ]
-        )
+    # Get the first row's title and URL for each regulation
+    first_row_data = df.filter(pl.col("_row_num_in_regulation") == 1).select(
+        [
+            pl.col("NOARR"),
+            (pl.col("DESCRIPTIF") + pl.lit(" – ") + pl.col("LIBRU")).alias("regulation_title"),
+            pl.col("LIEN_URL"),
+        ]
+    )
 
-        # Join back to get title and URL for all rows
-        df = df.join(first_row_data, on="NOARR", how="left")
+    # Join back to get title and URL for all rows
+    df = df.join(first_row_data, on="NOARR", how="left")
 
-        # Add regulation fields
-        df = df.with_columns(
-            [
-                pl.col("NOARR").alias("regulation_identifier"),
-                pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(
-                    "regulation_category"
-                ),
-                pl.lit(PostApiRegulationsAddBodySubject.OTHER.value).alias("regulation_subject"),
-                pl.lit("Circulation").alias("regulation_other_category_text"),
-                pl.col("LIEN_URL").alias("regulation_document_url"),
-            ]
-        )
+    # Add regulation fields
+    df = df.with_columns(
+        [
+            pl.col("NOARR").alias("regulation_identifier"),
+            pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(
+                "regulation_category"
+            ),
+            pl.lit(PostApiRegulationsAddBodySubject.OTHER.value).alias("regulation_subject"),
+            pl.lit("Circulation").alias("regulation_other_category_text"),
+            pl.col("LIEN_URL").alias("regulation_document_url"),
+        ]
+    )
 
-        num_null_titles = df.select(pl.col("regulation_title").is_null().sum()).item()
-        logger.warning(f"Dropping {num_null_titles} rows with null regulation_title")
-        df = df.filter(pl.col("regulation_title").is_not_null())
+    num_null_titles = df.select(pl.col("regulation_title").is_null().sum()).item()
+    logger.warning(f"Dropping {num_null_titles} rows with null regulation_title")
+    df = df.filter(pl.col("regulation_title").is_not_null())
 
-        # Drop helper columns
-        return df
+    # Drop helper columns
+    return df
 
 
-def ccompute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
+def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all period fields for SavePeriodDTO.
     - period_start_date: from DT_MAT field
