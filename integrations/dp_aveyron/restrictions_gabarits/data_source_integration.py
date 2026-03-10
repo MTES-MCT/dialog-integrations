@@ -1,17 +1,24 @@
 """Data source integration for Aveyron : prescriptions-routieres-du-departement"""
 
 import io
+import json
 
+import geojson
+import geopandas as gpd
 from loguru import logger
 import polars as pl
 import requests
+from shapely.geometry import mapping
 
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_aveyron.restrictions_gabarits.schema import AveyronPrescriptionsRoutieresRawDataSchema
 
 from api.dia_log_client.models import (
     MeasureTypeEnum,
+    PostApiRegulationsAddBodyCategory,
     PostApiRegulationsAddBodyMeasuresItemVehicleSetType0RestrictedTypesType0Item as VehicleRestrictedTypeEnum,
+    PostApiRegulationsAddBodySubject,
+    RoadTypeEnum,
 )
 
 
@@ -106,13 +113,106 @@ def compute_measure_fields(df: pl.DataFrame):
     ])
 
 def compute_period_fields(df: pl.DataFrame):
-    return df
+    """
+    Compute all period fields for SavePeriodDTO.
+    - period_start_date: from date_creation
+    - period_end_date: None
+    - period_start_time: None
+    - period_end_time: None
+    - period_recurrence_type: everyDay
+    - period_is_permanent: True
+
+    Filters out rows where date_creation is not defined.
+    """
+
+    # Count rows with null date_creation before filtering
+    n_null_date = df.select(pl.col("date_maj").is_null().sum()).item()
+    if n_null_date > 0:
+        logger.warning(
+            f"Dropping {n_null_date} rows with null date_creation (no start date available)"
+        )
+
+    # Filter out rows where date_creation is null
+    df = df.filter(pl.col("date_maj").is_not_null())
+
+    return df.with_columns(
+        [
+            (
+                pl.col("date_maj").str.to_date().dt.strftime("%Y-%m-%dT%H:%M:%S")
+             + pl.lit("T00:00:00")
+            ).alias("period_start_date"),
+            pl.lit(None).alias("period_end_date"),
+            pl.lit(None).alias("period_start_time"),
+            pl.lit(None).alias("period_end_time"),
+            pl.lit("everyDay").alias("period_recurrence_type"),
+            pl.lit(True).alias("period_is_permanent"),
+        ]
+    )
 
 def compute_location_fields(df: pl.DataFrame):
-    return df
+    """
+    Compute all location fields for SaveLocationDTO.
+    - location_road_type: always RoadTypeEnum.RAWGEOJSON
+    - location_label: D98 (Aveyron) du PR 28+881 au PR 32+444
+    - location_geometry: from geo_shape
+
+    Filter out rows where geo_shape is null or undefined.
+    """
+    # Count rows with null geo_shape before filtering
+    n_null_geometry = df.select(pl.col("geo_shape").is_null().sum()).item()
+    if n_null_geometry > 0:
+        logger.warning(
+            f"Dropping {n_null_geometry} rows with null geo_shape (no geometry available)"
+        )
+
+    # Filter out rows where geo_shape is null
+    df = df.filter(pl.col("geo_shape").is_not_null())
+
+    return df.with_columns([
+        (pl.col("idroute").str.split("_").list.last()
+         + pl.lit(" (Aveyron) du PR ")
+         + pl.col("prdeb").cast(pl.Utf8)
+         + pl.lit("+")
+         + pl.col("absdeb").cast(pl.Utf8)
+         + pl.lit(" au PR ")
+         + pl.col("prfin").cast(pl.Utf8)
+         + pl.lit("+")
+         + pl.col("absfin").cast(pl.Utf8)
+        ).alias("location_label"),
+        pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
+        pl.from_pandas(gpd.GeoSeries.from_wkb(df["geo_shape"]).apply(lambda geom: json.dumps(mapping(geom)))).alias("location_geometry")
+    ])
 
 def compute_regulation_fields(df: pl.DataFrame):
-    return df
+    """
+        Compute all regulation fields for PostApiRegulationsAddBody.
+        - regulation_identifier: from objectid (filter duplicates)
+        - regulation_category: PERMANENTREGULATION
+        - regulation_subject: OTHER
+        - regulation_title: objectid + nature + site
+        - regulation_other_category_text: "Circulation"
+
+        Filters out rows with duplicate objectid.
+        """
+    return df.with_columns(
+            [
+                (
+                    pl.lit("12-restriction-")
+                    + pl.col("objectid").cast(pl.Utf8)
+                ).alias("regulation_identifier"),
+                pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(
+                    "regulation_category"
+                ),
+                pl.lit(PostApiRegulationsAddBodySubject.OTHER.value).alias("regulation_subject"),
+                (
+                    pl.col("arrete").cast(pl.Utf8)
+                    + pl.lit(" - ")
+                    + pl.col("nature").fill_null("")
+                    + pl.lit(" - ")
+                    + pl.col("site").fill_null("")
+                ).alias("regulation_title"),
+            ]
+        )
 
 def compute_vehicle_fields(df: pl.DataFrame):
     """
