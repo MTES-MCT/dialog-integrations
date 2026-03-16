@@ -28,6 +28,7 @@ from api.dia_log_client.models import (
     SaveMeasureDTO,
     SavePeriodDTO,
     SaveRawGeoJSONDTO,
+    SaveNumberedRoadDTO,
     SaveVehicleSetDTO,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration, RegulationMeasure
@@ -299,7 +300,7 @@ class BaseIntegration:
 
         return SavePeriodDTO(**period_fields)
 
-    def create_save_location_dto(self, measure: RegulationMeasure) -> SaveLocationDTO:
+    def create_save_location_dto(self, measure: RegulationMeasure) -> SaveLocationDTO|SaveNumberedRoadDTO:
         """
         Create a SaveLocationDTO from a RegulationMeasure with location_ prefixed fields.
         Expects location_road_type (string), location_label, and location_geometry fields.
@@ -307,13 +308,31 @@ class BaseIntegration:
         road_type_value = measure["location_road_type"]
         road_type = RoadTypeEnum(road_type_value)
 
-        return SaveLocationDTO(
-            road_type=road_type,
-            raw_geo_json=SaveRawGeoJSONDTO(
-                label=measure["location_label"],
-                geometry=measure["location_geometry"],
-            ),
-        )
+
+        location_fields = {}
+        for key, value in measure.items():
+            if key.startswith("location_") and key != "location_road_type":
+                field_name = key.replace("location_", "", 1)
+                location_fields[field_name] = value
+        if road_type == RoadTypeEnum.RAWGEOJSON:
+            return SaveLocationDTO(
+                road_type=road_type,
+                raw_geo_json=SaveRawGeoJSONDTO(
+                    **location_fields
+                ),
+            )
+        elif road_type in [RoadTypeEnum.DEPARTMENTALROAD, RoadTypeEnum.NATIONALROAD]:
+            payload = {
+                "road_type":road_type,
+                ("national_road" 
+                    if road_type == RoadTypeEnum.NATIONALROAD 
+                    else "departmental_road"
+                ) : SaveNumberedRoadDTO(**location_fields)
+            }
+            breakpoint()
+            return SaveLocationDTO(**payload)
+        else:
+            raise Exception(f"Location saving not implemented for  RoadType {road_type.value}")
 
     def create_save_vehicle_dto(self, measure: RegulationMeasure) -> SaveVehicleSetDTO:
         """

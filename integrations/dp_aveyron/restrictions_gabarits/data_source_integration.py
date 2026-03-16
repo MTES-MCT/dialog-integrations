@@ -14,6 +14,7 @@ from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_aveyron.restrictions_gabarits.schema import AveyronPrescriptionsRoutieresRawDataSchema
 
 from api.dia_log_client.models import (
+    DirectionEnum,
     MeasureTypeEnum,
     PostApiRegulationsAddBodyCategory,
     PostApiRegulationsAddBodyMeasuresItemVehicleSetType0RestrictedTypesType0Item as VehicleRestrictedTypeEnum,
@@ -25,6 +26,7 @@ from api.dia_log_client.models import (
 
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/prescriptions-routieres-du-departement-aveyron/exports/parquet"
+LOCAL_FILE = "explorations/dp_aveyron/data/prescriptions-routieres-du-departement-aveyron.parquet"
 
 class DataSourceIntegration(BaseDataSourceIntegration):
     """Data source for Prescription Routière du Département"""
@@ -32,12 +34,13 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "restrictions_gabarits"
 
     def fetch_raw_data(self):
-        logger.info(f"Downloading data from {URL}")
+        # logger.info(f"Downloading data from {URL}")
 
-        r = requests.get(URL)
-        r.raise_for_status()
+        # r = requests.get(URL)
+        # r.raise_for_status()
 
-        df = pl.read_parquet(io.BytesIO(r.content))
+        # df = pl.read_parquet(io.BytesIO(r.content))
+        df = pl.read_parquet(LOCAL_FILE)
 
         return df
     
@@ -150,6 +153,42 @@ def compute_period_fields(df: pl.DataFrame):
     )
 
 def compute_location_fields(df: pl.DataFrame):
+    """
+    Compute all location fields for SaveLocationDTO.
+    - location_administrator: "Aveyron"
+    - location_road_type: RoadTypeEnum.DEPARTMENTALROAD
+    - location_road_number: D98 (Aveyron) du PR 28+881 au PR 32+444
+    - location_from_department_code: 12
+    - location_from_point_number: from prdeb
+    - location_from_abscissa: from absdeb
+    - location_from_side: "U"
+    - location_to_department_code: 12
+    - location_to_point_number: from prfin
+    - location_to_abscissa: from absfin
+    - location_to_side: "U"
+    - location_direction: "BOTH"
+    #NOT TRANSMITTTED- location_geometry: from geo_shape
+    """
+
+    return df.with_columns([
+        pl.lit("Aveyron").alias("location_administrator"),
+        pl.lit(RoadTypeEnum.DEPARTMENTALROAD.value).alias("location_road_type"),
+        pl.col("idroute").str.split("_").list.last().alias("location_road_number"),
+        pl.lit("12").alias("location_from_department_code"),
+        # pl.col("prdeb").cast(pl.Utf8).alias("location_from_point_number"),
+        pl.lit("").cast(pl.Utf8).alias("location_from_point_number"),
+        pl.col("absdeb").alias("location_from_abscissa"),
+        pl.lit("U").alias("location_from_side"),
+        pl.lit("12").alias("location_to_department_code"),
+        pl.col("prfin").cast(pl.Utf8).alias("location_to_point_number"),
+        pl.col("absfin").alias("location_to_abscissa"),
+        pl.lit("U").alias("location_to_side"),
+        pl.lit(DirectionEnum.BOTH.value).alias("location_direction"),
+
+    ])
+
+
+def compute_location_fields_geojson(df: pl.DataFrame):
     """
     Compute all location fields for SaveLocationDTO.
     - location_road_type: always RoadTypeEnum.RAWGEOJSON

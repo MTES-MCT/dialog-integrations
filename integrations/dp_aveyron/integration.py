@@ -5,10 +5,15 @@ from .restrictions_gabarits.data_source_integration import (
     DataSourceIntegration as RestrictionGabarits,
 )
 
+from .limitations_vitesse.data_source_integration import (
+    DataSourceIntegration as LimitationsVitesse
+)
+
 
 class Integration(BaseIntegration):
     """Main integration class for Aveyron - coordinates multiple data sources."""
 
-    status = PostApiRegulationsAddBodyStatus.DRAFT
+    status = PostApiRegulationsAddBodyStatus.PUBLISHED
 
-    data_sources = [RestrictionGabarits]
+    # data_sources = [RestrictionGabarits]
+    data_sources = [LimitationsVitesse]
