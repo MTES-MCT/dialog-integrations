@@ -65,7 +65,7 @@ def compute_period_fields(df: pl.DataFrame):
     """
     return df.with_columns(
         [
-            pl.lit("2024-08-12T00:00:00").alias("period_start_date"),
+            pl.lit("2024-08-12T02:00:00Z").alias("period_start_date"),
             pl.lit(None).alias("period_end_date"),
             pl.lit(None).alias("period_start_time"),
             pl.lit(None).alias("period_end_time"),
@@ -130,8 +130,7 @@ def compute_regulation_fields(df: pl.DataFrame):
         pl.lit(PostApiRegulationsAddBodySubject.OTHER.value).alias("regulation_subject"),
         (
             pl.lit(" Limitation de vitesse - ")
-            + pl.lit(" - ")
-            + pl.col("agglo").fill_null("")
+            + pl.col("agglo").fill_null(df["location_road_number"])
         ).alias("regulation_title"),
         pl.lit("Limitation de vitesse").alias("regulation_other_category_text"),
     ])

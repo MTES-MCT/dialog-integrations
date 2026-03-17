@@ -3,7 +3,6 @@
 import io
 import json
 
-import geojson
 import geopandas as gpd
 from loguru import logger
 import polars as pl
@@ -157,7 +156,7 @@ def compute_location_fields(df: pl.DataFrame):
     Compute all location fields for SaveLocationDTO.
     - location_administrator: "Aveyron"
     - location_road_type: RoadTypeEnum.DEPARTMENTALROAD
-    - location_road_number: D98 (Aveyron) du PR 28+881 au PR 32+444
+    - location_road_number: D98
     - location_from_department_code: 12
     - location_from_point_number: from prdeb
     - location_from_abscissa: from absdeb
@@ -176,6 +175,7 @@ def compute_location_fields(df: pl.DataFrame):
         pl.col("idroute").str.split("_").list.last().alias("location_road_number"),
         pl.lit("12").alias("location_from_department_code"),
         # pl.col("prdeb").cast(pl.Utf8).alias("location_from_point_number"),
+        pl.lit("12##4").cast(pl.Utf8).alias("location_from_point_number"),
         pl.lit("").cast(pl.Utf8).alias("location_from_point_number"),
         pl.col("absdeb").alias("location_from_abscissa"),
         pl.lit("U").alias("location_from_side"),
