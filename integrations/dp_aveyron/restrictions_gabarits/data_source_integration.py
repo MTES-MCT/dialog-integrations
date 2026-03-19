@@ -192,49 +192,6 @@ def compute_location_fields(df: pl.DataFrame):
         ]
     )
 
-
-def compute_location_fields_geojson(df: pl.DataFrame):
-    """
-    Compute all location fields for SaveLocationDTO.
-    - location_road_type: always RoadTypeEnum.RAWGEOJSON
-    - location_label: D98 (Aveyron) du PR 28+881 au PR 32+444
-    - location_geometry: from geo_shape
-
-    Filter out rows where geo_shape is null or undefined.
-    """
-    # Count rows with null geo_shape before filtering
-    n_null_geometry = df.select(pl.col("geo_shape").is_null().sum()).item()
-    if n_null_geometry > 0:
-        logger.warning(
-            f"Dropping {n_null_geometry} rows with null geo_shape (no geometry available)"
-        )
-
-    # Filter out rows where geo_shape is null
-    df = df.filter(pl.col("geo_shape").is_not_null())
-
-    return df.with_columns(
-        [
-            (
-                pl.col("idroute").str.split("_").list.last()
-                + pl.lit(" (Aveyron) du PR ")
-                + pl.col("prdeb").cast(pl.Utf8)
-                + pl.lit("+")
-                + pl.col("absdeb").cast(pl.Utf8)
-                + pl.lit(" au PR ")
-                + pl.col("prfin").cast(pl.Utf8)
-                + pl.lit("+")
-                + pl.col("absfin").cast(pl.Utf8)
-            ).alias("location_label"),
-            pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
-            pl.from_pandas(
-                gpd.GeoSeries.from_wkb(df["geo_shape"]).apply(
-                    lambda geom: json.dumps(mapping(geom))
-                )
-            ).alias("location_geometry"),
-        ]
-    )
-
-
 def compute_regulation_fields(df: pl.DataFrame):
     """
     Compute all regulation fields for PostApiRegulationsAddBody.
