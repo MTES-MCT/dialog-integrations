@@ -192,6 +192,7 @@ def compute_location_fields(df: pl.DataFrame):
         ]
     )
 
+
 def compute_regulation_fields(df: pl.DataFrame):
     """
     Compute all regulation fields for PostApiRegulationsAddBody.
