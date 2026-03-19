@@ -1,11 +1,7 @@
 """Data source integration for Aveyron : prescriptions-routieres-du-departement"""
 
-import json
-
-import geopandas as gpd
 import polars as pl
 from loguru import logger
-from shapely.geometry import mapping
 
 from api.dia_log_client.models import (
     DirectionEnum,

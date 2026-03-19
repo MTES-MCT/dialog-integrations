@@ -425,6 +425,7 @@ dependencies = [
     { name = "geopandas" },
     { name = "ipdb" },
     { name = "jupyter" },
+    { name = "jupyterlab-geojson" },
     { name = "loguru" },
     { name = "mypy" },
     { name = "numpy" },
@@ -450,6 +451,7 @@ requires-dist = [
     { name = "geopandas", specifier = ">=1.1.2" },
     { name = "ipdb", specifier = ">=0.13.13" },
     { name = "jupyter", specifier = ">=1.1.1" },
+    { name = "jupyterlab-geojson", specifier = ">=3.4.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "mypy", specifier = ">=1.11.0" },
     { name = "numpy", specifier = "!=2.4.0" },
@@ -966,6 +968,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ac/d5/730628e03fff2e8a8e8ccdaedde1489ab1309f9a4fa2536248884e30b7c7/jupyterlab-4.5.6.tar.gz", hash = "sha256:642fe2cfe7f0f5922a8a558ba7a0d246c7bc133b708dfe43f7b3a826d163cf42", size = 23970670, upload-time = "2026-03-11T14:17:04.531Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e1/1b/dad6fdcc658ed7af26fdf3841e7394072c9549a8b896c381ab49dd11e2d9/jupyterlab-4.5.6-py3-none-any.whl", hash = "sha256:d6b3dac883aa4d9993348e0f8e95b24624f75099aed64eab6a4351a9cdd1e580", size = 12447124, upload-time = "2026-03-11T14:17:00.229Z" },
+]
+
+[[package]]
+name = "jupyterlab-geojson"
+version = "3.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/75/c4ba4e915c077ec1de6dd3037f06bb4f1ed1c00e9d453fb3307eee9eac50/jupyterlab_geojson-3.4.0.tar.gz", hash = "sha256:cc7f6015f75f7816240402880134cd7174af64fbef010b1556071729f98a291f", size = 570324, upload-time = "2023-05-23T12:26:07.703Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7c/6d/113e7d1fd8deedda14fc1a3ad3ad8e98a73dc72b7e6d2cafe032c1c16521/jupyterlab_geojson-3.4.0-py3-none-any.whl", hash = "sha256:56d9bed9253d0a3b4c6e5ae8ac0685039bfb43775cd356e4979bdf147e89dfc5", size = 83184, upload-time = "2023-05-23T12:25:30.616Z" },
 ]
 
 [[package]]
