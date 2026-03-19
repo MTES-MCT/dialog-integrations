@@ -9,6 +9,7 @@ from integrations.co_brest.integration import Integration
 from integrations.co_brest.permanent_lineaire.data_source_integration import (
     DataSourceIntegration,
     compute_period_fields,
+    compute_regulation_fields
 )
 from integrations.co_brest.permanent_lineaire.schema import Schema
 
@@ -208,7 +209,7 @@ def test_compute_regulation_fields(data_source):
         }
     )
 
-    result = data_source.compute_regulation_fields(df)
+    result = compute_regulation_fields(df)
 
     # Check all regulation fields exist
     assert "regulation_identifier" in result.columns
@@ -244,7 +245,7 @@ def test_compute_regulation_fields_with_url(data_source):
         }
     )
 
-    result = data_source.compute_regulation_fields(df)
+    result = compute_regulation_fields(df)
 
     # Check that URL is in regulation_document_url
     assert result["regulation_document_url"][0] == "https://example.com/arrete1.pdf"
