@@ -1,28 +1,26 @@
 """Data source integration for Aveyron : prescriptions-routieres-du-departement"""
 
-import io
 import json
 
 import geopandas as gpd
-from loguru import logger
 import polars as pl
-import requests
+from loguru import logger
 from shapely.geometry import mapping
-
-from integrations.base_data_source_integration import BaseDataSourceIntegration
-from integrations.dp_aveyron.restrictions_gabarits.schema import (
-    AveyronPrescriptionsRoutieresRawDataSchema,
-)
 
 from api.dia_log_client.models import (
     DirectionEnum,
     MeasureTypeEnum,
     PostApiRegulationsAddBodyCategory,
-    PostApiRegulationsAddBodyMeasuresItemVehicleSetType0RestrictedTypesType0Item as VehicleRestrictedTypeEnum,
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
 )
-
+from api.dia_log_client.models import (
+    PostApiRegulationsAddBodyMeasuresItemVehicleSetType0RestrictedTypesType0Item as VehicleRestrictedTypeEnum,  # noqa
+)
+from integrations.base_data_source_integration import BaseDataSourceIntegration
+from integrations.dp_aveyron.restrictions_gabarits.schema import (
+    AveyronPrescriptionsRoutieresRawDataSchema,
+)
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/prescriptions-routieres-du-departement-aveyron/exports/parquet"
 LOCAL_FILE = "explorations/dp_aveyron/data/prescriptions-routieres-du-departement-aveyron.parquet"

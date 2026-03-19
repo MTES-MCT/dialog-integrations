@@ -26,9 +26,9 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
     SaveLocationDTO,
     SaveMeasureDTO,
+    SaveNumberedRoadDTO,
     SavePeriodDTO,
     SaveRawGeoJSONDTO,
-    SaveNumberedRoadDTO,
     SaveVehicleSetDTO,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration, RegulationMeasure

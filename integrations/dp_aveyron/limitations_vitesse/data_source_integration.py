@@ -1,12 +1,6 @@
 """Data source integration for Aveyron : limitations-de-vitesse-du-departement"""
 
-from loguru import logger
 import polars as pl
-
-from integrations.base_data_source_integration import BaseDataSourceIntegration
-from integrations.dp_aveyron.limitations_vitesse.schema import (
-    AveyronLimitationsVitesseRawDataSchema,
-)
 
 from api.dia_log_client.models import (
     DirectionEnum,
@@ -14,6 +8,10 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBodyCategory,
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
+)
+from integrations.base_data_source_integration import BaseDataSourceIntegration
+from integrations.dp_aveyron.limitations_vitesse.schema import (
+    AveyronLimitationsVitesseRawDataSchema,
 )
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/limitations-de-vitesse-du-departement-aveyron/exports/parquet"
