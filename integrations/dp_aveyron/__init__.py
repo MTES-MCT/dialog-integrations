@@ -1,0 +1,1 @@
+"""Aveyron integration package."""

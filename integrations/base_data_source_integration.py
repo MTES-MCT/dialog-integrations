@@ -23,8 +23,19 @@ class RegulationMeasure(TypedDict):
     period_is_permanent: bool | None
     # Location fields (prefixed with location_)
     location_road_type: str
-    location_label: str
-    location_geometry: str
+    location_label: str | None
+    location_geometry: str | None
+    location_administrator: str | None
+    location_road_number: str | None
+    location_from_department_code: str | None
+    location_from_point_number: str | None
+    location_from_abscissa: int | None
+    location_from_side: str | None
+    location_to_department_code: str | None
+    location_to_point_number: str | None
+    location_to_abscissa: int | None
+    location_to_side: str | None
+    location_direction: str | None
     # Regulation fields (prefixed with regulation_)
     regulation_identifier: str
     regulation_category: str
@@ -40,6 +51,7 @@ class RegulationMeasure(TypedDict):
     vehicle_heavyweight_max_weight: float | None
     vehicle_max_height: float | None
     vehicle_max_width: float | None
+    vehicle_max_length: float | None
     vehicle_exempted_types: list[str] | None
     vehicle_restricted_types: list[str] | None
     vehicle_other_exempted_type_text: str | None

@@ -28,6 +28,7 @@ from api.dia_log_client.models import (
     SaveMeasureDTO,
     SavePeriodDTO,
     SaveRawGeoJSONDTO,
+    SaveNumberedRoadDTO,
     SaveVehicleSetDTO,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration, RegulationMeasure
@@ -92,63 +93,59 @@ class BaseIntegration:
         """
         # Get all data sources
         # Collect clean data from all sources
-        all_clean_data = []
+
+        # Get existing regulation IDs
+        integrated_regulation_ids = self.fetch_regulation_ids()
+
         for data_source in self.data_sources:
             logger.info(f"Processing data source: {data_source.name}")
             clean_data = data_source(
                 self.organization_settings, self.client
             ).compute_data_regulations()
-            all_clean_data.append(clean_data)
 
-        # Concatenate all data
-        combined_data = pl.concat(all_clean_data, how="vertical")
+            # Only process whitelisted identifiers
+            if limit_to and len(limit_to) > 0:
+                logger.info(f"Limiting processing to following ids : {limit_to}")
+                clean_data = clean_data.filter(pl.col("regulation_identifier").is_in(limit_to))
 
-        # Only process whitelisted identifiers
-        if limit_to and len(limit_to) > 0:
-            logger.info(f"Limiting processing to following ids : {limit_to}")
-            combined_data = combined_data.filter(pl.col("regulation_identifier").is_in(limit_to))
+            logger.info(f"Total records from all sources: {clean_data.shape[0]}")
 
-        logger.info(f"Total records from all sources: {combined_data.shape[0]}")
+            # Create regulations from combined data
+            regulations = self.create_regulations(clean_data)
+            for regulation in regulations:
+                regulation.identifier = f"{regulation.identifier}"
+                regulation.status = self.status
+            num_measures = sum([len(regulation.measures or []) for regulation in regulations])
+            logger.info(f"Created {len(regulations)} regulations with a total of {num_measures}")
 
-        # Create regulations from combined data
-        regulations = self.create_regulations(combined_data)
-        for regulation in regulations:
-            regulation.identifier = f"{regulation.identifier}-0"
-            regulation.status = self.status
-        num_measures = sum([len(regulation.measures or []) for regulation in regulations])
-        logger.info(f"Created {len(regulations)} regulations with a total of {num_measures}")
-
-        # Get existing regulation IDs
-        integrated_regulation_ids = self.fetch_regulation_ids()
-
-        # Filter regulations to create
-        regulation_ids_to_create = set([r.identifier for r in regulations]) - set(
-            integrated_regulation_ids
-        )
-        regulations_to_create = [
-            regulation
-            for regulation in regulations
-            if regulation.identifier in regulation_ids_to_create
-        ]
-        logger.info(f"Found {len(regulations_to_create)} new regulations to integrate")
-
-        # Integrate new regulations
-        self._integrate_regulations_add(regulations_to_create)
-
-        if update_existing:
-            # Filter regulations to update
-            regulation_ids_to_update = set([r.identifier for r in regulations]) & set(
+            # Filter regulations to create
+            regulation_ids_to_create = set([r.identifier for r in regulations]) - set(
                 integrated_regulation_ids
             )
-            regulations_to_update = [
+            regulations_to_create = [
                 regulation
                 for regulation in regulations
-                if regulation.identifier in regulation_ids_to_update
+                if regulation.identifier in regulation_ids_to_create
             ]
-            logger.info(f"Found {len(regulations_to_update)} regulations to update")
+            logger.info(f"Found {len(regulations_to_create)} new regulations to integrate")
 
-            # Integrate updated regulations
-            self._integrate_regulations_update(regulations_to_update)
+            # Integrate new regulations
+            self._integrate_regulations_add(regulations_to_create)
+
+            if update_existing:
+                # Filter regulations to update
+                regulation_ids_to_update = set([r.identifier for r in regulations]) & set(
+                    integrated_regulation_ids
+                )
+                regulations_to_update = [
+                    regulation
+                    for regulation in regulations
+                    if regulation.identifier in regulation_ids_to_update
+                ]
+                logger.info(f"Found {len(regulations_to_update)} regulations to update")
+
+                # Integrate updated regulations
+                self._integrate_regulations_update(regulations_to_update)
 
     def publish_regulations(self) -> None:
         regulation_ids = self.fetch_regulation_ids()
@@ -271,7 +268,7 @@ class BaseIntegration:
                 status=PostApiRegulationsAddBodyStatus(self.status),
                 subject=PostApiRegulationsAddBodySubject(first_row["regulation_subject"]),
                 title=first_row["regulation_title"],
-                other_category_text=first_row["regulation_other_category_text"],
+                other_category_text=first_row.get("regulation_other_category_text"),
                 measures=measures,  # type: ignore
             )
 
@@ -296,10 +293,10 @@ class BaseIntegration:
             if key.startswith("period_"):
                 field_name = key.replace("period_", "", 1)
                 period_fields[field_name] = value
-
+        
         return SavePeriodDTO(**period_fields)
 
-    def create_save_location_dto(self, measure: RegulationMeasure) -> SaveLocationDTO:
+    def create_save_location_dto(self, measure: RegulationMeasure) -> SaveLocationDTO|SaveNumberedRoadDTO:
         """
         Create a SaveLocationDTO from a RegulationMeasure with location_ prefixed fields.
         Expects location_road_type (string), location_label, and location_geometry fields.
@@ -307,13 +304,30 @@ class BaseIntegration:
         road_type_value = measure["location_road_type"]
         road_type = RoadTypeEnum(road_type_value)
 
-        return SaveLocationDTO(
-            road_type=road_type,
-            raw_geo_json=SaveRawGeoJSONDTO(
-                label=measure["location_label"],
-                geometry=measure["location_geometry"],
-            ),
-        )
+
+        location_fields = {}
+        for key, value in measure.items():
+            if key.startswith("location_") and key != "location_road_type":
+                field_name = key.replace("location_", "", 1)
+                location_fields[field_name] = value
+        if road_type == RoadTypeEnum.RAWGEOJSON:
+            return SaveLocationDTO(
+                road_type=road_type,
+                raw_geo_json=SaveRawGeoJSONDTO(
+                    **location_fields
+                ),
+            )
+        elif road_type in [RoadTypeEnum.DEPARTMENTALROAD, RoadTypeEnum.NATIONALROAD]:
+            payload = {
+                "road_type":road_type,
+                ("national_road" 
+                    if road_type == RoadTypeEnum.NATIONALROAD 
+                    else "departmental_road"
+                ) : SaveNumberedRoadDTO(**location_fields)
+            }
+            return SaveLocationDTO(**payload)
+        else:
+            raise Exception(f"Location saving not implemented for  RoadType {road_type.value}")
 
     def create_save_vehicle_dto(self, measure: RegulationMeasure) -> SaveVehicleSetDTO:
         """
