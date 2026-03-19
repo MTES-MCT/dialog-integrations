@@ -5,9 +5,7 @@ from .restrictions_gabarits.data_source_integration import (
     DataSourceIntegration as RestrictionGabarits,
 )
 
-from .limitations_vitesse.data_source_integration import (
-    DataSourceIntegration as LimitationsVitesse
-)
+from .limitations_vitesse.data_source_integration import DataSourceIntegration as LimitationsVitesse
 
 
 class Integration(BaseIntegration):

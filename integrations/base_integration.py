@@ -293,17 +293,18 @@ class BaseIntegration:
             if key.startswith("period_"):
                 field_name = key.replace("period_", "", 1)
                 period_fields[field_name] = value
-        
+
         return SavePeriodDTO(**period_fields)
 
-    def create_save_location_dto(self, measure: RegulationMeasure) -> SaveLocationDTO|SaveNumberedRoadDTO:
+    def create_save_location_dto(
+        self, measure: RegulationMeasure
+    ) -> SaveLocationDTO | SaveNumberedRoadDTO:
         """
         Create a SaveLocationDTO from a RegulationMeasure with location_ prefixed fields.
         Expects location_road_type (string), location_label, and location_geometry fields.
         """
         road_type_value = measure["location_road_type"]
         road_type = RoadTypeEnum(road_type_value)
-
 
         location_fields = {}
         for key, value in measure.items():
@@ -313,17 +314,16 @@ class BaseIntegration:
         if road_type == RoadTypeEnum.RAWGEOJSON:
             return SaveLocationDTO(
                 road_type=road_type,
-                raw_geo_json=SaveRawGeoJSONDTO(
-                    **location_fields
-                ),
+                raw_geo_json=SaveRawGeoJSONDTO(**location_fields),
             )
         elif road_type in [RoadTypeEnum.DEPARTMENTALROAD, RoadTypeEnum.NATIONALROAD]:
             payload = {
-                "road_type":road_type,
-                ("national_road" 
-                    if road_type == RoadTypeEnum.NATIONALROAD 
+                "road_type": road_type,
+                (
+                    "national_road"
+                    if road_type == RoadTypeEnum.NATIONALROAD
                     else "departmental_road"
-                ) : SaveNumberedRoadDTO(**location_fields)
+                ): SaveNumberedRoadDTO(**location_fields),
             }
             return SaveLocationDTO(**payload)
         else:
