@@ -9,7 +9,7 @@ from integrations.co_brest.integration import Integration
 from integrations.co_brest.permanent_lineaire.data_source_integration import (
     DataSourceIntegration,
     compute_period_fields,
-    compute_regulation_fields
+    compute_regulation_fields,
 )
 from integrations.co_brest.permanent_lineaire.schema import Schema
 
