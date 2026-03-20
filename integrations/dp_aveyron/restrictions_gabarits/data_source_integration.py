@@ -1,6 +1,9 @@
 """Data source integration for Aveyron : prescriptions-routieres-du-departement"""
 
+import io
+
 import polars as pl
+import requests
 from loguru import logger
 
 from api.dia_log_client.models import (
@@ -29,13 +32,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "restrictions_gabarits"
 
     def fetch_raw_data(self):
-        # logger.info(f"Downloading data from {URL}")
+        logger.info(f"Downloading data from {URL}")
 
-        # r = requests.get(URL)
-        # r.raise_for_status()
+        r = requests.get(URL)
+        r.raise_for_status()
 
-        # df = pl.read_parquet(io.BytesIO(r.content))
-        df = pl.read_parquet(LOCAL_FILE)
+        df = pl.read_parquet(io.BytesIO(r.content))
 
         return df
 
@@ -202,7 +204,7 @@ def compute_regulation_fields(df: pl.DataFrame):
     """
     return df.with_columns(
         [
-            (pl.lit("12-restriction-") + pl.col("objectid").cast(pl.Utf8)).alias(
+            (pl.col("objectid").cast(pl.Utf8) + pl.lit("/RESTRICTION-GABARIT")).alias(
                 "regulation_identifier"
             ),
             pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(
