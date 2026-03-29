@@ -5,11 +5,13 @@ from .limitations_vitesse.data_source_integration import DataSourceIntegration a
 from .restrictions_gabarits.data_source_integration import (
     DataSourceIntegration as RestrictionGabarits,
 )
+from .chantiers_routiers.data_source_integration import DataSourceIntegration as ChantiersRoutiers
 
 
 class Integration(BaseIntegration):
     """Main integration class for Sarthe - coordinates multiple data sources."""
 
-    status = PostApiRegulationsAddBodyStatus.PUBLISHED
+    status = PostApiRegulationsAddBodyStatus.DRAFT
 
-    data_sources = [LimitationsVitesse, RestrictionGabarits]
+    # data_sources = [LimitationsVitesse, RestrictionGabarits, ChantiersRoutiers]
+    data_sources = [ChantiersRoutiers]
