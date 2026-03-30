@@ -23,7 +23,8 @@ from integrations.base_data_source_integration import BaseDataSourceIntegration
 
 from .schema import Schema
 
-URL = "https://www.data.gouv.fr/api/1/datasets/r/3ca7bd06-6489-45a2-aee9-efc6966121b2"
+# URL = "https://www.data.gouv.fr/api/1/datasets/r/3ca7bd06-6489-45a2-aee9-efc6966121b2"
+URL = "https://echanges.brest-metropole.fr/VIPDU72/GPB/DEP_ARR_CIRC_STAT_L_V.zip"
 FILENAME = "DEP_ARR_CIRC_STAT_L_V.shp"
 
 transformer = Transformer.from_crs("EPSG:2154", "EPSG:4326", always_xy=True)
