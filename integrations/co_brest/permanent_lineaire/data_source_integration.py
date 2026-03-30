@@ -153,7 +153,7 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
     # Add regulation fields
     df = df.with_columns(
         [
-            pl.col("NOARR").alias("regulation_identifier"),
+            (pl.col("NOARR") + pl.lit("-0")).alias("regulation_identifier"),
             pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(
                 "regulation_category"
             ),
