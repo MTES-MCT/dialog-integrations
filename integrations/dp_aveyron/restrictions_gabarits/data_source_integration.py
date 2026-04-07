@@ -1,11 +1,10 @@
 """Data source integration for Aveyron : prescriptions-routieres-du-departement"""
 
-import json
+import io
 
-import geopandas as gpd
 import polars as pl
+import requests
 from loguru import logger
-from shapely.geometry import mapping
 
 from api.dia_log_client.models import (
     DirectionEnum,
@@ -15,7 +14,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from api.dia_log_client.models import (
-    PostApiRegulationsAddBodyMeasuresItemVehicleSetType0RestrictedTypesType0Item as VehicleRestrictedTypeEnum,
+    PostApiRegulationsAddBodyMeasuresItemVehicleSetType0RestrictedTypesType0Item as VehicleRestrictedTypeEnum,  # noqa
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_aveyron.restrictions_gabarits.schema import (
@@ -33,13 +32,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "restrictions_gabarits"
 
     def fetch_raw_data(self):
-        # logger.info(f"Downloading data from {URL}")
+        logger.info(f"Downloading data from {URL}")
 
-        # r = requests.get(URL)
-        # r.raise_for_status()
+        r = requests.get(URL)
+        r.raise_for_status()
 
-        # df = pl.read_parquet(io.BytesIO(r.content))
-        df = pl.read_parquet(LOCAL_FILE)
+        df = pl.read_parquet(io.BytesIO(r.content))
 
         return df
 
@@ -179,9 +177,7 @@ def compute_location_fields(df: pl.DataFrame):
             pl.lit(RoadTypeEnum.DEPARTMENTALROAD.value).alias("location_road_type"),
             pl.col("idroute").str.split("_").list.last().alias("location_road_number"),
             pl.lit("12").alias("location_from_department_code"),
-            # pl.col("prdeb").cast(pl.Utf8).alias("location_from_point_number"),
-            pl.lit("12##4").cast(pl.Utf8).alias("location_from_point_number"),
-            pl.lit("").cast(pl.Utf8).alias("location_from_point_number"),
+            pl.col("prdeb").cast(pl.Utf8).alias("location_from_point_number"),
             pl.col("absdeb").alias("location_from_abscissa"),
             pl.lit("U").alias("location_from_side"),
             pl.lit("12").alias("location_to_department_code"),
@@ -189,48 +185,6 @@ def compute_location_fields(df: pl.DataFrame):
             pl.col("absfin").alias("location_to_abscissa"),
             pl.lit("U").alias("location_to_side"),
             pl.lit(DirectionEnum.BOTH.value).alias("location_direction"),
-        ]
-    )
-
-
-def compute_location_fields_geojson(df: pl.DataFrame):
-    """
-    Compute all location fields for SaveLocationDTO.
-    - location_road_type: always RoadTypeEnum.RAWGEOJSON
-    - location_label: D98 (Aveyron) du PR 28+881 au PR 32+444
-    - location_geometry: from geo_shape
-
-    Filter out rows where geo_shape is null or undefined.
-    """
-    # Count rows with null geo_shape before filtering
-    n_null_geometry = df.select(pl.col("geo_shape").is_null().sum()).item()
-    if n_null_geometry > 0:
-        logger.warning(
-            f"Dropping {n_null_geometry} rows with null geo_shape (no geometry available)"
-        )
-
-    # Filter out rows where geo_shape is null
-    df = df.filter(pl.col("geo_shape").is_not_null())
-
-    return df.with_columns(
-        [
-            (
-                pl.col("idroute").str.split("_").list.last()
-                + pl.lit(" (Aveyron) du PR ")
-                + pl.col("prdeb").cast(pl.Utf8)
-                + pl.lit("+")
-                + pl.col("absdeb").cast(pl.Utf8)
-                + pl.lit(" au PR ")
-                + pl.col("prfin").cast(pl.Utf8)
-                + pl.lit("+")
-                + pl.col("absfin").cast(pl.Utf8)
-            ).alias("location_label"),
-            pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
-            pl.from_pandas(
-                gpd.GeoSeries.from_wkb(df["geo_shape"]).apply(
-                    lambda geom: json.dumps(mapping(geom))
-                )
-            ).alias("location_geometry"),
         ]
     )
 
@@ -248,7 +202,7 @@ def compute_regulation_fields(df: pl.DataFrame):
     """
     return df.with_columns(
         [
-            (pl.lit("12-restriction-") + pl.col("objectid").cast(pl.Utf8)).alias(
+            (pl.col("objectid").cast(pl.Utf8) + pl.lit("/RESTRICTION-GABARIT")).alias(
                 "regulation_identifier"
             ),
             pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(

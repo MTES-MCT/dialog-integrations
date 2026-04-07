@@ -1,4 +1,3 @@
-
 import polars as pl
 
 from api.dia_log_client.models import (
