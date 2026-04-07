@@ -19,7 +19,6 @@ def test_full_pipeline_integration(organization, monkeypatch):
 
     # Get data sources and mock their fetch_raw_data to load actual CSV data
     for data_source_integration in integration.data_sources:
-        
 
         def mock_fetch_raw_data(_, name=data_source_integration.name):
             return pl.read_csv(f"tests/{organization}/{name}.csv", separator=",")
