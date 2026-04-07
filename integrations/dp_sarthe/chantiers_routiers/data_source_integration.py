@@ -1,10 +1,5 @@
-from datetime import date
-
-from integrations.base_data_source_integration import BaseDataSourceIntegration
-from integrations.dp_sarthe.chantiers_routiers.schema import SartheChantiersRoutiersSchema
 
 import polars as pl
-import requests
 
 from api.dia_log_client.models import (
     DirectionEnum,
@@ -13,7 +8,8 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
 )
-
+from integrations.base_data_source_integration import BaseDataSourceIntegration
+from integrations.dp_sarthe.chantiers_routiers.schema import SartheChantiersRoutiersSchema
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_chantiers_routiers/exports/parquet"
 LOCAL_FILE = "explorations/dp_sarthe/data/227200029_chantiers_routiers.parquet"
@@ -21,6 +17,7 @@ LOCAL_FILE = "explorations/dp_sarthe/data/227200029_chantiers_routiers.parquet"
 
 class DataSourceIntegration(BaseDataSourceIntegration):
     """Data source for Prescription Routière du Département"""
+
     raw_data_schema = SartheChantiersRoutiersSchema
     name = "chantiers_routiers"
 
@@ -37,33 +34,30 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def compute_clean_data(self, raw_data):
         return (
-            raw_data
-            .pipe(compute_measure_fields)
+            raw_data.pipe(compute_measure_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
             .pipe(compute_regulation_fields)
             .pipe(compute_vehicle_fields)
         )
-    
+
 
 def compute_measure_fields(df: pl.DataFrame):
     """
     Compute mesure fields
     - measure_type_ : "NOENTRY" (travaux)
     """
-    return df.with_columns([
-        pl.when(pl.col("mode_exp").str.to_lowercase() == "alternat")
-        .then(
-            pl.lit(MeasureTypeEnum.ALTERNATEROAD.value)
-        )
-        .when(pl.col("mode_exp").str.to_lowercase().str.contains("Limitation de vitesse"))
-        .then(
-            pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value)
-        )
-        .otherwise(
-            pl.lit(MeasureTypeEnum.NOENTRY.value)
-        ).alias("measure_type_"),
-    ])
+    return df.with_columns(
+        [
+            pl.when(pl.col("mode_exp").str.to_lowercase() == "alternat")
+            .then(pl.lit(MeasureTypeEnum.ALTERNATEROAD.value))
+            .when(pl.col("mode_exp").str.to_lowercase().str.contains("Limitation de vitesse"))
+            .then(pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value))
+            .otherwise(pl.lit(MeasureTypeEnum.NOENTRY.value))
+            .alias("measure_type_"),
+        ]
+    )
+
 
 def compute_period_fields(df: pl.DataFrame):
     """
@@ -86,8 +80,9 @@ def compute_period_fields(df: pl.DataFrame):
         ]
     )
 
+
 def compute_location_fields(df: pl.DataFrame):
-    """
+    r"""
     Compute all location fields for SaveLocationDTO.
     Parse the following Regexp
         (RD) (\d+) : Du (\d+)\+(\d+) au (\d+)\+(\d+)
@@ -107,50 +102,55 @@ def compute_location_fields(df: pl.DataFrame):
     """
     pattern = r"(RD) (\d+) : Du (\d+)\+(\d+) au (\d+)\+(\d+)"
 
-    return df.with_columns([
-        pl.lit("Sarthe").alias("location_administrator"),
-        pl.lit(RoadTypeEnum.DEPARTMENTALROAD.value).alias("location_road_type"),
-        (pl.lit("D")+df["loc_txt"].str.extract(pattern,2).str.strip_chars_start("0")).alias("location_road_number"),
-        pl.lit("72").alias("location_from_department_code"),
-        (df["loc_txt"].str.extract(pattern,3)).alias("location_from_point_number"),
-        (df["loc_txt"].str.extract(pattern,4).cast(int)).alias("location_from_abscissa"),
-        pl.lit("U").alias("location_from_side"),
-        pl.lit("72").alias("location_to_department_code"),
-        (df["loc_txt"].str.extract(pattern,5)).alias("location_to_point_number"),
-        (df["loc_txt"].str.extract(pattern,6).cast(int)).alias("location_to_abscissa"),
-        pl.lit("U").alias("location_to_side"),
-        pl.lit(DirectionEnum.BOTH.value).alias("location_direction"),
-    ])
+    return df.with_columns(
+        [
+            pl.lit("Sarthe").alias("location_administrator"),
+            pl.lit(RoadTypeEnum.DEPARTMENTALROAD.value).alias("location_road_type"),
+            (pl.lit("D") + df["loc_txt"].str.extract(pattern, 2).str.strip_chars_start("0")).alias(
+                "location_road_number"
+            ),
+            pl.lit("72").alias("location_from_department_code"),
+            (df["loc_txt"].str.extract(pattern, 3)).alias("location_from_point_number"),
+            (df["loc_txt"].str.extract(pattern, 4).cast(int)).alias("location_from_abscissa"),
+            pl.lit("U").alias("location_from_side"),
+            pl.lit("72").alias("location_to_department_code"),
+            (df["loc_txt"].str.extract(pattern, 5)).alias("location_to_point_number"),
+            (df["loc_txt"].str.extract(pattern, 6).cast(int)).alias("location_to_abscissa"),
+            pl.lit("U").alias("location_to_side"),
+            pl.lit(DirectionEnum.BOTH.value).alias("location_direction"),
+        ]
+    )
+
 
 def compute_regulation_fields(df: pl.DataFrame):
     """
-        Compute all regulation fields for PostApiRegulationsAddBody.
-        - regulation_identifier: from objectid (filter duplicates)
-        - regulation_category: PERMANENTREGULATION
-        - regulation_subject: OTHER
-        - regulation_title: objectid + nature + site
+    Compute all regulation fields for PostApiRegulationsAddBody.
+    - regulation_identifier: from objectid (filter duplicates)
+    - regulation_category: PERMANENTREGULATION
+    - regulation_subject: OTHER
+    - regulation_title: objectid + nature + site
 
-        Filters out rows with duplicate objectid.
+    Filters out rows with duplicate objectid.
     """
-    return df.with_columns([
-        (
-            pl.lit("72-chantiers-routiers-")
-            + pl.col("objectid").cast(pl.Utf8)
-        ).alias("regulation_identifier"),
-        pl.lit(
-            PostApiRegulationsAddBodyCategory.TEMPORARYREGULATION.value
-        ).alias("regulation_category"),
-        pl.lit(
-            PostApiRegulationsAddBodySubject.ROADMAINTENANCE.value
-        ).alias("regulation_subject"),
-        (pl.lit("Travaux : ")+pl.col("nature_trvx")).alias("regulation_title")
-    ])
+    return df.with_columns(
+        [
+            (pl.lit("72-chantiers-routiers-") + pl.col("objectid").cast(pl.Utf8)).alias(
+                "regulation_identifier"
+            ),
+            pl.lit(PostApiRegulationsAddBodyCategory.TEMPORARYREGULATION.value).alias(
+                "regulation_category"
+            ),
+            pl.lit(PostApiRegulationsAddBodySubject.ROADMAINTENANCE.value).alias(
+                "regulation_subject"
+            ),
+            (pl.lit("Travaux : ") + pl.col("nature_trvx")).alias("regulation_title"),
+        ]
+    )
+
 
 def compute_vehicle_fields(df: pl.DataFrame):
     """
     Compute all vehicle fields for SaveVehicleSetDTO.
     - vehicle_all_vehicles: true
     """
-    return df.with_columns([
-        pl.lit(True).alias("vehicle_all_vehicles")
-    ])
+    return df.with_columns([pl.lit(True).alias("vehicle_all_vehicles")])

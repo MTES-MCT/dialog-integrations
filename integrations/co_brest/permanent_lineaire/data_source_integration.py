@@ -121,6 +121,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .fill_null(False)
         )
 
+
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all regulation fields for PostApiRegulationsAddBody.
@@ -135,9 +136,7 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     # For each NOARR, we need the first row's DESCRIPTIF, LIBRU, and LIEN_URL
     # Add a row number per NOARR group to identify first row
-    df = df.with_columns(
-        pl.col("NOARR").cum_count().over("NOARR").alias("_row_num_in_regulation")
-    )
+    df = df.with_columns(pl.col("NOARR").cum_count().over("NOARR").alias("_row_num_in_regulation"))
 
     # Get the first row's title and URL for each regulation
     first_row_data = df.filter(pl.col("_row_num_in_regulation") == 1).select(
