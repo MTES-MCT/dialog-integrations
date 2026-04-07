@@ -220,7 +220,7 @@ def test_compute_regulation_fields(data_source):
     assert "regulation_document_url" in result.columns
 
     # Check values - all rows with same NOARR should have same regulation_title (from first row)
-    assert result["regulation_identifier"].to_list() == ["REG001", "REG001", "REG002"]
+    assert result["regulation_identifier"].to_list() == ["REG001-0", "REG001-0", "REG002-0"]
     assert result["regulation_title"][0] == "Limitation Vitesse – Rue A"
     assert result["regulation_title"][1] == "Limitation Vitesse – Rue A"  # Same as first row
     assert result["regulation_title"][2] == "Stationnement interdit – Rue C"
