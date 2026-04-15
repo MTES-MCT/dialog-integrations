@@ -242,7 +242,8 @@ class BaseIntegration:
 
         # Add max_speed if present and not None
         if measure["measure_type_"] == MeasureTypeEnum.SPEEDLIMITATION.value:
-            params["max_speed"] = int(measure["measure_max_speed"])  # type: ignore
+            if measure.get("measure_max_speed"):
+                params["max_speed"] = int(measure["measure_max_speed"])  # type: ignore
 
         return SaveMeasureDTO(**params)
 
