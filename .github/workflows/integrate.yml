@@ -46,6 +46,9 @@ jobs:
           else
             echo "result_${org}={\"success\":false}" >> "$GITHUB_OUTPUT"
           fi
+      - name: Fail job if integration failed
+        if: ${{ steps.integration.outputs[format('result_{0}', matrix.organization)] == '{"success":false}' }}
+        run: exit 1
 
   notify:
     runs-on: ubuntu-latest
@@ -62,5 +65,7 @@ jobs:
         run: make api:generate-client
 
       - name: Notify Mattermost
+        env:
+          MATTERMOST_WEBHOOK_URL: ${{ secrets.MATTERMOST_WEBHOOK_URL }}
         run: |
           uv run dialog notify --results '${{ toJson(needs.integrate.outputs) }}'
