@@ -25,7 +25,7 @@ URL = (
 
 LOCAL_FILE = "explorations/co_rennes/data/travaux_1_jour.parquet"
 
-MODE = "local"
+MODE = "remote"
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):

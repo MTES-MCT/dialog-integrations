@@ -4,12 +4,12 @@ from integrations.base_integration import BaseIntegration
 from .circulation_interdite.data_source_integration import (
     DataSourceIntegration as CirculationInterdite,
 )
+from .travaux_voirie.data_source_integration import DataSourceIntegration as TravauxVoirie
 
 
 class Integration(BaseIntegration):
-    """Main integration class for Aveyron - coordinates multiple data sources."""
+    """Main integration class for Rennes - coordinates multiple data sources."""
 
     status = PostApiRegulationsAddBodyStatus.PUBLISHED
 
-    # data_sources = [TravauxVoirie]#, CirculationInterdite]
-    data_sources = [CirculationInterdite]  # , ]
+    data_sources = [TravauxVoirie, CirculationInterdite]
