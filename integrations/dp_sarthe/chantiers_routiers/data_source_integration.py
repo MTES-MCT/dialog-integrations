@@ -1,4 +1,8 @@
+import io
+
 import polars as pl
+import requests
+from loguru import logger
 
 from api.dia_log_client.models import (
     DirectionEnum,
@@ -21,13 +25,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "chantiers_routiers"
 
     def fetch_raw_data(self):
-        # logger.info(f"Downloading data from {URL}")
+        logger.info(f"Downloading data from {URL}")
 
-        # r = requests.get(URL)
-        # r.raise_for_status()
+        r = requests.get(URL)
+        r.raise_for_status()
 
-        # df = pl.read_parquet(io.BytesIO(r.content))
-        df = pl.read_parquet(LOCAL_FILE)
+        df = pl.read_parquet(io.BytesIO(r.content))
 
         return df
 

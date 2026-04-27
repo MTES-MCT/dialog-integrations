@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime
 
@@ -28,19 +29,25 @@ class MattermostNotifier:
             raise
 
     def _format_message(self, results_data: dict) -> str:
-        """Format results into Mattermost message payload."""
         now = datetime.now().strftime("%d/%m/%Y %H:%M")
-
         lines = [
             "#### Rapport d'intégration Litteralis",
             f"Rapport généré le {now}.\n",
         ]
 
-        for org, result in results_data.items():
-            status = ":white_check_mark:" if result.get("success") else ":x:"
-            status_text = (
-                "Importé avec succès" if result.get("success") else "Erreur lors de l'import"
-            )
+        for key, raw in results_data.items():
+            if not key.startswith("result_"):
+                continue
+            org = key.removeprefix("result_")
+            # Each value is a JSON string like '{"success": true}'
+            try:
+                result = json.loads(raw) if isinstance(raw, str) else raw
+            except (json.JSONDecodeError, TypeError):
+                result = {}
+
+            success = result.get("success", False)
+            status = ":white_check_mark:" if success else ":x:"
+            status_text = "Importé avec succès" if success else "Erreur lors de l'import"
             lines.append(f"{status} {org} : {status_text}")
 
         return "\n".join(lines)
