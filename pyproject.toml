@@ -9,6 +9,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "fastexcel>=0.19.0",
     "geojson>=3.2.0",
     "geopandas>=1.1.2",
     "ipdb>=0.13.13",
