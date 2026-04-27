@@ -31,7 +31,7 @@ class MattermostNotifier:
     def _format_message(self, results_data: dict) -> str:
         now = datetime.now().strftime("%d/%m/%Y %H:%M")
         lines = [
-            "#### Rapport d'intégration Litteralis",
+            "#### Rapport d'intégration Open Data",
             f"Rapport généré le {now}.\n",
         ]
 
@@ -48,6 +48,6 @@ class MattermostNotifier:
             success = result.get("success", False)
             status = ":white_check_mark:" if success else ":x:"
             status_text = "Importé avec succès" if success else "Erreur lors de l'import"
-            lines.append(f"{status} {org} : {status_text}")
+            lines.append(f"{status} **{org}** : {status_text}")
 
         return "\n".join(lines)
