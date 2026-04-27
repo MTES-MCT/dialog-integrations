@@ -1,6 +1,9 @@
 """Data source integration for Aveyron : prescriptions-routieres-du-departement"""
 
+import io
+
 import polars as pl
+import requests
 from loguru import logger
 
 from api.dia_log_client.models import (
@@ -29,13 +32,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "restrictions_gabarits"
 
     def fetch_raw_data(self):
-        # logger.info(f"Downloading data from {URL}")
+        logger.info(f"Downloading data from {URL}")
 
-        # r = requests.get(URL)
-        # r.raise_for_status()
+        r = requests.get(URL)
+        r.raise_for_status()
 
-        # df = pl.read_parquet(io.BytesIO(r.content))
-        df = pl.read_parquet(LOCAL_FILE)
+        df = pl.read_parquet(io.BytesIO(r.content))
 
         return df
 
@@ -175,9 +177,7 @@ def compute_location_fields(df: pl.DataFrame):
             pl.lit(RoadTypeEnum.DEPARTMENTALROAD.value).alias("location_road_type"),
             pl.col("idroute").str.split("_").list.last().alias("location_road_number"),
             pl.lit("12").alias("location_from_department_code"),
-            # pl.col("prdeb").cast(pl.Utf8).alias("location_from_point_number"),
-            pl.lit("12##4").cast(pl.Utf8).alias("location_from_point_number"),
-            pl.lit("").cast(pl.Utf8).alias("location_from_point_number"),
+            pl.col("prdeb").cast(pl.Utf8).alias("location_from_point_number"),
             pl.col("absdeb").alias("location_from_abscissa"),
             pl.lit("U").alias("location_from_side"),
             pl.lit("12").alias("location_to_department_code"),
@@ -202,7 +202,7 @@ def compute_regulation_fields(df: pl.DataFrame):
     """
     return df.with_columns(
         [
-            (pl.lit("12-restriction-") + pl.col("objectid").cast(pl.Utf8)).alias(
+            (pl.col("objectid").cast(pl.Utf8) + pl.lit("/RESTRICTION-GABARIT")).alias(
                 "regulation_identifier"
             ),
             pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(

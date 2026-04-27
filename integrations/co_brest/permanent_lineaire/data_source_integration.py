@@ -23,7 +23,8 @@ from integrations.base_data_source_integration import BaseDataSourceIntegration
 
 from .schema import Schema
 
-URL = "https://www.data.gouv.fr/api/1/datasets/r/3ca7bd06-6489-45a2-aee9-efc6966121b2"
+# URL = "https://www.data.gouv.fr/api/1/datasets/r/3ca7bd06-6489-45a2-aee9-efc6966121b2"
+URL = "https://echanges.brest-metropole.fr/VIPDU72/GPB/DEP_ARR_CIRC_STAT_L_V.zip"
 FILENAME = "DEP_ARR_CIRC_STAT_L_V.shp"
 
 transformer = Transformer.from_crs("EPSG:2154", "EPSG:4326", always_xy=True)
@@ -153,7 +154,7 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
     # Add regulation fields
     df = df.with_columns(
         [
-            pl.col("NOARR").alias("regulation_identifier"),
+            (pl.col("NOARR") + pl.lit("-0")).alias("regulation_identifier"),
             pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(
                 "regulation_category"
             ),

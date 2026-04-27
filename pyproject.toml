@@ -26,8 +26,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
     "pyright>=1.1.408",
-    "pyshp>=3.0.3",
-    "pytest>=8.0.0",
+    "pytest>=9.0.3",
     "python-dotenv>=1.2.1",
     "ruff>=0.14.11",
     "shapely>=2.1.2",
@@ -40,7 +39,7 @@ dialog = "cli:app"
 
 [tool.setuptools]
 py-modules = ["cli", "settings"]
-packages = ["integrations", "api"]
+packages = ["integrations", "api", "notifications"]
 
 [tool.ruff]
 # Exclude auto-generated API client and standard directories

@@ -6,6 +6,102 @@
         "version": "1.0.0"
     },
     "paths": {
+        "/api/nearby-streets": {
+            "post": {
+                "tags": [
+                    "Private"
+                ],
+                "operationId": "post_api_nearby_streets",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "geometry"
+                                ],
+                                "properties": {
+                                    "geometry": {
+                                        "description": "G\u00e9om\u00e9trie GeoJSON",
+                                        "type": "object",
+                                        "example": "{\"type\": \"Point\", \"coordinates\": [2.35, 48.85]}"
+                                    },
+                                    "radius": {
+                                        "description": "Rayon de recherche en m\u00e8tres (max 500)",
+                                        "type": "integer",
+                                        "example": 100
+                                    },
+                                    "limit": {
+                                        "description": "Nombre maximum de r\u00e9sultats (max 50)",
+                                        "type": "integer",
+                                        "example": 10
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Liste des rues \u00e0 proximit\u00e9",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "properties": {
+                                            "roadName": {
+                                                "type": "string",
+                                                "example": "Rue de Rivoli"
+                                            },
+                                            "distance": {
+                                                "type": "number",
+                                                "format": "float",
+                                                "example": 12.3
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Requ\u00eate invalide (g\u00e9om\u00e9trie GeoJSON manquante)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "GeoJSON geometry required"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Erreur interne lors de la recherche",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Nearby streets query failed"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/regulations": {
             "get": {
                 "tags": [

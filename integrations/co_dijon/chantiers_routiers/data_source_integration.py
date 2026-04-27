@@ -1,12 +1,20 @@
+import io
 import json
 
 import geopandas as gpd
 import polars as pl
+import requests
 from loguru import logger
 from shapely.geometry import mapping
 
+from api.dia_log_client.api.private.post_api_nearby_streets import (
+    sync_detailed as _get_reverse_label,
+)
 from api.dia_log_client.models import (
     MeasureTypeEnum,
+    PostApiNearbyStreetsBody,
+    PostApiNearbyStreetsBodyGeometry,
+    PostApiNearbyStreetsResponse200Item,
     PostApiRegulationsAddBodyCategory,
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
@@ -27,19 +35,19 @@ LOCAL_FILE = "explorations/co_dijon/data/travaux.csv"
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
-    """Data source for Sarthe limitations vitesse CSV data."""
+    """Data source for Dijon chantiers routiers CSV data."""
 
     raw_data_schema = DijonChantiersRoutiersSchema
     name = "limitation_vitesse"
 
     def fetch_raw_data(self):
-        # logger.info(f"Downloading data from {URL}")
+        logger.info(f"Downloading data from {URL}")
 
-        # r = requests.get(URL)
-        # r.raise_for_status()
+        r = requests.get(URL)
+        r.raise_for_status()
 
-        # df = pl.read_csv(io.BytesIO(r.content))
-        df = pl.read_csv(LOCAL_FILE)
+        df = pl.read_csv(io.BytesIO(r.content))
+        # df = pl.read_csv(LOCAL_FILE)
 
         return df
 
@@ -47,9 +55,78 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         return (
             raw_data.pipe(compute_measure_fields)
             .pipe(compute_period_fields)
-            .pipe(compute_location_fields)
+            .pipe(self.compute_location_fields)
             .pipe(compute_regulation_fields)
             .pipe(compute_vehicle_fields)
+        )
+
+    def compute_location_fields(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Defined in class to be able to use `api.client`
+        Compute all location fields for SaveLocationDTO.
+        - location_road_type: always RoadTypeEnum.RAWGEOJSON for Dijon
+        - location_geometry: from geometry field (WKB) transformed to GeoJSON (WGS84)
+        Filter out rows where geometry is null.
+        """
+        # Count rows with null geometry before filtering
+        n_null_geometry = df.select(pl.col("geometry").is_null().sum()).item()
+        if n_null_geometry > 0:
+            logger.warning(f"Dropping {n_null_geometry} rows with null geometry")
+
+        # Filter out rows where geometry is null
+        df = df.filter(pl.col("geometry").is_not_null())
+
+        dfcoords = df.select(
+            [
+                df["geo_point_2d"]
+                .str.split_exact(",", 1)
+                .struct.rename_fields(["latitude", "longitude"])
+                .alias("point_coords")
+            ]
+        ).unnest("point_coords")
+
+        geometry = pl.Series(
+            [
+                json.dumps(mapping(geom))
+                for geom in gpd.points_from_xy(
+                    dfcoords["longitude"], dfcoords["latitude"], crs="EPSG:2154"
+                )
+            ]
+        )
+
+        def reverse_geocode_label(point):
+            logger.info(f"Reverse geocoding {point}...")
+            try:
+                resp = _get_reverse_label(
+                    client=self.client,
+                    body=PostApiNearbyStreetsBody(
+                        geometry=PostApiNearbyStreetsBodyGeometry.from_dict(json.loads(point))
+                    ),
+                )
+            except Exception:
+                logger.warning(f"Failed to reverse geocode {point}")
+                return "Rue inconnue"
+
+            if resp.parsed is None:
+                logger.warning(f"Failed to reverse geocode {point}")
+                return "Rue inconnue"
+
+            found_nearby: list[PostApiNearbyStreetsResponse200Item] = resp.parsed  # type: ignore
+
+            if len(found_nearby) > 0:
+                road_name = found_nearby[0].road_name
+                logger.info(f"Found a street : {road_name}")
+                return road_name
+            return "Rue inconnue"
+
+        df = df.with_columns([geometry.map_elements(reverse_geocode_label).alias("location_label")])
+
+        return df.with_columns(
+            [
+                # Road type (always RAWGEOJSON as enum string value)
+                pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
+                geometry.alias("location_geometry"),
+            ]
         )
 
 
@@ -91,50 +168,6 @@ def compute_period_fields(df: pl.DataFrame):
             .alias("period_end_time"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(True).alias("period_is_permanent"),
-        ]
-    )
-
-
-def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all location fields for SaveLocationDTO.
-    - location_road_type: always RoadTypeEnum.RAWGEOJSON for Dijon
-    - location_geometry: from geometry field (WKB) transformed to GeoJSON (WGS84)
-    Filter out rows where geometry is null.
-    """
-    # Count rows with null geometry before filtering
-    n_null_geometry = df.select(pl.col("geometry").is_null().sum()).item()
-    if n_null_geometry > 0:
-        logger.warning(f"Dropping {n_null_geometry} rows with null geometry")
-
-    # Filter out rows where geometry is null
-    df = df.filter(pl.col("geometry").is_not_null())
-
-    dfcoords = df.select(
-        [
-            df["geo_point_2d"]
-            .str.split_exact(",", 1)
-            .struct.rename_fields(["latitude", "longitude"])
-            .alias("point_coords")
-        ]
-    ).unnest("point_coords")
-
-    geometry = pl.Series(
-        [
-            json.dumps(mapping(geom))
-            for geom in gpd.points_from_xy(
-                dfcoords["longitude"], dfcoords["latitude"], crs="EPSG:2154"
-            )
-        ]
-    )
-
-    return df.with_columns(
-        [
-            # Road type (always RAWGEOJSON as enum string value)
-            pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
-            # Label from LIBCO and LIBRU
-            pl.lit("Rue").alias("location_label"),
-            geometry.alias("location_geometry"),
         ]
     )
 

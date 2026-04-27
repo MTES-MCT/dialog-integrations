@@ -9,6 +9,7 @@ from integrations.co_brest.integration import Integration
 from integrations.co_brest.permanent_lineaire.data_source_integration import (
     DataSourceIntegration,
     compute_period_fields,
+    compute_regulation_fields,
 )
 from integrations.co_brest.permanent_lineaire.schema import Schema
 
@@ -208,7 +209,7 @@ def test_compute_regulation_fields(data_source):
         }
     )
 
-    result = data_source.compute_regulation_fields(df)
+    result = compute_regulation_fields(df)
 
     # Check all regulation fields exist
     assert "regulation_identifier" in result.columns
@@ -219,7 +220,7 @@ def test_compute_regulation_fields(data_source):
     assert "regulation_document_url" in result.columns
 
     # Check values - all rows with same NOARR should have same regulation_title (from first row)
-    assert result["regulation_identifier"].to_list() == ["REG001", "REG001", "REG002"]
+    assert result["regulation_identifier"].to_list() == ["REG001-0", "REG001-0", "REG002-0"]
     assert result["regulation_title"][0] == "Limitation Vitesse – Rue A"
     assert result["regulation_title"][1] == "Limitation Vitesse – Rue A"  # Same as first row
     assert result["regulation_title"][2] == "Stationnement interdit – Rue C"
@@ -244,7 +245,7 @@ def test_compute_regulation_fields_with_url(data_source):
         }
     )
 
-    result = data_source.compute_regulation_fields(df)
+    result = compute_regulation_fields(df)
 
     # Check that URL is in regulation_document_url
     assert result["regulation_document_url"][0] == "https://example.com/arrete1.pdf"

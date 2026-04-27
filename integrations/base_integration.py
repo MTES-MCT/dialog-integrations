@@ -95,7 +95,15 @@ class BaseIntegration:
         # Collect clean data from all sources
 
         # Get existing regulation IDs
-        integrated_regulation_ids = self.fetch_regulation_ids()
+        try:
+            integrated_regulation_ids = self.fetch_regulation_ids()
+        except Exception as e:
+            logger.info(
+                f"Could not fetch existing regulation ids"
+                f", defaulting to update_existing=False - {e}"
+            )
+            integrated_regulation_ids = []
+            update_existing = False
 
         for data_source in self.data_sources:
             logger.info(f"Processing data source: {data_source.name}")
@@ -234,7 +242,8 @@ class BaseIntegration:
 
         # Add max_speed if present and not None
         if measure["measure_type_"] == MeasureTypeEnum.SPEEDLIMITATION.value:
-            params["max_speed"] = int(measure["measure_max_speed"])  # type: ignore
+            if measure.get("measure_max_speed"):
+                params["max_speed"] = int(measure["measure_max_speed"])  # type: ignore
 
         return SaveMeasureDTO(**params)
 

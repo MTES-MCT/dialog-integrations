@@ -1,6 +1,10 @@
 """Data source integration for Aveyron : limitations-de-vitesse-du-departement"""
 
+import io
+
 import polars as pl
+import requests
+from loguru import logger
 
 from api.dia_log_client.models import (
     DirectionEnum,
@@ -26,13 +30,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "limitation_vitesse"
 
     def fetch_raw_data(self):
-        # logger.info(f"Downloading data from {URL}")
+        logger.info(f"Downloading data from {URL}")
 
-        # r = requests.get(URL)
-        # r.raise_for_status()
+        r = requests.get(URL)
+        r.raise_for_status()
 
-        # df = pl.read_parquet(io.BytesIO(r.content))
-        df = pl.read_parquet(LOCAL_FILE)
+        df = pl.read_parquet(io.BytesIO(r.content))
 
         return df
 
@@ -63,7 +66,7 @@ def compute_period_fields(df: pl.DataFrame):
     - period_start_time: None
     - period_end_time: None
     - period_recurrence_type: everyDay
-    - period_is_permanent: True
+    - period_is_permanent: False
     """
     return df.with_columns(
         [
@@ -126,7 +129,7 @@ def compute_regulation_fields(df: pl.DataFrame):
     """
     return df.with_columns(
         [
-            (pl.lit("12-limitation-vitesse-") + pl.col("objectid").cast(pl.Utf8)).alias(
+            (pl.col("objectid").cast(pl.Utf8) + pl.lit("/LIMITATION-VITESSE")).alias(
                 "regulation_identifier"
             ),
             pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(

@@ -2,24 +2,27 @@ name: integrate
 
 on:
   schedule:
-    # Run every day at midnight UTC
     - cron: '0 0 * * *'
-  push:
-    branches: ["main"]
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
   integrate:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false  # Continue even if one integration fails
+      fail-fast: false
       matrix:
-        organization: [co_brest, dp_sarthe]
-    environment: ${{ matrix.organization }}  # Use GitHub Environment per organization
+        organization: [co_brest, dp_sarthe, co_nantes, co_rennes, dp_aveyron]
+    environment: ${{ matrix.organization }}
+    outputs:
+      # One output per matrix value — names must be static
+      result_co_brest:   ${{ steps.integration.outputs.result_co_brest }}
+      result_dp_sarthe:  ${{ steps.integration.outputs.result_dp_sarthe }}
+      result_co_nantes:  ${{ steps.integration.outputs.result_co_nantes }}
+      result_co_rennes:  ${{ steps.integration.outputs.result_co_rennes }}
+      result_dp_aveyron: ${{ steps.integration.outputs.result_dp_aveyron }}
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: astral-sh/setup-uv@v3
 
       - name: Install dependencies
@@ -29,8 +32,40 @@ jobs:
         run: make api:generate-client
 
       - name: Run integration for ${{ matrix.organization }}
+        id: integration
         env:
           DIALOG_BASE_URL: ${{ secrets.DIALOG_BASE_URL }}
           DIALOG_CLIENT_ID: ${{ secrets.DIALOG_CLIENT_ID }}
           DIALOG_CLIENT_SECRET: ${{ secrets.DIALOG_CLIENT_SECRET }}
-        run: uv run dialog integrate ${{ matrix.organization }}
+        # Write a JSON result to the step output named after this org.
+        # The || block runs on failure so we still capture a result.
+        run: |
+          org="${{ matrix.organization }}"
+          if uv run dialog integrate "$org"; then
+            echo "result_${org}={\"success\":true}"  >> "$GITHUB_OUTPUT"
+          else
+            echo "result_${org}={\"success\":false}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Fail job if integration failed
+        if: ${{ steps.integration.outputs[format('result_{0}', matrix.organization)] == '{"success":false}' }}
+        run: exit 1
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: integrate
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: make app:build-ci
+
+      - name: Generate API client
+        run: make api:generate-client
+
+      - name: Notify Mattermost
+        env:
+          MATTERMOST_WEBHOOK_URL: ${{ secrets.MATTERMOST_WEBHOOK_URL }}
+        run: |
+          uv run dialog notify --results '${{ toJson(needs.integrate.outputs) }}'
