@@ -54,6 +54,7 @@ def notify(
     """Notify Mattermost with integration results."""
     try:
         results_data = json.loads(results)
+        breakpoint()
         logger.info(f"Processing integration results: {results_data}")
         notifier = MattermostNotifier()
         notifier.send_notification(results_data)

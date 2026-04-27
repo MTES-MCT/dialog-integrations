@@ -28,7 +28,6 @@ jobs:
 
       - name: Run integration for ${{ matrix.organization }}
         id: integration
-        continue-on-error: true
         env:
           DIALOG_BASE_URL: ${{ secrets.DIALOG_BASE_URL }}
           DIALOG_CLIENT_ID: ${{ secrets.DIALOG_CLIENT_ID }}
@@ -40,6 +39,13 @@ jobs:
     needs: integrate
     if: always()
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: make app:build-ci
+
       - name: Notify Mattermost
         env:
           RESULTS: ${{ toJson(needs.integrate.outputs) }}

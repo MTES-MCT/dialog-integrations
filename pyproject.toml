@@ -38,7 +38,7 @@ dialog = "cli:app"
 
 [tool.setuptools]
 py-modules = ["cli", "settings"]
-packages = ["integrations", "api"]
+packages = ["integrations", "api", "notifications"]
 
 [tool.ruff]
 # Exclude auto-generated API client and standard directories
