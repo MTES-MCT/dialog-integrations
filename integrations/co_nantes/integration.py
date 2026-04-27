@@ -5,9 +5,10 @@ from .circulation_chantier.data_source_integration import (
     DataSourceIntegration as CirculationChantier,
 )
 
+
 class Integration(BaseIntegration):
     """Main integration class for Nantes."""
 
     status = PostApiRegulationsAddBodyStatus.PUBLISHED
 
-    data_sources = [CirculationChantier]  # , ]
+    data_sources = [CirculationChantier]
