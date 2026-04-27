@@ -66,7 +66,7 @@ def compute_period_fields(df: pl.DataFrame):
     - period_start_time: None
     - period_end_time: None
     - period_recurrence_type: everyDay
-    - period_is_permanent: True
+    - period_is_permanent: False
     """
     return df.with_columns(
         [
