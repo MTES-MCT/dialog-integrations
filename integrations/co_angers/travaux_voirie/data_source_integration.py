@@ -23,9 +23,7 @@ URL = (
     "info-travaux/exports/parquet?lang=fr&timezone=Europe%2FBerlin"
 )
 
-LOCAL_FILE = "explorations/co_rennes/data/travaux_1_jour.parquet"
-
-MODE = "local"
+MODE = "remote"
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
@@ -33,21 +31,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "travaux_voirie"
 
     def fetch_raw_data(self):
-        if MODE == "remote":
-            logger.info(f"Downloading data from {URL}")
+        logger.info(f"Downloading data from {URL}")
 
-            r = requests.get(URL)
-            r.raise_for_status()
+        r = requests.get(URL)
+        r.raise_for_status()
 
-            df = pl.read_parquet(io.BytesIO(r.content))
-        elif MODE == "local":
-            logger.info(f"Opening local data from {LOCAL_FILE}")
-            df = pl.read_parquet(LOCAL_FILE)
-        else:
-            logger.error("MODE should be local or remote")
-            raise
-
-        return df
+        return pl.read_parquet(io.BytesIO(r.content))
 
     def compute_clean_data(self, raw_data):
         return (
@@ -61,7 +50,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 def compute_measure_fields(df: pl.DataFrame):
     """
-    measure_type_ : depends on type
+    measure_type_ : depends on description
     Excludes : les mesures de type "chausséee rétrécies"
     """
 
@@ -69,9 +58,9 @@ def compute_measure_fields(df: pl.DataFrame):
         [
             pl.when(pl.col("description").str.contains("Circulation interdite"))
             .then(pl.lit(MeasureTypeEnum.NOENTRY.value))
-            .when(pl.col("type").str.contains("Circulation alternée"))
+            .when(pl.col("description").str.contains("Circulation alternée"))
             .then(pl.lit(MeasureTypeEnum.ALTERNATEROAD.value))
-            .when(pl.col("type").str.contains("Interdiction de stationnement"))
+            .when(pl.col("description").str.contains("Interdiction de stationnement"))
             .then(pl.lit(MeasureTypeEnum.PARKINGPROHIBITED.value))
             .otherwise(pl.lit(None))
             .alias("measure_type_"),
@@ -88,20 +77,20 @@ def compute_measure_fields(df: pl.DataFrame):
 def compute_period_fields(df: pl.DataFrame):
     """
     Compute all period fields for SavePeriodDTO.
-    - period_start_date: startAt
-    - period_end_date: endAt
-    - period_start_time: startAt
-    - period_end_time: endAt
+    - period_start_date: startat
+    - period_end_date: endat
+    - period_start_time: startat
+    - period_end_time: endat
     - period_recurrence_type: everyDay
     - period_is_permanent: True
     """
 
     return df.with_columns(
         [
-            pl.col("startAt").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_date"),
-            pl.col("endAt").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_date"),
-            pl.col("startAt").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_time"),
-            pl.col("endAt").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_time"),
+            pl.col("startat").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_date"),
+            pl.col("endat").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_date"),
+            pl.col("startat").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_time"),
+            pl.col("endat").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_time"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(False).alias("period_is_permanent"),
         ]
