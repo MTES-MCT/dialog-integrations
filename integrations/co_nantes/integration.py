@@ -9,6 +9,6 @@ from .circulation_chantier.data_source_integration import (
 class Integration(BaseIntegration):
     """Main integration class for Nantes."""
 
-    status = PostApiRegulationsAddBodyStatus.PUBLISHED
+    status = PostApiRegulationsAddBodyStatus.DRAFT
 
     data_sources = [CirculationChantier]
