@@ -148,7 +148,7 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all regulation fields for PostApiRegulationsAddBody.
-    - regulation_identifier: from objectid field
+    - regulation_identifier: from gid field
     - regulation_category: TEMPORARYREGULATION
     - regulation_subject: ROADMAINTENANCE
     - regulation_title: "{DESCRIPTIF} – {LIBRU}"
@@ -158,7 +158,7 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     return df.with_columns(
         [
-            (pl.lit("44/") + pl.col("objectid").cast(pl.Utf8) + pl.lit("/TRAVAUX")).alias(
+            (pl.lit("44/") + pl.col("gid").cast(pl.Utf8) + pl.lit("/TRAVAUX")).alias(
                 "regulation_identifier"
             ),
             pl.lit(PostApiRegulationsAddBodyCategory.TEMPORARYREGULATION.value).alias(
