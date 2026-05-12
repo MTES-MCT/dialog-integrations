@@ -11,13 +11,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        organization: [co_brest, dp_sarthe, co_nantes, co_rennes, dp_aveyron]
+        organization: [co_brest, dp_sarthe, co_rennes, dp_aveyron]
     environment: ${{ matrix.organization }}
     outputs:
       # One output per matrix value — names must be static
       result_co_brest:   ${{ steps.integration.outputs.result_co_brest }}
       result_dp_sarthe:  ${{ steps.integration.outputs.result_dp_sarthe }}
-      result_co_nantes:  ${{ steps.integration.outputs.result_co_nantes }}
       result_co_rennes:  ${{ steps.integration.outputs.result_co_rennes }}
       result_dp_aveyron: ${{ steps.integration.outputs.result_dp_aveyron }}
 
