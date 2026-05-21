@@ -1,58 +1,8 @@
-import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import requests
 
-# Eudonet Paris table fields
-# Values come from the "MetaInfos" endpoint
-# See: https://eudonet-partage.apps.paris.fr/eudoapi/eudoapidoc/swaggerui/#!/MetaInfos/post_MetaInfos
-
-
-# ARRETE fields
-ARRETE_TAB_ID = 1100;
-ARRETE_ID = 1101;
-ARRETE_COMPLEMENT_DE_TITRE = 1102;
-ARRETE_TYPE = 1108;
-ARRETE_DATE_DEBUT = 1109;
-ARRETE_DATE_FIN = 1110;
-
-# ARRETE_TYPE values
-TEMPORAIRE = 8;
-PERMANENT = 7;
-
-# MESURE fields
-MESURE_TAB_ID = 1200;
-MESURE_ID = 1201;
-MESURE_NOM = 1202;
-MESURE_ALINEA = 1294;
-MEASURE_NOM_CIRCULATION_INTERDITE_DB_VALUE = '103';
-
-# LOCALISATION fields
-LOCALISATION_TAB_ID = 2700;
-LOCALISATION_ID = 2701;
-LOCALISATION_PORTE_SUR = 2705;
-LOCALISATION_ARRONDISSEMENT = 2708;
-LOCALISATION_LIBELLE_VOIE = 2710;
-LOCALISATION_LIBELLE_VOIE_DEBUT = 2730;
-LOCALISATION_LIBELLE_VOIE_FIN = 2740;
-LOCALISATION_N_ADRESSE_DEBUT = 2720;
-LOCALISATION_N_ADRESSE_FIN = 2737;
-
-# ADRESSE fields
-ADRESSE_TAB_ID = 3400;
-ADRESSE_LIBELLE = 3401; # Called 'Liste des Adresses', but it contains the full label of the address
-ADRESSE_X_WGS84 = 3414;
-ADRESSE_Y_WGS84 = 3411;
-
-# Operators
-# See: https://eudonet-partage.apps.paris.fr/eudoapi/eudoapidoc/lexique_FR.html
-EQUALS = 0;
-AND = 1;
-OR = 2;
-GREATER_THAN = 3;
-NOT_EQUALS = 5;
-NOT_IN_LIST = 15;
 
 class EudonetClient:
     def __init__(self, base_url: str, credentials: str, logger=None, session=None):
@@ -64,7 +14,11 @@ class EudonetClient:
         self.token_expiry_date = None
 
     def ensure_authenticated(self):
-        if self.token and self.token_expiry_date and self.token_expiry_date > datetime.now(ZoneInfo("Europe/Paris")):
+        if (
+            self.token
+            and self.token_expiry_date
+            and self.token_expiry_date > datetime.now(ZoneInfo("Europe/Paris"))
+        ):
             return
 
         self.token = None
@@ -145,10 +99,14 @@ class EudonetClient:
             )
 
             data = response.json()
-            
+
             if not data["ResultInfos"]["Success"]:
-                raise Exception(f"""API Error : {data["ResultInfos"]["ErrorNumber"]} - {data["ResultInfos"]["ErrorMessage"]}""")
-            
+                raise Exception(
+                    f"""API Error : """
+                    f"""{data["ResultInfos"]["ErrorNumber"]}"""
+                    f""" - {data["ResultInfos"]["ErrorMessage"]}"""
+                )
+
             if self.logger:
                 self.logger.debug(f""" Found {data["ResultMetaData"]["TotalRows"]} total rows""")
 

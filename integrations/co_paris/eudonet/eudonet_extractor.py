@@ -1,6 +1,6 @@
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from typing import Iterator
+from zoneinfo import ZoneInfo
 
 from .eudonet_client import EudonetClient
 
@@ -13,6 +13,10 @@ class EudonetParisExtractor:
     ARRETE_TYPE = 1108
     ARRETE_DATE_DEBUT = 1109
     ARRETE_DATE_FIN = 1110
+
+    # ARRETE_TYPE values
+    PERMANENT = 7
+    TEMPORAIRE = 8
 
     # MESURE fields
     MESURE_TAB_ID = 1200
@@ -45,9 +49,6 @@ class EudonetParisExtractor:
     GREATER_THAN = 3
     NOT_EQUALS = 5
     NOT_IN_LIST = 15
-
-    # ARRETE_TYPE values
-    TEMPORAIRE = 8
 
     def __init__(self, eudonet_client: EudonetClient):
         self.eudonet_client = eudonet_client
