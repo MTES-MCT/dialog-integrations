@@ -79,7 +79,7 @@ class EudonetClient:
     def search(self, tab_id: int, list_cols: list, where_custom: dict | None = None):
         rows = []
         page_number = 1
-        max_pages = 1
+        # max_pages = 2000
         where_custom = where_custom or {}
 
         while True:
@@ -108,14 +108,16 @@ class EudonetClient:
                 )
 
             if self.logger:
-                self.logger.debug(f""" Found {data["ResultMetaData"]["TotalRows"]} total rows""")
+                self.logger.debug(tab_id)
+                self.logger.debug(where_custom)
+                self.logger.debug(f""" Found {data["ResultMetaData"]["TotalRows"]} total rows on page {page_number}""")
 
             for row in data["ResultData"]["Rows"]:
                 fields = {field["DescId"]: field["Value"] for field in row["Fields"]}
                 rows.append({"fileId": row["FileId"], "fields": fields})
 
             total_pages = data["ResultMetaData"]["TotalPages"]
-            if page_number >= total_pages or page_number >= max_pages:
+            if page_number >= total_pages:# or page_number >= max_pages:
                 break
 
             page_number += 1

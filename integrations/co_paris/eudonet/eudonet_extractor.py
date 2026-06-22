@@ -104,6 +104,7 @@ class EudonetParisExtractor:
     def iter_extract(self, later_than_utc: datetime, ignore_ids: list | None = None) -> Iterator:
         if ignore_ids is None:
             ignore_ids = []
+        breakpoint()
 
         later_than_paris = later_than_utc.astimezone(ZoneInfo("Europe/Paris"))
 
