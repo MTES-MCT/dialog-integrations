@@ -26,3 +26,5 @@ dmypy.json
 
 explorations/*/data
 *.ipynb
+.ipynb_checkpoints
+sandbox/*
