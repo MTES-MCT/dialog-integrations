@@ -3,6 +3,7 @@
 import pandera.polars as pa
 from datetime import date
 
+
 class IssylesMoulineauxTravauxRawDataSchema(pa.DataFrameModel):
     reference: str
     type_travaux: str | None = pa.Field(nullable=True)
