@@ -2,6 +2,7 @@ import json
 
 import geopandas as gpd
 import polars as pl
+from .schema import TravauxVoirieRawDataSchema
 from api.dia_log_client.models import (
     MeasureTypeEnum,
     PostApiRegulationsAddBodyCategory,
@@ -12,8 +13,6 @@ from loguru import logger
 from shapely.geometry import mapping
 
 from integrations.base_data_source_integration import BaseDataSourceIntegration
-
-from .schema import TravauxVoirieRawDataSchema
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
