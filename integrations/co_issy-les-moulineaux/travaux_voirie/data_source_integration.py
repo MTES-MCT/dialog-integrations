@@ -1,16 +1,18 @@
 import json
+
 import geopandas as gpd
 import polars as pl
-from loguru import logger
-from shapely.geometry import mapping
-
 from api.dia_log_client.models import (
     MeasureTypeEnum,
     PostApiRegulationsAddBodyCategory,
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
 )
+from loguru import logger
+from shapely.geometry import mapping
+
 from integrations.base_data_source_integration import BaseDataSourceIntegration
+
 from .schema import TravauxVoirieRawDataSchema
 
 

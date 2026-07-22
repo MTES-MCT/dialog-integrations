@@ -1,7 +1,8 @@
 """Schema for Issy-les-Moulineaux Travaux Voirie"""
 
-import pandera.polars as pa
 from datetime import date
+
+import pandera.polars as pa
 
 
 class IssylesMoulineauxTravauxRawDataSchema(pa.DataFrameModel):
