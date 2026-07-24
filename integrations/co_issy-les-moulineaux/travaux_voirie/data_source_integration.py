@@ -10,11 +10,11 @@ from api.dia_log_client.models import (
 from loguru import logger
 from shapely.geometry import mapping
 from integrations.base_data_source_integration import BaseDataSourceIntegration
-from .schema import TravauxVoirieRawDataSchema
+from .schema import IssylesMoulineauxTravauxRawDataSchema
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
-    raw_data_schema = TravauxVoirieRawDataSchema
+    raw_data_schema = IssylesMoulineauxTravauxRawDataSchema
     name = "travaux_voirie"
 
     def fetch_raw_data(self):
