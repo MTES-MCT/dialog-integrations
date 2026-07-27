@@ -8,18 +8,14 @@ class AveyronLimitationsVitesseRawDataSchema(pa.DataFrameModel):
 
     geo_point_2d: bytes | None = pa.Field(nullable=True)
     geo_shape: bytes | None = pa.Field(nullable=True)
-    objectid: int
-    idroute: str | None = pa.Field(nullable=True)
-    decalage: int | None = pa.Field(nullable=True)
-    debut: int | None = pa.Field(nullable=True)
-    fin: int | None = pa.Field(nullable=True)
-    prdeb: int | None = pa.Field(nullable=True)
-    absdeb: int | None = pa.Field(nullable=True)
-    prfin: int | None = pa.Field(nullable=True)
-    absfin: int | None = pa.Field(nullable=True)
+    num_arrete: str  | None = pa.Field(nullable=True)
+    route: str | None = pa.Field(nullable=True)
+    prd: str | None = pa.Field(nullable=True)
+    abd: str | None = pa.Field(nullable=True)
+    prf: str | None = pa.Field(nullable=True)
+    abf: str | None = pa.Field(nullable=True)
     agglo: str | None = pa.Field(nullable=True)
-    limit1: int | None = pa.Field(nullable=True)
-    limit2: str | None = pa.Field(nullable=True)
+    limit: int | None = pa.Field(nullable=True)
     sens: int | None = pa.Field(nullable=True)
 
     class Config(pa.DataFrameModel.Config):

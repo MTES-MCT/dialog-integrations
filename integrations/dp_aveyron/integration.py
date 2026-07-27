@@ -12,4 +12,7 @@ class Integration(BaseIntegration):
 
     status = PostApiRegulationsAddBodyStatus.DRAFT
 
-    data_sources = [RestrictionGabarits, LimitationsVitesse]
+    data_sources = [
+                    RestrictionGabarits, 
+                    LimitationsVitesse,
+                    ]

@@ -36,7 +36,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         r.raise_for_status()
 
         df = pl.read_parquet(io.BytesIO(r.content))
-
+        breakpoint()
         return df
 
     def compute_clean_data(self, raw_data):
@@ -53,7 +53,7 @@ def compute_measure_fields(df: pl.DataFrame):
     return df.with_columns(
         [
             pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value).alias("measure_type_"),
-            pl.col("limit1").alias("measure_max_speed"),
+            pl.col("limit").alias("measure_max_speed"),
         ]
     )
 
@@ -87,12 +87,12 @@ def compute_location_fields(df: pl.DataFrame):
     - location_road_type: RoadTypeEnum.DEPARTMENTALROAD
     - location_road_number: D98 (Aveyron) du PR 28+881 au PR 32+444
     - location_from_department_code: 12
-    - location_from_point_number: from prdeb
-    - location_from_abscissa: from absdeb
+    - location_from_point_number: from prd
+    - location_from_abscissa: from abd
     - location_from_side: "U"
     - location_to_department_code: 12
-    - location_to_point_number: from prfin
-    - location_to_abscissa: from absfin
+    - location_to_point_number: from prf
+    - location_to_abscissa: from abf
     - location_to_side: "U"
     - location_direction: "BOTH"
     #NOT TRANSMITTTED- location_geometry: from geo_shape
@@ -102,14 +102,14 @@ def compute_location_fields(df: pl.DataFrame):
         [
             pl.lit("Aveyron").alias("location_administrator"),
             pl.lit(RoadTypeEnum.DEPARTMENTALROAD.value).alias("location_road_type"),
-            pl.col("idroute").str.split("_").list.last().alias("location_road_number"),
+            pl.col("route").str.split("_").list.last().alias("location_road_number"),
             pl.lit("12").alias("location_from_department_code"),
-            pl.col("prdeb").cast(pl.Utf8).alias("location_from_point_number"),
-            pl.col("absdeb").alias("location_from_abscissa"),
+            pl.col("prd").cast(pl.Utf8).alias("location_from_point_number"),
+            pl.col("abd").alias("location_from_abscissa"),
             pl.lit("U").alias("location_from_side"),
             pl.lit("12").alias("location_to_department_code"),
-            pl.col("prfin").cast(pl.Utf8).alias("location_to_point_number"),
-            pl.col("absfin").alias("location_to_abscissa"),
+            pl.col("prf").cast(pl.Utf8).alias("location_to_point_number"),
+            pl.col("abf").alias("location_to_abscissa"),
             pl.lit("U").alias("location_to_side"),
             pl.lit(DirectionEnum.BOTH.value).alias("location_direction"),
         ]
@@ -119,17 +119,27 @@ def compute_location_fields(df: pl.DataFrame):
 def compute_regulation_fields(df: pl.DataFrame):
     """
     Compute all regulation fields for PostApiRegulationsAddBody.
-    - regulation_identifier: from objectid (filter duplicates)
+    - regulation_identifier: from num_arrete (filter duplicates)
     - regulation_category: PERMANENTREGULATION
     - regulation_subject: OTHER
-    - regulation_title: objectid + nature + site
+    - regulation_title: num_arrete + nature + site
     - regulation_other_category_text: "Circulation"
 
-    Filters out rows with duplicate objectid.
+    Filters out rows with empty num_arrete.
     """
+
+    empty_num_arrete = pl.col("num_arrete").is_null() | (pl.col("num_arrete") == "")
+
+    num_dropped = df.select(empty_num_arrete.sum()).item()
+    logger.warning(f"Dropping {num_dropped} rows where num_arrete is empty")
+    # /!\/!\ Dropping 4708 rows where num_arrete is empty
+    df = df.filter(~empty_num_arrete)
+
+    breakpoint()
+
     return df.with_columns(
         [
-            (pl.col("objectid").cast(pl.Utf8) + pl.lit("/LIMITATION-VITESSE")).alias(
+            (pl.col("num_arrete").cast(pl.Utf8) + pl.lit("/LIMITATION-VITESSE")).alias(
                 "regulation_identifier"
             ),
             pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(
