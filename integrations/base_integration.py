@@ -26,6 +26,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
     SaveLocationDTO,
     SaveMeasureDTO,
+    SaveNamedStreetDTO,
     SaveNumberedRoadDTO,
     SavePeriodDTO,
     SaveRawGeoJSONDTO,
@@ -333,6 +334,12 @@ class BaseIntegration:
                     if road_type == RoadTypeEnum.NATIONALROAD
                     else "departmental_road"
                 ): SaveNumberedRoadDTO(**location_fields),
+            }
+            return SaveLocationDTO(**payload)
+        elif road_type == RoadTypeEnum.LANE:
+            payload = {
+                "road_type": road_type,
+                "named_street": SaveNamedStreetDTO(**location_fields),
             }
             return SaveLocationDTO(**payload)
         else:

@@ -1,3 +1,4 @@
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -12,6 +13,7 @@ class EudonetClient:
         self.session = session or requests.Session()
         self.token = None
         self.token_expiry_date = None
+        self.last_request_time = 0
 
     def ensure_authenticated(self):
         if (
@@ -37,7 +39,15 @@ class EudonetClient:
             "%Y/%m/%d %H:%M:%S",
         ).replace(tzinfo=ZoneInfo("Europe/Paris"))
 
+    def _throttle(self):
+        """Ensure no more than 1 request per second."""
+        elapsed = time.time() - self.last_request_time
+        if elapsed < 1.0:
+            time.sleep(1.0 - elapsed)
+        self.last_request_time = time.time()
+
     def request(self, method: str, path: str, headers=None, json_body=None, data=None):
+        self._throttle()
         self.ensure_authenticated()
 
         if headers is None:
@@ -110,14 +120,17 @@ class EudonetClient:
             if self.logger:
                 self.logger.debug(tab_id)
                 self.logger.debug(where_custom)
-                self.logger.debug(f""" Found {data["ResultMetaData"]["TotalRows"]} total rows on page {page_number}""")
+                self.logger.debug(
+                    f""" Found {data["ResultMetaData"]["TotalRows"]} total rows"""
+                    f""" on page {page_number}"""
+                )
 
             for row in data["ResultData"]["Rows"]:
                 fields = {field["DescId"]: field["Value"] for field in row["Fields"]}
                 rows.append({"fileId": row["FileId"], "fields": fields})
 
             total_pages = data["ResultMetaData"]["TotalPages"]
-            if page_number >= total_pages:# or page_number >= max_pages:
+            if page_number >= total_pages:  # or page_number >= max_pages:
                 break
 
             page_number += 1

@@ -1,13 +1,16 @@
-from .eudonet.data_source_integration import ParisEudonetDataSourceIntegration
+from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
+from integrations.base_integration import BaseIntegration
+from integrations.co_paris.permanents.data_source_integration import (
+    ParisEudonetDataSourceIntegration as Permanents,
+)
 
 
-class ParisIntegration:
-    source_name = "co_paris"
+class Integration(BaseIntegration):
+    """Main integration class for Paris."""
 
-    def __init__(self, config):
-        self.config = config
-        self.data_sources = [ParisEudonetDataSourceIntegration(config)]
+    status = PostApiRegulationsAddBodyStatus.DRAFT
 
-    def run(self):
-        for source in self.data_sources:
-            source.run()
+    data_sources = [
+        # Temporaires,
+        Permanents,
+    ]

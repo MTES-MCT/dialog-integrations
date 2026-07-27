@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import Iterator
 from zoneinfo import ZoneInfo
 
+from loguru import logger
+
 from .eudonet_client import EudonetClient
 
 
@@ -101,42 +103,37 @@ class EudonetParisExtractor:
             where_custom={"WhereCustoms": where_customs_all_measures},
         )
 
-    def iter_extract(self, later_than_utc: datetime, ignore_ids: list | None = None) -> Iterator:
+    def iter_extract(
+        self, type: str, later_than_utc: datetime, ignore_ids: list | None = None
+    ) -> Iterator:
         if ignore_ids is None:
             ignore_ids = []
-        breakpoint()
 
         later_than_paris = later_than_utc.astimezone(ZoneInfo("Europe/Paris"))
+
+        arrete_type_value = self.PERMANENT if type == "permanent" else self.TEMPORAIRE
 
         where_customs = [
             {
                 "Criteria": {
                     "Field": self.ARRETE_TYPE,
                     "Operator": self.EQUALS,
-                    "Value": self.TEMPORAIRE,
+                    "Value": self.PERMANENT,
                 }
-            },
-            {
-                "Criteria": {
-                    "Field": self.ARRETE_DATE_FIN,
-                    "Operator": self.GREATER_THAN,
-                    "Value": later_than_paris.strftime("%Y/%m/%d %H:%M:%S"),
-                },
-                "InterOperator": self.AND,
             },
         ]
 
-        if len(ignore_ids) > 0:
-            where_customs.append(
+        if arrete_type_value == self.TEMPORAIRE:
+            where_customs += [
                 {
                     "Criteria": {
-                        "Field": self.ARRETE_ID,
-                        "Operator": self.NOT_IN_LIST,
-                        "Value": ";".join(str(id) for id in ignore_ids),
+                        "Field": self.ARRETE_DATE_FIN,
+                        "Operator": self.GREATER_THAN,
+                        "Value": later_than_paris.strftime("%Y/%m/%d %H:%M:%S"),
                     },
                     "InterOperator": self.AND,
                 }
-            )
+            ]
 
         regulation_order_rows = self.eudonet_client.search(
             tab_id=self.ARRETE_TAB_ID,
@@ -150,12 +147,27 @@ class EudonetParisExtractor:
             where_custom={"WhereCustoms": where_customs},
         )
 
+        logger.debug(f"Found {len(regulation_order_rows)} regulations_orders")
+
+        regulation_order_row_i = 0
         for regulation_order_row in regulation_order_rows:
+            regulation_order_row_i += 1
+            if regulation_order_row["fileId"] in ignore_ids:
+                logger.debug(
+                    f"""Skipping measures for {regulation_order_row["fileId"]}"""
+                    f""" ({regulation_order_row_i} /{len(regulation_order_rows)})"""
+                )
+                continue
             row = {
                 "fileId": regulation_order_row["fileId"],
                 "fields": regulation_order_row["fields"],
                 "measures": [],
             }
+
+            logger.debug(
+                f"""Searching measures for {regulation_order_row["fileId"]}"""
+                f"""({regulation_order_row_i} /{len(regulation_order_rows)})"""
+            )
 
             mesure_rows = self.eudonet_client.search(
                 tab_id=self.MESURE_TAB_ID,
@@ -173,17 +185,19 @@ class EudonetParisExtractor:
                                 "Value": regulation_order_row["fileId"],
                             }
                         },
-                        {
-                            "Criteria": {
-                                "Field": self.MESURE_NOM,
-                                "Operator": self.EQUALS,
-                                "Value": self.MEASURE_NOM_CIRCULATION_INTERDITE_DB_VALUE,
-                            },
-                            "InterOperator": self.AND,
-                        },
+                        # {
+                        #     "Criteria": {
+                        #         "Field": self.MESURE_NOM,
+                        #         "Operator": self.EQUALS,
+                        #         "Value": self.MEASURE_NOM_CIRCULATION_INTERDITE_DB_VALUE,
+                        #     },
+                        #     "InterOperator": self.AND,
+                        # },
                     ]
                 },
             )
+
+            logger.debug(f"""Found {len(mesure_rows)} mesures""")
 
             for mesure_row in mesure_rows:
                 measure_row = {
@@ -212,6 +226,8 @@ class EudonetParisExtractor:
                         }
                     },
                 )
+
+                logger.debug(f"""Found {len(location_rows)} locations""")
 
                 for location_row in location_rows:
                     from_coords = None

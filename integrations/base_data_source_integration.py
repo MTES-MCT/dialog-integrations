@@ -36,6 +36,16 @@ class RegulationMeasure(TypedDict):
     location_to_abscissa: int | None
     location_to_side: str | None
     location_direction: str | None
+    location_city_label: str | None
+    location_city_code: str | None
+    location_road_name: str | None
+    # location_is_entire_street: bool | None
+    location_from_point_type: str | None
+    location_to_point_type: str | None
+    location_from_road_name: str | None
+    location_to_road_name: str | None
+    location_from_house_number: str | None
+    location_to_house_number: str | None
     # Regulation fields (prefixed with regulation_)
     regulation_identifier: str
     regulation_category: str
@@ -65,6 +75,7 @@ class BaseDataSourceIntegration:
 
     name: str | None = None  # Subclasses must set this
     raw_data_schema: type[pa.DataFrameModel] | None = None  # Subclasses must set this
+    mode: str | None = "dataframe"
     organization_settings: OrganizationSettings
     client: Client
 
@@ -83,9 +94,15 @@ class BaseDataSourceIntegration:
         Override this method in subclasses for custom data processing.
         """
         raw_data = self.fetch_raw_data()
-        logger.info(f"Fetched {raw_data.shape[0]} raw records")
-        validated_data = self.validate_raw_data(raw_data)
-        clean_data = validated_data.pipe(self.compute_clean_data)
+        if self.mode == "dataframe":
+            logger.info(f"Fetched {raw_data.shape[0]} raw records")
+            validated_data = self.validate_raw_data(raw_data)
+            clean_data = validated_data.pipe(self.compute_clean_data)
+        elif self.mode == "raw":
+            logger.info(f"Fetched {raw_data.__sizeof__()} bytes")
+            clean_data = self.compute_clean_data(raw_data)
+        else:
+            raise NotImplementedError(...)
         logger.info(f"After cleaning, got {clean_data.shape[0]} records")
 
         # Select only RegulationMeasure fields
