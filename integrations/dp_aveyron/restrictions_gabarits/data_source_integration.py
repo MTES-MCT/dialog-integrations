@@ -141,9 +141,9 @@ def compute_period_fields(df: pl.DataFrame):
 
     return df.with_columns(
         [
-            (pl.col("date_darre").str.to_date().dt.strftime("%Y-%m-%d") + pl.lit("T00:00:00")).alias(
-                "period_start_date"
-            ),
+            (
+                pl.col("date_darre").str.to_date().dt.strftime("%Y-%m-%d") + pl.lit("T00:00:00")
+            ).alias("period_start_date"),
             pl.lit(None).alias("period_end_date"),
             pl.lit(None).alias("period_start_time"),
             pl.lit(None).alias("period_end_time"),
@@ -202,9 +202,7 @@ def compute_regulation_fields(df: pl.DataFrame):
     """
     return df.with_columns(
         [
-            pl.col("numero_dar").cast(pl.Utf8).alias(
-                "regulation_identifier"
-            ),
+            pl.col("numero_dar").cast(pl.Utf8).alias("regulation_identifier"),
             pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(
                 "regulation_category"
             ),

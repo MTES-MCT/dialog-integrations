@@ -8,7 +8,7 @@ class AveyronLimitationsVitesseRawDataSchema(pa.DataFrameModel):
 
     geo_point_2d: bytes | None = pa.Field(nullable=True)
     geo_shape: bytes | None = pa.Field(nullable=True)
-    num_arrete: str  | None = pa.Field(nullable=True)
+    num_arrete: str | None = pa.Field(nullable=True)
     route: str | None = pa.Field(nullable=True)
     prd: str | None = pa.Field(nullable=True)
     abd: str | None = pa.Field(nullable=True)
