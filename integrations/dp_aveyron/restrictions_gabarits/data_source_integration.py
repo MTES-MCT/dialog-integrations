@@ -130,18 +130,18 @@ def compute_period_fields(df: pl.DataFrame):
     """
 
     # Count rows with null date_creation before filtering
-    n_null_date = df.select(pl.col("date_maj").is_null().sum()).item()
+    n_null_date = df.select(pl.col("date_darre").is_null().sum()).item()
     if n_null_date > 0:
         logger.warning(
             f"Dropping {n_null_date} rows with null date_creation (no start date available)"
         )
 
     # Filter out rows where date_creation is null
-    df = df.filter(pl.col("date_maj").is_not_null())
+    df = df.filter(pl.col("date_darre").is_not_null())
 
     return df.with_columns(
         [
-            (pl.col("date_maj").str.to_date().dt.strftime("%Y-%m-%d") + pl.lit("T00:00:00")).alias(
+            (pl.col("date_darre").str.to_date().dt.strftime("%Y-%m-%d") + pl.lit("T00:00:00")).alias(
                 "period_start_date"
             ),
             pl.lit(None).alias("period_end_date"),
@@ -160,12 +160,12 @@ def compute_location_fields(df: pl.DataFrame):
     - location_road_type: RoadTypeEnum.DEPARTMENTALROAD
     - location_road_number: D98
     - location_from_department_code: 12
-    - location_from_point_number: from prdeb
-    - location_from_abscissa: from absdeb
+    - location_from_point_number: from prd
+    - location_from_abscissa: from abd
     - location_from_side: "U"
     - location_to_department_code: 12
-    - location_to_point_number: from prfin
-    - location_to_abscissa: from absfin
+    - location_to_point_number: from prf
+    - location_to_abscissa: from abf
     - location_to_side: "U"
     - location_direction: "BOTH"
     #NOT TRANSMITTTED- location_geometry: from geo_shape
@@ -175,14 +175,14 @@ def compute_location_fields(df: pl.DataFrame):
         [
             pl.lit("Aveyron").alias("location_administrator"),
             pl.lit(RoadTypeEnum.DEPARTMENTALROAD.value).alias("location_road_type"),
-            pl.col("idroute").str.split("_").list.last().alias("location_road_number"),
+            pl.col("route").str.split("_").list.last().alias("location_road_number"),
             pl.lit("12").alias("location_from_department_code"),
-            pl.col("prdeb").cast(pl.Utf8).alias("location_from_point_number"),
-            pl.col("absdeb").alias("location_from_abscissa"),
+            pl.col("prd").cast(pl.Utf8).alias("location_from_point_number"),
+            pl.col("abd").alias("location_from_abscissa"),
             pl.lit("U").alias("location_from_side"),
             pl.lit("12").alias("location_to_department_code"),
-            pl.col("prfin").cast(pl.Utf8).alias("location_to_point_number"),
-            pl.col("absfin").alias("location_to_abscissa"),
+            pl.col("prf").cast(pl.Utf8).alias("location_to_point_number"),
+            pl.col("abf").alias("location_to_abscissa"),
             pl.lit("U").alias("location_to_side"),
             pl.lit(DirectionEnum.BOTH.value).alias("location_direction"),
         ]
@@ -202,7 +202,7 @@ def compute_regulation_fields(df: pl.DataFrame):
     """
     return df.with_columns(
         [
-            (pl.col("objectid").cast(pl.Utf8) + pl.lit("/RESTRICTION-GABARIT")).alias(
+            pl.col("numero_dar").cast(pl.Utf8).alias(
                 "regulation_identifier"
             ),
             pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(
@@ -210,13 +210,13 @@ def compute_regulation_fields(df: pl.DataFrame):
             ),
             pl.lit(PostApiRegulationsAddBodySubject.OTHER.value).alias("regulation_subject"),
             (
-                pl.col("arrete").cast(pl.Utf8)
+                pl.col("numero_dar").cast(pl.Utf8)
                 + pl.lit(" - ")
-                + pl.col("prescript").fill_null("")
-                + pl.lit(" - ")
-                + pl.col("commune").fill_null("")
+                + pl.col("prescripti").fill_null("")
+                # + pl.lit(" - ")
+                # + pl.col("commune").fill_null("")
             ).alias("regulation_title"),
-            pl.col("prescript").alias("regulation_other_category_text"),
+            pl.col("prescripti").alias("regulation_other_category_text"),
         ]
     )
 
