@@ -9,8 +9,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "folium>=0.20.0",
     "geojson>=3.2.0",
     "geopandas>=1.1.2",
+    "googlemaps>=4.10.0",
     "ipdb>=0.13.13",
     "jupyter>=1.1.1",
     "jupyterlab-geojson>=3.4.0",
@@ -30,6 +32,7 @@ dependencies = [
     "ruff>=0.14.11",
     "shapely>=2.1.2",
     "tabulate>=0.9.0",
+    "tdqm>=0.0.1",
     "typer>=0.20.1",
 ]
 
