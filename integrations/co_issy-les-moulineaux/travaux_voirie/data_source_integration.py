@@ -1,6 +1,7 @@
 import json
 
 import geopandas as gpd
+import httpx
 import polars as pl
 from loguru import logger
 from shapely.geometry import mapping
@@ -15,13 +16,34 @@ from integrations.base_data_source_integration import BaseDataSourceIntegration
 
 from .schema import IssylesMoulineauxTravauxRawDataSchema
 
+TRAVAUX_VOIRIE_ENDPOINT = (
+    "https://data.issy.com/api/explore/v2.1/catalog/datasets/travaux-voirie/records"
+)
+
 
 class DataSourceIntegration(BaseDataSourceIntegration):
     raw_data_schema = IssylesMoulineauxTravauxRawDataSchema
     name = "travaux_voirie"
 
     def fetch_raw_data(self):
-        return pl.read_parquet("data/travaux-voirie.parquet")
+        records = []
+        offset = 0
+        limit = 100
+
+        while True:
+            response = httpx.get(
+                TRAVAUX_VOIRIE_ENDPOINT,
+                params={"limit": limit, "offset": offset},
+            )
+            response.raise_for_status()
+            data = response.json()
+            records.extend(data["results"])
+
+            if len(data["results"]) < limit:
+                break
+            offset += limit
+
+        return pl.DataFrame(records)
 
     def compute_clean_data(self, raw_data):
         return (
@@ -30,6 +52,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_location_fields)
             .pipe(compute_regulation_fields)
             .pipe(compute_vehicle_fields)
+            .pipe(group_by_arrete)
         )
 
 
@@ -46,6 +69,10 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
             .then(pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value))
             .otherwise(pl.lit(None))
             .alias("measure_type_"),
+            pl.when(pl.col("mesure_titre").str.contains("Limitation vitesse"))
+            .then(pl.col("mesure_titre").str.extract(r"(\d+)").cast(pl.Int32))
+            .otherwise(pl.lit(None))
+            .alias("measure_max_speed"),
         ]
     )
 
@@ -61,6 +88,8 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
         [
             pl.col("date_debut").dt.strftime("%Y-%m-%dT%H:%M:%SZ").alias("period_start_date"),
             pl.col("date_fin").dt.strftime("%Y-%m-%dT%H:%M:%SZ").alias("period_end_date"),
+            pl.col("date_debut").dt.strftime("%Y-%m-%dT%H:%M:%SZ").alias("period_start_time"),
+            pl.col("date_fin").dt.strftime("%Y-%m-%dT%H:%M:%SZ").alias("period_end_time"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(False).alias("period_is_permanent"),
         ]
@@ -106,5 +135,33 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     return df.with_columns(
         [
             pl.lit(True).alias("vehicle_all_vehicles"),
+        ]
+    )
+
+
+def group_by_arrete(df: pl.DataFrame) -> pl.DataFrame:
+    scalar_cols = [
+        "period_start_date",
+        "period_end_date",
+        "period_start_time",
+        "period_end_time",
+        "period_recurrence_type",
+        "period_is_permanent",
+        "location_geometry",
+        "location_road_type",
+        "location_label",
+        "regulation_category",
+        "regulation_subject",
+        "regulation_title",
+        "regulation_other_category_text",
+        "regulation_document_url",
+        "vehicle_all_vehicles",
+    ]
+
+    return df.group_by("regulation_identifier").agg(
+        [pl.col(c).first() for c in scalar_cols]
+        + [
+            pl.col("measure_type_").alias("measure_types"),
+            pl.col("measure_max_speed").alias("measure_max_speeds"),
         ]
     )
