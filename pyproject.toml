@@ -58,7 +58,7 @@ ignore = []
 [tool.pyright]
 # Pyright configuration (used by Pylance in VSCode)
 include = ["."]
-exclude = ["**/__pycache__", ".venv", "api"]
+exclude = ["**/__pycache__", ".venv", "api", "explorations"]
 typeCheckingMode = "standard"
 pythonVersion = "3.11"
 reportMissingImports = "error"
