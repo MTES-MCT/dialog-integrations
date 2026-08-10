@@ -31,18 +31,33 @@ class Settings(BaseSettings):
     client_secret: str | None = None
 
     def __init__(self, organization: str, env: str = "dev", **data: Any):
-        # Determine which .env file to load: .env.{organization}.{env}
-        env_file = Path(f".env.{organization}.{env}")
+        candidates = []
+        if env == "dev":
+            candidates.append(Path(f".env.{env}"))
+        candidates.append(Path(f".env.{organization}.{env}"))
 
-        # Update model_config with the env_file if it exists
-        if env_file.exists():
-            logger.info(f"Loading environment variables from {env_file}")
-            self.model_config["env_file"] = str(env_file)
-        else:
-            logger.warning(f"Environment file not found: {env_file}")
+        env_files = [env_file for env_file in candidates if env_file.exists()]
+
+        for env_file in candidates:
+            if env_file in env_files:
+                logger.info(f"Loading environment variables from {env_file}")
+            else:
+                logger.debug(f"Environment file not found: {env_file}")
+
+        # report if env.prod (or other equivalent) have been created but can't be used
+        ignored_shared_file = Path(f".env.{env}")
+        if env != "dev" and ignored_shared_file.exists():
+            logger.warning(
+                f"Ignoring {ignored_shared_file}: the shared fallback identity is dev-only"
+            )
+
+        if not env_files:
+            logger.warning(f"No environment file found for {organization} ({env})")
             logger.warning("Using environment variables from CI/CD.")
 
-        super().__init__(**data)
+        # use _env_file instead of mutating self.model_config, which is shared at class
+        # level (ensures the env file doesn't leak into subsequent objects)
+        super().__init__(_env_file=env_files or None, **data)
 
 
 class OrganizationSettings:

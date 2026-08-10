@@ -124,6 +124,17 @@ DIALOG_CLIENT_ID="12345678-abcd-9876-5432-10abcdef1234"
 DIALOG_CLIENT_SECRET="XXXXXXXXXXXXXXXX-abcdefghijklmnopqrstuvwxyz"
 ```
 
+### `.env.dev` — l'identité de travail par défaut (dev uniquement)
+
+Un fichier `.env.dev` est chargé **avant** le fichier de l'organisation. Il porte l'identité utilisée par défaut, quelle que soit l'organisation passée à la CLI.
+
+Ordre de priorité en dev, du plus faible au plus fort :
+
+1. `.env.dev` ;
+2. `.env.{organization}.dev` ;
+3. variables d'environnement du processus.
+
+
 ## Organisation des dossiers
 
 * `api` : dossier non-versionné contenant le sdk généré pour l'api
