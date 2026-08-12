@@ -1,11 +1,9 @@
 import json
 
-import geopandas as gpd
 import httpx
 import polars as pl
 from loguru import logger
-from shapely.geometry import mapping
-from shapely.geometry import Point
+from shapely.geometry import Point, mapping
 
 from api.dia_log_client.models import (
     MeasureTypeEnum,
