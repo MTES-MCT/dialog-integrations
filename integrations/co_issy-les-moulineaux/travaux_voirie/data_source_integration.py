@@ -143,9 +143,10 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
             pl.lit(PostApiRegulationsAddBodySubject.ROADMAINTENANCE.value).alias(
                 "regulation_subject"
             ),
-            pl.col("description").str.slice(0, 252).map_elements(
-                lambda s: s + "..." if s and len(s) > 252 else s, return_dtype=pl.String
-            ).alias("regulation_title"),
+            pl.col("description")
+            .str.slice(0, 252)
+            .map_elements(lambda s: s + "..." if s and len(s) > 252 else s, return_dtype=pl.String)
+            .alias("regulation_title"),
             pl.col("type_travaux").alias("regulation_other_category_text"),
             pl.col("url").alias("regulation_document_url"),
         ]
