@@ -5,6 +5,7 @@ import httpx
 import polars as pl
 from loguru import logger
 from shapely.geometry import mapping
+from shapely.geometry import Point
 
 from api.dia_log_client.models import (
     MeasureTypeEnum,
@@ -43,6 +44,15 @@ class DataSourceIntegration(BaseDataSourceIntegration):
                 break
             offset += limit
 
+        for r in records:
+            titre = r.get("mesure_titre")
+            if isinstance(titre, list):
+                r["mesure_titre"] = " ".join(titre)
+
+            mesures = r.get("mesures")
+            if isinstance(mesures, list):
+                r["mesures"] = " ".join(mesures)
+
         return pl.DataFrame(records)
 
     def compute_clean_data(self, raw_data):
@@ -52,7 +62,6 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_location_fields)
             .pipe(compute_regulation_fields)
             .pipe(compute_vehicle_fields)
-            .pipe(group_by_arrete)
         )
 
 
@@ -70,7 +79,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
             .otherwise(pl.lit(None))
             .alias("measure_type_"),
             pl.when(pl.col("mesure_titre").str.contains("Limitation vitesse"))
-            .then(pl.col("mesure_titre").str.extract(r"(\d+)").cast(pl.Int32))
+            .then(pl.col("mesures").str.extract(r"(\d+)\s*km", 1).cast(pl.Int32))
             .otherwise(pl.lit(None))
             .alias("measure_max_speed"),
         ]
@@ -84,6 +93,12 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
+    df = df.with_columns(
+        [
+            pl.col("date_debut").str.to_datetime("%Y-%m-%d", strict=False),
+            pl.col("date_fin").str.to_datetime("%Y-%m-%d", strict=False),
+        ]
+    )
     return df.with_columns(
         [
             pl.col("date_debut").dt.strftime("%Y-%m-%dT%H:%M:%SZ").alias("period_start_date"),
@@ -98,20 +113,26 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     pdf = df.to_pandas()
-    gdf = gpd.GeoDataFrame(
-        pdf, geometry=gpd.GeoSeries.from_wkb(pdf["geolocalisation"]), crs="EPSG:4326"
-    )
-    pdf["location_geometry"] = gdf.geometry.apply(
-        lambda geom: json.dumps(mapping(geom)) if geom is not None else None
-    )
+
+    def to_geojson(geo):
+        if geo is None:
+            return None
+        point = Point(geo["lon"], geo["lat"])
+        return json.dumps(mapping(point))
+
+    pdf["location_geometry"] = pdf["geolocalisation"].apply(to_geojson)
     df = pl.from_pandas(pdf)
 
-    return df.with_columns(
+    df = df.with_columns(
         [
             pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
             (pl.col("rue_principal") + pl.lit(" - ") + pl.col("commune")).alias("location_label"),
         ]
     )
+
+    missing_geo = df.select(pl.col("location_geometry").is_null().sum()).item()
+    logger.warning(f"Dropping {missing_geo} rows due to missing geolocalisation")
+    return df.filter(pl.col("location_geometry").is_not_null())
 
 
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
@@ -124,7 +145,9 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
             pl.lit(PostApiRegulationsAddBodySubject.ROADMAINTENANCE.value).alias(
                 "regulation_subject"
             ),
-            pl.col("description").alias("regulation_title"),
+            pl.col("description").str.slice(0, 252).map_elements(
+                lambda s: s + "..." if s and len(s) > 252 else s, return_dtype=pl.String
+            ).alias("regulation_title"),
             pl.col("type_travaux").alias("regulation_other_category_text"),
             pl.col("url").alias("regulation_document_url"),
         ]
@@ -135,33 +158,5 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     return df.with_columns(
         [
             pl.lit(True).alias("vehicle_all_vehicles"),
-        ]
-    )
-
-
-def group_by_arrete(df: pl.DataFrame) -> pl.DataFrame:
-    scalar_cols = [
-        "period_start_date",
-        "period_end_date",
-        "period_start_time",
-        "period_end_time",
-        "period_recurrence_type",
-        "period_is_permanent",
-        "location_geometry",
-        "location_road_type",
-        "location_label",
-        "regulation_category",
-        "regulation_subject",
-        "regulation_title",
-        "regulation_other_category_text",
-        "regulation_document_url",
-        "vehicle_all_vehicles",
-    ]
-
-    return df.group_by("regulation_identifier").agg(
-        [pl.col(c).first() for c in scalar_cols]
-        + [
-            pl.col("measure_type_").alias("measure_types"),
-            pl.col("measure_max_speed").alias("measure_max_speeds"),
         ]
     )
