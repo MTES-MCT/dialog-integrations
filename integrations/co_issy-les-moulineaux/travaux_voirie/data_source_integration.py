@@ -118,9 +118,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     unsupported = df.filter(~is_published).get_column("measure_type_")
     if unsupported.len():
         counts = dict(unsupported.value_counts(sort=True).iter_rows())
-        logger.warning(
-            f"Dropping {unsupported.len()} measures requiring a segment: {counts}"
-        )
+        logger.warning(f"Dropping {unsupported.len()} measures requiring a segment: {counts}")
     return df.filter(is_published)
 
 
@@ -132,18 +130,10 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     return df.with_columns(
         [
-            pl.col("date_debut")
-            .dt.strftime("%Y-%m-%dT00:00:00Z")
-            .alias("period_start_date"),
-            pl.col("date_fin")
-            .dt.strftime("%Y-%m-%dT00:00:00Z")
-            .alias("period_end_date"),
-            pl.col("date_debut")
-            .dt.strftime("%Y-%m-%dT00:00:00Z")
-            .alias("period_start_time"),
-            pl.col("date_fin")
-            .dt.strftime("%Y-%m-%dT00:00:00Z")
-            .alias("period_end_time"),
+            pl.col("date_debut").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_date"),
+            pl.col("date_fin").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_date"),
+            pl.col("date_debut").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_time"),
+            pl.col("date_fin").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_time"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(False).alias("period_is_permanent"),
         ]
@@ -167,19 +157,14 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     # EPSG:4326: longitude, latitude.
     geometry = pl.Series(
         "location_geometry",
-        [
-            json.dumps(mapping(Point(lon, lat)))
-            for lon, lat in zip(df["lon"], df["lat"])
-        ],
+        [json.dumps(mapping(Point(lon, lat))) for lon, lat in zip(df["lon"], df["lat"])],
         dtype=pl.Utf8,
     )
 
     return df.with_columns(
         [
             pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
-            (pl.col("rue_principal") + pl.lit(" - ") + pl.col("commune")).alias(
-                "location_label"
-            ),
+            (pl.col("rue_principal") + pl.lit(" - ") + pl.col("commune")).alias("location_label"),
             geometry,
         ]
     ).drop(["lon", "lat"])
@@ -197,9 +182,7 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
             ),
             pl.when(pl.col("description").str.len_chars() > TITLE_MAX_LENGTH)
             .then(
-                pl.col("description").str.slice(
-                    0, TITLE_MAX_LENGTH - len(TITLE_ELLIPSIS)
-                )
+                pl.col("description").str.slice(0, TITLE_MAX_LENGTH - len(TITLE_ELLIPSIS))
                 + pl.lit(TITLE_ELLIPSIS)
             )
             .otherwise(pl.col("description"))
