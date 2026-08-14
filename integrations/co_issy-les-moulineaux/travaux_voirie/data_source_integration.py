@@ -19,6 +19,20 @@ TRAVAUX_VOIRIE_ENDPOINT = (
     "https://data.issy.com/api/explore/v2.1/catalog/datasets/travaux-voirie/records"
 )
 
+MEASURE_TYPE_BY_LABEL = {
+    "Barrage de voie": MeasureTypeEnum.NOENTRY.value,
+    "Circulation alternée": MeasureTypeEnum.ALTERNATEROAD.value,
+    "Stationnement gênant": MeasureTypeEnum.PARKINGPROHIBITED.value,
+    "Limitation vitesse": MeasureTypeEnum.SPEEDLIMITATION.value,
+}
+
+PUBLISHED_MEASURE_TYPES = [
+    MeasureTypeEnum.PARKINGPROHIBITED.value,
+]
+
+TITLE_MAX_LENGTH = 255
+TITLE_ELLIPSIS = "..."
+
 
 class DataSourceIntegration(BaseDataSourceIntegration):
     raw_data_schema = IssylesMoulineauxTravauxRawDataSchema
@@ -42,16 +56,21 @@ class DataSourceIntegration(BaseDataSourceIntegration):
                 break
             offset += limit
 
-        for r in records:
-            titre = r.get("mesure_titre")
-            if isinstance(titre, list):
-                r["mesure_titre"] = " ".join(titre)
-
-            mesures = r.get("mesures")
-            if isinstance(mesures, list):
-                r["mesures"] = " ".join(mesures)
-
         return pl.DataFrame(records)
+
+    def preprocess_raw_data(self, raw_data):
+        """
+        Recast raw types into augmented ones when possible :
+        str -> date
+        bytes -> pl.Struct
+        """
+        return raw_data.with_columns(
+            [
+                pl.col("date_debut").cast(pl.Utf8).str.to_date("%Y-%m-%d"),
+                pl.col("date_fin").cast(pl.Utf8).str.to_date("%Y-%m-%d"),
+                pl.col("url").cast(pl.Utf8),
+            ]
+        )
 
     def compute_clean_data(self, raw_data):
         return (
@@ -64,45 +83,67 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
+    no_measure = df.select(pl.col("mesure_titre").is_null().sum()).item()
+    if no_measure:
+        logger.warning(f"Dropping {no_measure} rows without any mesure_titre")
+    df = df.filter(pl.col("mesure_titre").is_not_null())
+
+    df = df.explode(["mesure_titre", "mesures"])
+
     df = df.with_columns(
         [
-            pl.when(pl.col("mesure_titre").str.contains("Barrage de voie"))
-            .then(pl.lit(MeasureTypeEnum.NOENTRY.value))
-            .when(pl.col("mesure_titre").str.contains("Circulation alternée"))
-            .then(pl.lit(MeasureTypeEnum.ALTERNATEROAD.value))
-            .when(pl.col("mesure_titre").str.contains("Stationnement gênant"))
-            .then(pl.lit(MeasureTypeEnum.PARKINGPROHIBITED.value))
-            .when(pl.col("mesure_titre").str.contains("Limitation vitesse"))
-            .then(pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value))
-            .otherwise(pl.lit(None))
+            pl.col("mesure_titre")
+            .replace_strict(MEASURE_TYPE_BY_LABEL, default=None, return_dtype=pl.Utf8)
             .alias("measure_type_"),
-            pl.when(pl.col("mesure_titre").str.contains("Limitation vitesse"))
-            .then(pl.col("mesures").str.extract(r"(\d+)\s*km", 1).cast(pl.Int32))
-            .otherwise(pl.lit(None))
+            pl.col("mesures")
+            .str.extract(r"(\d+)\s*km/h", 1)
+            .cast(pl.Int32)
             .alias("measure_max_speed"),
         ]
     )
 
-    null_measure_type = df.select(pl.col("measure_type_").is_null().sum()).item()
-    logger.warning(f"Dropping {null_measure_type} rows due to unable to infer restriction type")
+    unmapped = (
+        df.filter(pl.col("measure_type_").is_null())
+        .get_column("mesure_titre")
+        .value_counts(sort=True)
+    )
+    if unmapped.height:
+        logger.warning(
+            f"Dropping {unmapped.get_column('count').sum()} measures without DiaLog equivalent: "
+            f"{dict(zip(unmapped.get_column('mesure_titre'), unmapped.get_column('count')))}"
+        )
     df = df.filter(pl.col("measure_type_").is_not_null())
 
-    return df
+    is_published = pl.col("measure_type_").is_in(PUBLISHED_MEASURE_TYPES)
+    unsupported = df.filter(~is_published).get_column("measure_type_")
+    if unsupported.len():
+        counts = dict(unsupported.value_counts(sort=True).iter_rows())
+        logger.warning(
+            f"Dropping {unsupported.len()} measures requiring a segment: {counts}"
+        )
+    return df.filter(is_published)
 
 
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
-    df = df.with_columns(
-        [
-            pl.col("date_debut").str.to_datetime("%Y-%m-%d", strict=False),
-            pl.col("date_fin").str.to_datetime("%Y-%m-%d", strict=False),
-        ]
-    )
+    no_end = df.select(pl.col("date_fin").is_null().sum()).item()
+    if no_end:
+        logger.warning(f"Dropping {no_end} measures without an end date")
+    df = df.filter(pl.col("date_fin").is_not_null())
+
     return df.with_columns(
         [
-            pl.col("date_debut").dt.strftime("%Y-%m-%dT%H:%M:%SZ").alias("period_start_date"),
-            pl.col("date_fin").dt.strftime("%Y-%m-%dT%H:%M:%SZ").alias("period_end_date"),
-            pl.col("date_debut").dt.strftime("%Y-%m-%dT%H:%M:%SZ").alias("period_start_time"),
-            pl.col("date_fin").dt.strftime("%Y-%m-%dT%H:%M:%SZ").alias("period_end_time"),
+            pl.col("date_debut")
+            .dt.strftime("%Y-%m-%dT00:00:00Z")
+            .alias("period_start_date"),
+            pl.col("date_fin")
+            .dt.strftime("%Y-%m-%dT00:00:00Z")
+            .alias("period_end_date"),
+            pl.col("date_debut")
+            .dt.strftime("%Y-%m-%dT00:00:00Z")
+            .alias("period_start_time"),
+            pl.col("date_fin")
+            .dt.strftime("%Y-%m-%dT00:00:00Z")
+            .alias("period_end_time"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(False).alias("period_is_permanent"),
         ]
@@ -110,27 +151,38 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
-    pdf = df.to_pandas()
-
-    def to_geojson(geo):
-        if geo is None:
-            return None
-        point = Point(geo["lon"], geo["lat"])
-        return json.dumps(mapping(point))
-
-    pdf["location_geometry"] = pdf["geolocalisation"].apply(to_geojson)
-    df = pl.from_pandas(pdf)
-
     df = df.with_columns(
         [
-            pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
-            (pl.col("rue_principal") + pl.lit(" - ") + pl.col("commune")).alias("location_label"),
+            pl.col("geolocalisation").struct.field("lon").alias("lon"),
+            pl.col("geolocalisation").struct.field("lat").alias("lat"),
         ]
     )
 
-    missing_geo = df.select(pl.col("location_geometry").is_null().sum()).item()
-    logger.warning(f"Dropping {missing_geo} rows due to missing geolocalisation")
-    return df.filter(pl.col("location_geometry").is_not_null())
+    has_point = pl.col("lon").is_not_null() & pl.col("lat").is_not_null()
+    missing_geo = df.select((~has_point).sum()).item()
+    if missing_geo:
+        logger.warning(f"Dropping {missing_geo} rows due to missing geolocalisation")
+    df = df.filter(has_point)
+
+    # EPSG:4326: longitude, latitude.
+    geometry = pl.Series(
+        "location_geometry",
+        [
+            json.dumps(mapping(Point(lon, lat)))
+            for lon, lat in zip(df["lon"], df["lat"])
+        ],
+        dtype=pl.Utf8,
+    )
+
+    return df.with_columns(
+        [
+            pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
+            (pl.col("rue_principal") + pl.lit(" - ") + pl.col("commune")).alias(
+                "location_label"
+            ),
+            geometry,
+        ]
+    ).drop(["lon", "lat"])
 
 
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
@@ -143,9 +195,14 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
             pl.lit(PostApiRegulationsAddBodySubject.ROADMAINTENANCE.value).alias(
                 "regulation_subject"
             ),
-            pl.col("description")
-            .str.slice(0, 252)
-            .map_elements(lambda s: s + "..." if s and len(s) > 252 else s, return_dtype=pl.String)
+            pl.when(pl.col("description").str.len_chars() > TITLE_MAX_LENGTH)
+            .then(
+                pl.col("description").str.slice(
+                    0, TITLE_MAX_LENGTH - len(TITLE_ELLIPSIS)
+                )
+                + pl.lit(TITLE_ELLIPSIS)
+            )
+            .otherwise(pl.col("description"))
             .alias("regulation_title"),
             pl.col("type_travaux").alias("regulation_other_category_text"),
             pl.col("url").alias("regulation_document_url"),
