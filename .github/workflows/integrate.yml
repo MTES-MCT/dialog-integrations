@@ -64,8 +64,10 @@ jobs:
       - name: Generate API client
         run: make api:generate-client
 
-      - name: Notify Mattermost
+      - name: Notify Tchap
         env:
-          MATTERMOST_WEBHOOK_URL: ${{ secrets.MATTERMOST_WEBHOOK_URL }}
+          TCHAP_HOMESERVER_URL: ${{ secrets.TCHAP_HOMESERVER_URL }}
+          TCHAP_ROOM_ID: ${{ secrets.TCHAP_ROOM_ID }}
+          TCHAP_ACCESS_TOKEN: ${{ secrets.TCHAP_ACCESS_TOKEN }}
         run: |
           uv run dialog notify --results '${{ toJson(needs.integrate.outputs) }}'
