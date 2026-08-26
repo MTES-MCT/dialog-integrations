@@ -16,6 +16,7 @@ from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_sarthe.restrictions_gabarits.schema import (
     SartheRestrictionGabaritsRawDataSchema,
 )
+from integrations.local_time import start_of_local_day
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_restrictions_gabarits/exports/csv?lang=fr&timezone=Europe%2FLondon&use_labels=true&delimiter=%3B"
 
@@ -113,11 +114,9 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all period fields for SavePeriodDTO.
-    - period_start_date: from date_creation
+    - period_start_date: date_creation, at 00:00:00 Paris
     - period_end_date: None
-    - period_start_time: None
-    - period_end_time: None
-    - period_recurrence_type: None
+    - period_recurrence_type: everyDay
     - period_is_permanent: True
 
     Filters out rows where date_creation is not defined.
@@ -134,10 +133,8 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     return df.with_columns(
         [
-            pl.col("date_creation").alias("period_start_date"),
+            start_of_local_day(df, "date_creation").alias("period_start_date"),
             pl.lit(None).alias("period_end_date"),
-            pl.lit(None).alias("period_start_time"),
-            pl.lit(None).alias("period_end_time"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(True).alias("period_is_permanent"),
         ]

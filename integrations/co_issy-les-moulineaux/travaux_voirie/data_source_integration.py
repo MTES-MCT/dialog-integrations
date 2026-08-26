@@ -12,6 +12,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
+from integrations.local_time import end_of_local_day, start_of_local_day
 
 from .schema import IssylesMoulineauxTravauxRawDataSchema
 
@@ -130,10 +131,8 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     return df.with_columns(
         [
-            pl.col("date_debut").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_date"),
-            pl.col("date_fin").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_date"),
-            pl.col("date_debut").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_time"),
-            pl.col("date_fin").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_time"),
+            start_of_local_day(df, "date_debut").alias("period_start_date"),
+            end_of_local_day(df, "date_fin").alias("period_end_date"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(False).alias("period_is_permanent"),
         ]

@@ -94,10 +94,8 @@ def compute_period_fields(df: pl.DataFrame):
 
     return df.with_columns(
         [
-            pl.lit("2022-01-13T02:00:00Z").alias("period_start_date"),
+            pl.lit("2022-01-13T00:00:00+01:00").alias("period_start_date"),
             pl.lit(None).alias("period_end_date"),
-            pl.lit(None).alias("period_start_time"),
-            pl.lit(None).alias("period_end_time"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(True).alias("period_is_permanent"),
         ]

@@ -97,15 +97,17 @@ def test_compute_period_fields():
     # Check all period fields exist
     assert "period_start_date" in result.columns
     assert "period_end_date" in result.columns
-    assert "period_start_time" in result.columns
-    assert "period_end_time" in result.columns
+    # start_time / end_time are mirrored from the dates in create_save_period_dto,
+    # so the pivot no longer carries them.
+    assert "period_start_time" not in result.columns
+    assert "period_end_time" not in result.columns
     assert "period_recurrence_type" in result.columns
     assert "period_is_permanent" in result.columns
 
     # Check values
-    assert result["period_start_date"][0] == "2024-07-11T19:27:30+01:00"
-    assert result["period_start_date"][1] == "2024-11-29T12:38:18+00:00"
-    assert result["period_start_date"][2] == "2025-01-23T10:51:06+00:00"
+    assert result["period_start_date"][0] == "2024-07-11T00:00:00+02:00"
+    assert result["period_start_date"][1] == "2024-11-29T00:00:00+01:00"
+    assert result["period_start_date"][2] == "2025-01-23T00:00:00+01:00"
     assert result["period_recurrence_type"][0] == "everyDay"
     assert result["period_is_permanent"][0] is True
 
@@ -123,8 +125,8 @@ def test_compute_period_fields_filters_null_date_creation():
     # Should keep only valid dates
     assert result.height == 2
     assert result["period_start_date"].to_list() == [
-        "2024-07-11T19:27:30+01:00",
-        "2025-01-23T10:51:06+00:00",
+        "2024-07-11T00:00:00+02:00",
+        "2025-01-23T00:00:00+01:00",
     ]
 
 

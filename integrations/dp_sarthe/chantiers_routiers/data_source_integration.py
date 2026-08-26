@@ -13,6 +13,7 @@ from api.dia_log_client.models import (
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_sarthe.chantiers_routiers.schema import SartheChantiersRoutiersSchema
+from integrations.local_time import end_of_local_day, start_of_local_day
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_chantiers_routiers/exports/parquet"
 LOCAL_FILE = "explorations/dp_sarthe/data/227200029_chantiers_routiers.parquet"
@@ -64,19 +65,15 @@ def compute_measure_fields(df: pl.DataFrame):
 def compute_period_fields(df: pl.DataFrame):
     """
     Compute all period fields for SavePeriodDTO.
-    - period_start_date: today
-    - period_end_date: from date_fin
-    - period_start_time: None
-    - period_end_time: None
+    - period_start_date: date_debut at 00:00:00 Paris
+    - period_end_date: date_fin at 23:59:59 Paris
     - period_recurrence_type: everyDay
     - period_is_permanent: True
     """
     return df.with_columns(
         [
-            pl.col("date_debut").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_date"),
-            pl.col("date_fin").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_date"),
-            pl.col("date_debut").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_time"),
-            pl.col("date_fin").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_time"),
+            start_of_local_day(df, "date_debut").alias("period_start_date"),
+            end_of_local_day(df, "date_fin").alias("period_end_date"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(True).alias("period_is_permanent"),
         ]
