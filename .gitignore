@@ -29,6 +29,7 @@ explorations/*/data
 *.ipynb
 .ipynb_checkpoints
 sandbox/*
+local/
 
 api/*
 !api/spec.json
@@ -37,3 +38,6 @@ api/*
 ai/
 .claude/
 CLAUDE.md
+
+# Rapports lors des runs
+reports/

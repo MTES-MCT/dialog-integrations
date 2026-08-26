@@ -296,12 +296,19 @@ class BaseIntegration:
         Create a SavePeriodDTO from a RegulationMeasure with period_ prefixed fields.
         Any field starting with 'period_' will be mapped to SavePeriodDTO,
         with the prefix stripped (e.g., period_start_date -> start_date).
+
+        `startTime` and `endTime` are mirrored from the dates. The API splits a single
+        instant across two fields: it takes the day from `startDate` and the clock from
+        `startTime`, and reads that clock in Europe/Paris.
         """
         period_fields = {}
         for key, value in measure.items():
             if key.startswith("period_"):
                 field_name = key.replace("period_", "", 1)
                 period_fields[field_name] = value
+
+        period_fields["start_time"] = period_fields.get("start_date")
+        period_fields["end_time"] = period_fields.get("end_date")
 
         return SavePeriodDTO(**period_fields)
 

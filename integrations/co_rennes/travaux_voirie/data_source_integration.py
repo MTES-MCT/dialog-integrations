@@ -14,6 +14,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
+from integrations.local_time import end_of_local_day, start_of_local_day
 
 from .schema import RennesTravauxVoirieRawDataSchema
 
@@ -88,20 +89,16 @@ def compute_measure_fields(df: pl.DataFrame):
 def compute_period_fields(df: pl.DataFrame):
     """
     Compute all period fields for SavePeriodDTO.
-    - period_start_date: date_deb
-    - period_end_date: date_fin
-    - period_start_time: date_deb
-    - period_end_time: date_fin
+    - period_start_date: date_deb at 00:00:00 Paris
+    - period_end_date: date_fin at 23:59:59 Paris
     - period_recurrence_type: everyDay
-    - period_is_permanent: True
+    - period_is_permanent: False
     """
 
     return df.with_columns(
         [
-            pl.col("date_deb").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_date"),
-            pl.col("date_fin").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_date"),
-            pl.col("date_deb").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_start_time"),
-            pl.col("date_fin").dt.strftime("%Y-%m-%dT00:00:00Z").alias("period_end_time"),
+            start_of_local_day(df, "date_deb").alias("period_start_date"),
+            end_of_local_day(df, "date_fin").alias("period_end_date"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(False).alias("period_is_permanent"),
         ]
