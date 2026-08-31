@@ -53,6 +53,7 @@ class RegulationMeasure(TypedDict):
     vehicle_exempted_types: list[str] | None
     vehicle_restricted_types: list[str] | None
     vehicle_other_exempted_type_text: str | None
+    vehicle_other_restricted_type_text: str | None
 
 
 class BaseDataSourceIntegration:

@@ -1,19 +1,22 @@
-"""Schema for Aveuron restriction gabarits CSV data."""
+"""Schema for Aveyron restriction gabarits data."""
 
 import pandera.polars as pa
 
 
 class AveyronPrescriptionsRoutieresRawDataSchema(pa.DataFrameModel):
-    """Schema for the raw Aveyron restriction gabarits data."""
+    """Schema for the raw Aveyron restriction gabarits data.
+
+    The producer ships every numeric column as a string. Declaring the target types here
+    makes `coerce` do the conversion once, and fail loudly if a value is not convertible.
+    """
 
     geo_point_2d: bytes | None = pa.Field(nullable=True)
     geo_shape: bytes | None = pa.Field(nullable=True)
     route: str | None = pa.Field(nullable=True)
     prd: int | None = pa.Field(nullable=True)
-    abd: int | None = pa.Field(nullable=True)
+    abd: float | None = pa.Field(nullable=True)
     prf: int | None = pa.Field(nullable=True)
-    abf: int | None = pa.Field(nullable=True)
-    # commune: str | None = pa.Field(nullable=True)
+    abf: float | None = pa.Field(nullable=True)
     prescripti: str | None = pa.Field(nullable=True)
     panneau: str | None = pa.Field(nullable=True)
     numero_dar: str | None = pa.Field(nullable=True)

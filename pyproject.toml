@@ -51,8 +51,7 @@ exclude = [
 line-length = 100
 
 [tool.ruff.lint]
-# Enable recommended rules
-select = ["E", "F", "W", "I"]  # pycodestyle errors, pyflakes, warnings, isort
+select = ["E", "F", "W", "I", "T10"]
 ignore = []
 
 [tool.pyright]

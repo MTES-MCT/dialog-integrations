@@ -1,6 +1,7 @@
 """Data source integration for Aveyron : prescriptions-routieres-du-departement"""
 
 import io
+from datetime import date
 
 import polars as pl
 import requests
@@ -20,6 +21,7 @@ from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_aveyron.restrictions_gabarits.schema import (
     AveyronPrescriptionsRoutieresRawDataSchema,
 )
+from integrations.local_time import start_of_local_day
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/prescriptions-routieres-du-departement-aveyron/exports/parquet"
 LOCAL_FILE = "explorations/dp_aveyron/data/prescriptions-routieres-du-departement-aveyron.parquet"
@@ -67,6 +69,7 @@ def unnest_measures(df: pl.DataFrame):
             .alias("restriction_fields")
         )
         .unnest("restriction_fields")
+        .with_columns(pl.col("panneau_type").str.strip_chars())
         .with_columns(
             pl.col("panneau_value")
             .str.strip_chars("mt²")
@@ -77,10 +80,10 @@ def unnest_measures(df: pl.DataFrame):
     )
 
 
+# Pedestrians and cyclists are the only signs left out: DiaLog has no vehicle type for
+# them, and `other` would describe a restriction on traffic as one on vehicles.
 PANNEAUX = {
-    #'B9a' : "Interdiction piéton", # Non-traité
-    #'B9b' : "Interdiction cycliste", # Non-traité
-    #'B9i' : "Interdiction caravanes", # Non-traité
+    "B9i": "Interdiction caravanes",
     "B18c": "Interdiction Transport Matieres dangereuse",
     "B10a": "Limitation de longueur",
     "B9f": "Limitation de longueur bus",
@@ -98,55 +101,42 @@ def filter_unrelevant(df: pl.DataFrame):
 
 
 def compute_measure_fields(df: pl.DataFrame):
-    return df.with_columns(
-        [
-            (
-                pl.when(pl.col("panneau_type").is_null())
-                .then(pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value))
-                .otherwise(pl.lit(MeasureTypeEnum.NOENTRY.value))
-                .alias("measure_type_")
-            ),
-            (
-                pl.when(pl.col("panneau_type").is_null())
-                .then(30.0)
-                .otherwise(None)
-                .alias("measure_max_speed")
-            ),
-        ]
-    )
+    """Every row left by filter_unrelevant carries a sign, so every measure is a
+    prohibition. This source holds no speed limit, and no measure_max_speed."""
+    return df.with_columns(pl.lit(MeasureTypeEnum.NOENTRY.value).alias("measure_type_"))
 
 
 def compute_period_fields(df: pl.DataFrame):
     """
     Compute all period fields for SavePeriodDTO.
-    - period_start_date: from date_creation
+    - period_start_date: from date_darre, the day the arrete was signed, else today
     - period_end_date: None
-    - period_start_time: None
-    - period_end_time: None
     - period_recurrence_type: everyDay
     - period_is_permanent: True
 
-    Filters out rows where date_creation is not defined.
+    The producer writes dd/mm/yyyy, with a few dd/mm/yy. Inferring the format lets polars
+    read "12/01/18" as year 18, so both formats are stated explicitly.
+
+    A third of the rows carry no date at all. They describe a restriction that is signed,
+    signposted and in force; only the day it was signed is missing. They are integrated
+    with the day of the run rather than dropped, on the same footing as the speed limits,
+    which have no date of their own either. The regulation being permanent and open-ended,
+    the start date only says "this applies now".
     """
+    parsed = (
+        pl.when(pl.col("date_darre").str.len_chars() <= 8)
+        .then(pl.col("date_darre").str.to_date("%d/%m/%y", strict=False))
+        .otherwise(pl.col("date_darre").str.to_date("%d/%m/%Y", strict=False))
+    )
+    n_dateless = df.select(parsed.is_null().sum()).item()
+    if n_dateless > 0:
+        logger.info(f"Dating {n_dateless}/{df.height} rows with no readable date_darre from today")
 
-    # Count rows with null date_creation before filtering
-    n_null_date = df.select(pl.col("date_darre").is_null().sum()).item()
-    if n_null_date > 0:
-        logger.warning(
-            f"Dropping {n_null_date} rows with null date_creation (no start date available)"
-        )
-
-    # Filter out rows where date_creation is null
-    df = df.filter(pl.col("date_darre").is_not_null())
-
+    df = df.with_columns(parsed.fill_null(date.today()).alias("_start_date"))
     return df.with_columns(
         [
-            (
-                pl.col("date_darre").str.to_date().dt.strftime("%Y-%m-%d") + pl.lit("T00:00:00")
-            ).alias("period_start_date"),
+            start_of_local_day(df, "_start_date").alias("period_start_date"),
             pl.lit(None).alias("period_end_date"),
-            pl.lit(None).alias("period_start_time"),
-            pl.lit(None).alias("period_end_time"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(True).alias("period_is_permanent"),
         ]
@@ -158,7 +148,7 @@ def compute_location_fields(df: pl.DataFrame):
     Compute all location fields for SaveLocationDTO.
     - location_administrator: "Aveyron"
     - location_road_type: RoadTypeEnum.DEPARTMENTALROAD
-    - location_road_number: D98
+    - location_road_number: from route, e.g. 12_D98 -> D98
     - location_from_department_code: 12
     - location_from_point_number: from prd
     - location_from_abscissa: from abd
@@ -178,43 +168,123 @@ def compute_location_fields(df: pl.DataFrame):
             pl.col("route").str.split("_").list.last().alias("location_road_number"),
             pl.lit("12").alias("location_from_department_code"),
             pl.col("prd").cast(pl.Utf8).alias("location_from_point_number"),
-            pl.col("abd").alias("location_from_abscissa"),
+            pl.col("abd").round().cast(pl.Int64).alias("location_from_abscissa"),
             pl.lit("U").alias("location_from_side"),
             pl.lit("12").alias("location_to_department_code"),
             pl.col("prf").cast(pl.Utf8).alias("location_to_point_number"),
-            pl.col("abf").alias("location_to_abscissa"),
+            pl.col("abf").round().cast(pl.Int64).alias("location_to_abscissa"),
             pl.lit("U").alias("location_to_side"),
             pl.lit(DirectionEnum.BOTH.value).alias("location_direction"),
         ]
     )
 
 
+MAX_IDENTIFIER_LENGTH = 60  # API contract
+# What the producer writes when there is no arrete to refer to. Treated as an absence,
+# otherwise every one of them lands in a single catch-all regulation.
+PLACEHOLDER_REFERENCES = ["0arrete", "arlot"]
+TITLE_MAX_LENGTH = 255
+TITLE_ELLIPSIS = "..."
+OTHER_CATEGORY_TEXT = "Restriction de gabarit"
+
+
+def normalize_reference(reference: pl.Expr) -> pl.Expr:
+    """Reduce a producer reference to what survives a URL path unescaped.
+
+    Identifiers travel in the path of DELETE /api/regulations/{identifier} and of the
+    publish endpoint, so anything that is not a letter or a digit becomes a single hyphen.
+    """
+    return reference.str.replace_all(r"[^A-Za-z0-9]+", "-").str.strip_chars("-")
+
+
 def compute_regulation_fields(df: pl.DataFrame):
     """
     Compute all regulation fields for PostApiRegulationsAddBody.
-    - regulation_identifier: from objectid (filter duplicates)
+    - regulation_identifier: "gabarit-{numero_dar}" when the producer gives an arrete
+      number. A third of the rows have none, or write "0 arrete" to say there is none, so
+      those are identified by the stretch itself,
+      "gabarit-{road}-de-{fromPR}+{fromAbscissa}-a-{toPR}+{toAbscissa}"
+      (R-20 level 3, written out here per R-23). Both forms stay under the 60-character cap.
     - regulation_category: PERMANENTREGULATION
     - regulation_subject: OTHER
-    - regulation_title: objectid + nature + site
-    - regulation_other_category_text: "Circulation"
+    - regulation_title: the prescriptions of the group, and the stretch when there is no
+      arrete number to name
+    - regulation_other_category_text: "Restriction de gabarit"
 
-    Filters out rows with duplicate objectid.
+    Nothing is dropped here. One arrete can carry several panneaux, so the title lists
+    every prescription of the group: the API keeps the title of the first row only, and a
+    single panneau would misdescribe the rest. `prescripti` is too long to serve as
+    otherCategoryText once joined (the API caps it at 100), so that field states the
+    subject instead.
     """
+    reference = normalize_reference(pl.col("numero_dar"))
+    is_placeholder = (
+        pl.col("numero_dar")
+        .str.to_lowercase()
+        .str.replace_all(" ", "")
+        .is_in(PLACEHOLDER_REFERENCES)
+    )
+    has_reference = reference.is_not_null() & (reference != "") & ~is_placeholder.fill_null(False)
+
+    n_reconstructed = df.select((~has_reference).sum()).item()
+    if n_reconstructed > 0:
+        logger.info(f"Identifying {n_reconstructed}/{df.height} rows by their stretch")
+
+    stretch = (
+        pl.col("location_road_number")
+        + pl.lit("-de-")
+        + pl.col("location_from_point_number")
+        + pl.lit("+")
+        + pl.col("location_from_abscissa").cast(pl.Utf8)
+        + pl.lit("-a-")
+        + pl.col("location_to_point_number")
+        + pl.lit("+")
+        + pl.col("location_to_abscissa").cast(pl.Utf8)
+    )
+    df = df.with_columns(
+        (pl.lit("gabarit-") + pl.when(has_reference).then(reference).otherwise(stretch)).alias(
+            "regulation_identifier"
+        )
+    )
+
+    n_too_long = df.select(
+        (pl.col("regulation_identifier").str.len_chars() > MAX_IDENTIFIER_LENGTH).sum()
+    ).item()
+    if n_too_long > 0:
+        logger.error(f"{n_too_long} identifiers exceed {MAX_IDENTIFIER_LENGTH} characters")
+
+    prescriptions = pl.col("prescripti").fill_null("").unique().sort().str.join(" ; ")
+    title = (
+        pl.when(has_reference)
+        .then(reference + pl.lit(" - ") + prescriptions.over("regulation_identifier"))
+        .otherwise(
+            prescriptions.over("regulation_identifier")
+            + pl.lit(" - ")
+            + pl.col("location_road_number")
+            + pl.lit(", du PR ")
+            + pl.col("location_from_point_number")
+            + pl.lit("+")
+            + pl.col("location_from_abscissa").cast(pl.Utf8)
+            + pl.lit(" au PR ")
+            + pl.col("location_to_point_number")
+            + pl.lit("+")
+            + pl.col("location_to_abscissa").cast(pl.Utf8)
+        )
+    )
+
     return df.with_columns(
         [
-            pl.col("numero_dar").cast(pl.Utf8).alias("regulation_identifier"),
             pl.lit(PostApiRegulationsAddBodyCategory.PERMANENTREGULATION.value).alias(
                 "regulation_category"
             ),
             pl.lit(PostApiRegulationsAddBodySubject.OTHER.value).alias("regulation_subject"),
-            (
-                pl.col("numero_dar").cast(pl.Utf8)
-                + pl.lit(" - ")
-                + pl.col("prescripti").fill_null("")
-                # + pl.lit(" - ")
-                # + pl.col("commune").fill_null("")
-            ).alias("regulation_title"),
-            pl.col("prescripti").alias("regulation_other_category_text"),
+            pl.when(title.str.len_chars() > TITLE_MAX_LENGTH)
+            .then(
+                title.str.slice(0, TITLE_MAX_LENGTH - len(TITLE_ELLIPSIS)) + pl.lit(TITLE_ELLIPSIS)
+            )
+            .otherwise(title)
+            .alias("regulation_title"),
+            pl.lit(OTHER_CATEGORY_TEXT).alias("regulation_other_category_text"),
         ]
     )
 
@@ -222,32 +292,28 @@ def compute_regulation_fields(df: pl.DataFrame):
 def compute_vehicle_fields(df: pl.DataFrame):
     """
     Compute all vehicle fields for SaveVehicleSetDTO.
-    - vehicle_all_vehicles: true only for speed limits rows
+    - vehicle_all_vehicles: always false, every measure targets a category of vehicle
     - vehicle_restricted_types :
-        None if speedlimit
         heavyGoodsVehicle if B13
         hazardousMaterials if B18c
-        other and dimension if B9f
+        other if B9i
+        other and dimensions if B9f
         dimensions otherwise
     - vehicle_heavyweight_max_weight if B13
     - vehicle_max_height if B12
     - vehicle_max_width if B11
     - vehicle_max_length if B10a or B9f
-    - other_restricted_type_text : "Bus" if B9f
-
+    - vehicle_other_restricted_type_text : "Bus" if B9f, "Caravanes" if B9i
     """
     return df.with_columns(
         [
-            pl.when(pl.col("measure_type_") == pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value))
-            .then(pl.lit(True))
-            .otherwise(pl.lit(False))
-            .alias("vehicle_all_vehicles"),
-            pl.when(pl.col("measure_type_") == pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value))
-            .then(None)
-            .when(pl.col("panneau_type") == "B13")
+            pl.lit(False).alias("vehicle_all_vehicles"),
+            pl.when(pl.col("panneau_type") == "B13")
             .then(pl.lit([VehicleRestrictedTypeEnum.HEAVYGOODSVEHICLE.value]))
             .when(pl.col("panneau_type") == "B18c")
             .then(pl.lit([VehicleRestrictedTypeEnum.HAZARDOUSMATERIALS.value]))
+            .when(pl.col("panneau_type") == "B9i")
+            .then(pl.lit([VehicleRestrictedTypeEnum.OTHER.value]))
             .when(pl.col("panneau_type") == "B9f")
             .then(
                 pl.lit(
@@ -276,6 +342,8 @@ def compute_vehicle_fields(df: pl.DataFrame):
             .alias("vehicle_max_length"),
             pl.when(pl.col("panneau_type") == "B9f")
             .then(pl.lit("Bus"))
-            .alias("other_restricted_type_text"),
+            .when(pl.col("panneau_type") == "B9i")
+            .then(pl.lit("Caravanes"))
+            .alias("vehicle_other_restricted_type_text"),
         ]
     )
