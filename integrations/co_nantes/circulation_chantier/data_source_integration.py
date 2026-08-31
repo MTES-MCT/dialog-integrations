@@ -13,6 +13,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
+from integrations.local_time import from_epoch_ms
 
 from .schema import NantesCirculationChantierRawDataSchema
 
@@ -94,28 +95,16 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all period fields for SavePeriodDTO.
-    - period_start_date: date_debut (timestamp)
-    - period_end_date: date_fin (timestamp)
-    - period_start_time: date_debut (timestamp)
-    - period_end_time: date_fin (timestamp)
+    - period_start_date: date_debut, epoch ms -> Paris
+    - period_end_date: date_fin, epoch ms -> Paris
     - period_recurrence_type: everyDay
     - period_is_permanent: False
     """
 
     return df.with_columns(
         [
-            pl.from_epoch("date_debut", time_unit="ms")
-            .dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-            .alias("period_start_date"),
-            pl.from_epoch("date_fin", time_unit="ms")
-            .dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-            .alias("period_end_date"),
-            pl.from_epoch("date_debut", time_unit="ms")
-            .dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-            .alias("period_start_time"),
-            pl.from_epoch("date_fin", time_unit="ms")
-            .dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-            .alias("period_end_time"),
+            from_epoch_ms("date_debut").alias("period_start_date"),
+            from_epoch_ms("date_fin").alias("period_end_date"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(False).alias("period_is_permanent"),
         ]

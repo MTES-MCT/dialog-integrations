@@ -20,13 +20,12 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
+from integrations.local_time import start_of_local_day
 
 from .schema import Schema
 
-URL = "https://www.data.gouv.fr/api/1/datasets/r/227f913a-18c3-4188-965c-cb2bdb20a54d"
-# URL = "https://www.data.gouv.fr/api/1/datasets/r/9d3ebee6-a27f-47d4-a768-22e9127ea223"
-# URL = "https://www.data.gouv.fr/api/1/datasets/r/3ca7bd06-6489-45a2-aee9-efc6966121b2"
 # URL = "https://echanges.brest-metropole.fr/VIPDU72/GPB/DEP_ARR_CIRC_STAT_L_V.zip"
+URL = "https://www.data.gouv.fr/api/1/datasets/r/760ac62d-b3aa-4d30-898c-94fea81e4537"
 FILENAME = "DEP_ARR_CIRC_STAT_L_V.shp"
 
 transformer = Transformer.from_crs("EPSG:2154", "EPSG:4326", always_xy=True)
@@ -178,7 +177,7 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all period fields for SavePeriodDTO.
     - period_start_date: from DT_MAT field
-    - period_end_date, period_start_time, period_end_time: None
+    - period_end_date: None
     - period_recurrence_type: EVERYDAY
     - period_is_permanent: True
     Filter out rows where DT_MAT is null.
@@ -194,10 +193,8 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     # Compute all period fields
     return df.with_columns(
         [
-            pl.col("DT_MAT").dt.strftime("%Y-%m-%dT%H:%M:%SZ").alias("period_start_date"),
+            start_of_local_day(df, "DT_MAT").alias("period_start_date"),
             pl.lit(None).alias("period_end_date"),
-            pl.lit(None).alias("period_start_time"),
-            pl.lit(None).alias("period_end_time"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(True).alias("period_is_permanent"),
         ]

@@ -24,7 +24,20 @@ dmypy.json
 /.coverage
 
 
+explorations/
 explorations/*/data
 *.ipynb
 .ipynb_checkpoints
 sandbox/*
+local/
+
+api/*
+!api/spec.json
+
+# Contexte, doc et outillage IA (voir ai/README.md).
+ai/
+.claude/
+CLAUDE.md
+
+# Rapports lors des runs
+reports/

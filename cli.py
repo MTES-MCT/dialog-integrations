@@ -5,7 +5,7 @@ import typer
 from loguru import logger
 
 from integrations.base_integration import BaseIntegration
-from notifications.notifier import MattermostNotifier
+from notifications.notifier import TchapNotifier
 from settings import Organization
 
 app = typer.Typer(help="Dialog CLI")
@@ -50,13 +50,22 @@ def publish(
 @app.command()
 def notify(
     results: Annotated[str, typer.Option(help="JSON results from integration step")],
+    dry_run: Annotated[bool, typer.Option(help="Render the message without posting it")] = False,
 ):
-    """Notify Mattermost with integration results."""
+    """Notify Tchap with integration results."""
     try:
         results_data = json.loads(results)
-        logger.info(f"Processing integration results: {results_data}")
-        notifier = MattermostNotifier()
-        notifier.send_notification(results_data)
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON results: {e}")
         raise typer.Exit(code=1)
+
+    logger.info(f"Processing integration results: {results_data}")
+    notifier = TchapNotifier()
+    if dry_run:
+        body, formatted_body = notifier.format_message(results_data)
+        typer.echo(body)
+        typer.echo("\n--- formatted_body (HTML) ---\n")
+        typer.echo(formatted_body)
+        return
+
+    notifier.send_notification(results_data)

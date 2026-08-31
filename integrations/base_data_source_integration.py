@@ -17,8 +17,6 @@ class RegulationMeasure(TypedDict):
     # Period fields (prefixed with period_)
     period_start_date: str | None
     period_end_date: str | None
-    period_start_time: str | None
-    period_end_time: str | None
     period_recurrence_type: str | None
     period_is_permanent: bool | None
     # Location fields (prefixed with location_)

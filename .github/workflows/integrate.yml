@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        organization: [co_brest, dp_sarthe, co_rennes, dp_aveyron]
+        organization: [co_brest, dp_sarthe, co_rennes, dp_aveyron, co_issy-les-moulineaux]
     environment: ${{ matrix.organization }}
     outputs:
       # One output per matrix value — names must be static
@@ -19,6 +19,7 @@ jobs:
       result_dp_sarthe:  ${{ steps.integration.outputs.result_dp_sarthe }}
       result_co_rennes:  ${{ steps.integration.outputs.result_co_rennes }}
       result_dp_aveyron: ${{ steps.integration.outputs.result_dp_aveyron }}
+      result_co_issy-les-moulineaux: ${{ steps.integration.outputs['result_co_issy-les-moulineaux'] }}
 
     steps:
       - uses: actions/checkout@v4
@@ -63,8 +64,10 @@ jobs:
       - name: Generate API client
         run: make api:generate-client
 
-      - name: Notify Mattermost
+      - name: Notify Tchap
         env:
-          MATTERMOST_WEBHOOK_URL: ${{ secrets.MATTERMOST_WEBHOOK_URL }}
+          TCHAP_HOMESERVER_URL: ${{ secrets.TCHAP_HOMESERVER_URL }}
+          TCHAP_ROOM_ID: ${{ secrets.TCHAP_ROOM_ID }}
+          TCHAP_ACCESS_TOKEN: ${{ secrets.TCHAP_ACCESS_TOKEN }}
         run: |
           uv run dialog notify --results '${{ toJson(needs.integrate.outputs) }}'

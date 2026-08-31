@@ -58,7 +58,7 @@ ignore = []
 [tool.pyright]
 # Pyright configuration (used by Pylance in VSCode)
 include = ["."]
-exclude = ["**/__pycache__", ".venv", "api"]
+exclude = ["**/__pycache__", ".venv", "api", "explorations", "local"]
 typeCheckingMode = "standard"
 pythonVersion = "3.11"
 reportMissingImports = "error"
@@ -66,3 +66,6 @@ reportMissingTypeStubs = false
 reportTypedDictNotRequiredAccess = "warning"
 reportOptionalMemberAccess = "warning"
 reportOptionalSubscript = "warning"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

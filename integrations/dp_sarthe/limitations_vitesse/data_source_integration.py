@@ -13,6 +13,7 @@ from api.dia_log_client.models import (
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_sarthe.limitations_vitesse.schema import SartheRawDataSchema
+from integrations.local_time import start_of_local_day
 
 URL = (
     "https://data.sarthe.fr"
@@ -147,9 +148,9 @@ def compute_title(df: pl.DataFrame) -> pl.DataFrame:
 def compute_start_date(df: pl.DataFrame) -> pl.DataFrame:
     """
     Compute all period fields for SavePeriodDTO.
-    - period_start_date: from annee (Jan 1st) or date_modif as fallback
-    - period_end_date, period_start_time, period_end_time: None
-    - period_recurrence_type: EVERYDAY
+    - period_start_date: annee (Jan 1st) or date_modif as fallback, at 00:00:00 Paris
+    - period_end_date: None
+    - period_recurrence_type: everyDay
     - period_is_permanent: True
     """
     # Log how many rows are using fallback date
@@ -157,21 +158,22 @@ def compute_start_date(df: pl.DataFrame) -> pl.DataFrame:
     if n_missing_annee > 0:
         logger.info(f"Using date_modif as fallback for {n_missing_annee} rows with missing annee")
 
+    # Resolved first so start_of_local_day can read the column's dtype.
+    df = df.with_columns(
+        pl.when(pl.col("annee").is_not_null())
+        .then(pl.col("annee").cast(pl.Int64).cast(pl.Utf8) + pl.lit("-01-01T00:00:00Z"))
+        .otherwise(pl.col("date_modif"))
+        .alias("_raw_start_date")
+    )
+
     return df.with_columns(
         [
-            # Start date from annee or date_modif
-            pl.when(pl.col("annee").is_not_null())
-            .then(pl.col("annee").cast(pl.Int64).cast(pl.Utf8) + pl.lit("-01-01T00:00:00Z"))
-            .otherwise(pl.col("date_modif"))
-            .alias("period_start_date"),
-            # Other period fields
+            start_of_local_day(df, "_raw_start_date").alias("period_start_date"),
             pl.lit(None).alias("period_end_date"),
-            pl.lit(None).alias("period_start_time"),
-            pl.lit(None).alias("period_end_time"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(True).alias("period_is_permanent"),
         ]
-    )
+    ).drop("_raw_start_date")
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
