@@ -19,6 +19,12 @@ class RegulationMeasure(TypedDict):
     period_end_date: str | None
     period_recurrence_type: str | None
     period_is_permanent: bool | None
+    # Daily time slots, as `{"start_time": ..., "end_time": ...}` ISO instants.
+    # The period bounds say "from 3 February to 12 March"; these cut every day of
+    # that range into "8am to 6pm". A slot whose end precedes its start crosses
+    # midnight, which is how night work is expressed. Leave it out (or null) and the
+    # measure applies around the clock.
+    period_time_slots: list[dict[str, str]] | None
     # Location fields (prefixed with location_)
     location_road_type: str
     location_label: str | None
