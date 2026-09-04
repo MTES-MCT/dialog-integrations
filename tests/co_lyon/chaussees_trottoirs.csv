@@ -1,0 +1,13 @@
+codetroncon,codefuv,nomvoie1,commune1,insee1,limitationvitesse,limitationtonnage,limitationhauteur,limitationlargeur,limitationlongueur,precisionreglementation,geometry
+T001,16121,Rue de la Republique,Lyon 2e Arrondissement,69382,30,,,,,ZCA : 2022 - Arrete N°2024RP44520 du 29/09/2022,"{""type"": ""LineString"", ""coordinates"": [[4.8320, 45.7600], [4.8330, 45.7610]]}"
+T002,16121,Rue Edouard Herriot,Lyon 2e Arrondissement,69382,30,,,,,ZCA : 2022 - Arrete N°2024RP44520 du 29/09/2022,"{""type"": ""LineString"", ""coordinates"": [[4.8340, 45.7620], [4.8350, 45.7630]]}"
+T003,16122,Rue Victor Hugo,Lyon 2e Arrondissement,69382,5,,,,,ZCA : 2022 - Arrete N°2024RP44520 du 29/09/2022,"{""type"": ""LineString"", ""coordinates"": [[4.8290, 45.7560], [4.8295, 45.7570]]}"
+T004,16200,Rue des Docks,Lyon 9e Arrondissement,69389,50,3.5,,,,,"{""type"": ""LineString"", ""coordinates"": [[4.8100, 45.7800], [4.8110, 45.7810]]}"
+T005,16201,Quai Paul Sedallian,Lyon 9e Arrondissement,69389,50,3.5,,,,,"{""type"": ""LineString"", ""coordinates"": [[4.8120, 45.7820], [4.8130, 45.7830]]}"
+T006,16300,Avenue Franklin Roosevelt,Villeurbanne,69266,30,,,,,,"{""type"": ""LineString"", ""coordinates"": [[4.8800, 45.7700], [4.8810, 45.7710]]}"
+T007,16301,Rue Leon Blum,Villeurbanne,69266,30,,,,,ZCA : 2017,"{""type"": ""LineString"", ""coordinates"": [[4.8820, 45.7720], [4.8830, 45.7730]]}"
+T008,16400,Route de Vienne,Venissieux,69259,50,,,,,Proposition zone apaisable = Zone 30 - Arrete n°2021-055 le 02/06/21,"{""type"": ""LineString"", ""coordinates"": [[4.8700, 45.7100], [4.8710, 45.7110]]}"
+T009,16401,Boulevard Ambroise Croizat,Venissieux,69259,30,,,,,Proposition zone apaisable = Zone 30 - Arrete n°2021-055 le 02/06/21,"{""type"": ""LineString"", ""coordinates"": [[4.8720, 45.7120], [4.8730, 45.7130]]}"
+T010,16500,Rue du Pont,Feyzin,69276,70,19.0,4.5,,,Arrete N°0_AR_2018.0018 du 11/09/2019 - Tonnage,"{""type"": ""LineString"", ""coordinates"": [[4.8500, 45.6700], [4.8510, 45.6710]]}"
+T011,16501,Chemin des Razes,Feyzin,69276,,,3.9,,,,"{""type"": ""LineString"", ""coordinates"": [[4.8520, 45.6720], [4.8530, 45.6730]]}"
+T012,16600,Rue Sans Geometrie,Oullins,69149,30,,,,,,

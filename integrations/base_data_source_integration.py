@@ -19,6 +19,19 @@ class RegulationMeasure(TypedDict):
     period_end_date: str | None
     period_recurrence_type: str | None
     period_is_permanent: bool | None
+    # Grouping fields — how rows collapse into measures and regulations.
+    #
+    # A source row is not always a measure: a SIG publishes one row per road segment,
+    # and a single measure ("30 km/h") covers thousands of them. Rows sharing
+    # `(regulation_identifier, measure_group_key)` become ONE measure carrying N
+    # locations, provided the data source sets `group_locations_by_measure`.
+    #
+    # `regulation_split_order` orders the locations of a regulation that has to be cut
+    # into several POSTs (see `max_locations_per_regulation`): rows are sorted by it, so
+    # a source that fills it with a geographic ranking keeps each slice spatially
+    # coherent instead of arbitrary.
+    measure_group_key: str | None
+    regulation_split_order: int | None
     # Location fields (prefixed with location_)
     location_road_type: str
     location_label: str | None
@@ -65,6 +78,16 @@ class BaseDataSourceIntegration:
     raw_data_schema: type[pa.DataFrameModel] | None = None  # Subclasses must set this
     organization_settings: OrganizationSettings
     client: Client
+
+    # Opt-in: collapse the rows sharing a `measure_group_key` into a single measure
+    # carrying every one of their locations. Off by default so that the sources already
+    # in production keep emitting one measure per row.
+    group_locations_by_measure: bool = False
+
+    # Opt-in: hard ceiling on the number of locations a single POST may carry. Above it
+    # the regulation is cut into `IDENTIFIER-01`, `IDENTIFIER-02`… slices, ordered by
+    # `regulation_split_order`. `None` means no ceiling.
+    max_locations_per_regulation: int | None = None
 
     def __init__(self, organization_settings: OrganizationSettings, client: Client):
         self.organization_settings = organization_settings

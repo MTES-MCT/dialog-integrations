@@ -10,6 +10,7 @@ from integrations.base_integration import BaseIntegration
     "organization",
     [
         "co_brest",
+        "co_lyon",
     ],
 )
 def test_full_pipeline_integration(organization, monkeypatch):

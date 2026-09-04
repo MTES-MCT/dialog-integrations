@@ -119,7 +119,7 @@ class BaseIntegration:
             logger.info(f"Total records from all sources: {clean_data.shape[0]}")
 
             # Create regulations from combined data
-            regulations = self.create_regulations(clean_data)
+            regulations = self.create_regulations(clean_data, data_source)
             for regulation in regulations:
                 regulation.identifier = f"{regulation.identifier}"
                 regulation.status = self.status
@@ -227,16 +227,24 @@ class BaseIntegration:
             f"Finished updating {count_success}/{len(regulations)} regulations successfully"
         )
 
-    def create_measure(self, measure: RegulationMeasure) -> SaveMeasureDTO:
+    def create_measure(
+        self, measure: RegulationMeasure, locations: list[RegulationMeasure] | None = None
+    ) -> SaveMeasureDTO:
         """
         Create a single measure from a RegulationMeasure.
         Default implementation that works for most cases.
         Subclasses can override if needed.
+
+        `measure` carries the measure, period and vehicle fields. `locations` optionally
+        carries the rows whose locations belong to this measure — one measure covering N
+        road segments, which is what a SIG-sourced regulation looks like. When omitted,
+        the measure gets the single location held by `measure` itself.
         """
+        location_rows = locations if locations is not None else [measure]
         params = {
             "type_": MeasureTypeEnum(measure["measure_type_"]),
             "periods": [self.create_save_period_dto(measure)],
-            "locations": [self.create_save_location_dto(measure)],
+            "locations": [self.create_save_location_dto(row) for row in location_rows],
             "vehicle_set": self.create_save_vehicle_dto(measure),
         }
 
@@ -247,49 +255,118 @@ class BaseIntegration:
 
         return SaveMeasureDTO(**params)
 
-    def create_regulations(self, clean_data: pl.DataFrame) -> list[PostApiRegulationsAddBody]:
+    def create_regulations(
+        self,
+        clean_data: pl.DataFrame,
+        data_source: BaseDataSourceIntegration | type[BaseDataSourceIntegration] | None = None,
+    ) -> list[PostApiRegulationsAddBody]:
         """
         Create regulation payloads from clean data.
         Groups by regulation_identifier and creates measures for each group.
         Uses precomputed regulation fields from the DataFrame.
+
+        Two behaviours, driven by the data source (see `BaseDataSourceIntegration`):
+
+        - `group_locations_by_measure` — rows sharing `measure_group_key` collapse into a
+          single measure carrying all of their locations, instead of one measure per row;
+        - `max_locations_per_regulation` — a regulation carrying more locations than the
+          ceiling is cut into `IDENTIFIER-01`, `IDENTIFIER-02`… slices.
         """
+        group_by_measure = bool(getattr(data_source, "group_locations_by_measure", False))
+        max_locations = getattr(data_source, "max_locations_per_regulation", None)
+
         regulations = []
 
         for _, group_df in clean_data.group_by("regulation_identifier"):
-            # Create measures for all rows in this regulation
-            measures = []
-            for row in group_df.iter_rows(named=True):
+            slices = self._split_regulation_rows(group_df, max_locations)
+
+            for index, slice_df in enumerate(slices):
+                measures = self._create_measures(slice_df, group_by_measure)
+
+                # Skip if no measures were created
+                if not measures:
+                    continue
+
+                # Get regulation fields from first row (all rows have same values)
+                first_row = slice_df.row(0, named=True)
+
+                identifier = first_row["regulation_identifier"]
+                if len(slices) > 1:
+                    identifier = f"{identifier}-{index + 1:02d}"
+
+                regulation = PostApiRegulationsAddBody(
+                    identifier=identifier,
+                    category=PostApiRegulationsAddBodyCategory(first_row["regulation_category"]),
+                    status=PostApiRegulationsAddBodyStatus(self.status),
+                    subject=PostApiRegulationsAddBodySubject(first_row["regulation_subject"]),
+                    title=first_row["regulation_title"],
+                    other_category_text=first_row.get("regulation_other_category_text"),
+                    measures=measures,  # type: ignore
+                )
+
+                # Add document URL to additional_properties if present
+                if first_row.get("regulation_document_url"):
+                    regulation.additional_properties["documentUrl"] = first_row[
+                        "regulation_document_url"
+                    ]
+
+                regulations.append(regulation)
+
+        return regulations
+
+    def _create_measures(self, slice_df: pl.DataFrame, group_by_measure: bool) -> list:
+        """Build the measures of one regulation slice.
+
+        Without grouping, every row is its own measure with its own location — the
+        historical behaviour of every source in production. With grouping, the rows
+        sharing a `measure_group_key` become one measure carrying all their locations.
+        """
+        measures = []
+
+        if not group_by_measure:
+            for row in slice_df.iter_rows(named=True):
                 try:
                     measures.append(self.create_measure(row))  # type: ignore
                 except Exception as e:
                     logger.error(f"Error creating measure: {e}")
+            return measures
 
-            # Skip if no measures were created
-            if not measures:
-                continue
+        for _, measure_df in slice_df.group_by("measure_group_key", maintain_order=True):
+            rows = list(measure_df.iter_rows(named=True))
+            try:
+                measures.append(self.create_measure(rows[0], locations=rows))  # type: ignore
+            except Exception as e:
+                logger.error(f"Error creating measure: {e}")
 
-            # Get regulation fields from first row (all rows have same values)
-            first_row = group_df.row(0, named=True)
+        return measures
 
-            regulation = PostApiRegulationsAddBody(
-                identifier=first_row["regulation_identifier"],
-                category=PostApiRegulationsAddBodyCategory(first_row["regulation_category"]),
-                status=PostApiRegulationsAddBodyStatus(self.status),
-                subject=PostApiRegulationsAddBodySubject(first_row["regulation_subject"]),
-                title=first_row["regulation_title"],
-                other_category_text=first_row.get("regulation_other_category_text"),
-                measures=measures,  # type: ignore
-            )
+    def _split_regulation_rows(
+        self, group_df: pl.DataFrame, max_locations: int | None
+    ) -> list[pl.DataFrame]:
+        """Cut a regulation into slices small enough for a single POST.
 
-            # Add document URL to additional_properties if present
-            if first_row.get("regulation_document_url"):
-                regulation.additional_properties["documentUrl"] = first_row[
-                    "regulation_document_url"
-                ]
+        The API is not bounded by payload size but by how long it takes to persist the
+        locations: past roughly 1 700 of them the request dies on a server-side timeout,
+        and splitting the same total across several measures does not help — the ceiling
+        is per regulation. Slices are cut along `regulation_split_order`, so a source
+        that ranks its rows geographically gets spatially coherent slices.
+        """
+        if not max_locations or group_df.height <= max_locations:
+            return [group_df]
 
-            regulations.append(regulation)
+        if "regulation_split_order" in group_df.columns:
+            group_df = group_df.sort("regulation_split_order", nulls_last=True)
 
-        return regulations
+        slices = [
+            group_df.slice(offset, max_locations)
+            for offset in range(0, group_df.height, max_locations)
+        ]
+        logger.info(
+            f"Regulation {group_df.row(0, named=True)['regulation_identifier']} carries "
+            f"{group_df.height} locations, above the {max_locations} ceiling: "
+            f"splitting into {len(slices)} regulations"
+        )
+        return slices
 
     def create_save_period_dto(self, measure: RegulationMeasure) -> SavePeriodDTO:
         """
