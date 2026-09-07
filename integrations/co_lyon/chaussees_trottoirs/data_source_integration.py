@@ -41,6 +41,7 @@ from integrations.co_lyon.chaussees_trottoirs.regulation_key import (
     order_number,
 )
 from integrations.co_lyon.chaussees_trottoirs.schema import LyonChausseesTrottoirsRawDataSchema
+from integrations.local_time import start_of_local_day
 from integrations.shared.wfs import LYON_BBOX, assert_lon_lat_bbox, fetch_wfs_features
 
 WFS_LAYER = "pvo_patrimoine_voirie.pvochausseetrottoir"
@@ -287,10 +288,14 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     presume a past date. An invented date is *false* — it claims an order applied when
     nothing says it did — where today's date is merely imprecise, and reads for what it
     is: in force when we published it.
+
+    The day goes through `start_of_local_day` rather than a hand-written `Z` suffix:
+    DiaLog reads the offset it is given, so `T00:00:00Z` would place the start two hours
+    before French midnight — on the previous day, all summer.
     """
-    today = datetime.date.today().strftime("%Y-%m-%dT00:00:00Z")
+    df = df.with_columns(pl.lit(datetime.date.today()).alias("_start_date"))
     return df.with_columns(
-        pl.lit(today).alias("period_start_date"),
+        start_of_local_day(df, "_start_date").alias("period_start_date"),
         pl.lit(None).alias("period_end_date"),
         pl.lit("everyDay").alias("period_recurrence_type"),
         pl.lit(True).alias("period_is_permanent"),
