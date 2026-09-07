@@ -385,6 +385,29 @@ REFUSED_SEGMENTS: frozenset[str] = frozenset(
     }
 )
 
+# A pedestrian area only means something to a satnav if it sits on a road a vehicle could
+# otherwise have driven on. The source files as "aire piétonne" a great many things that are
+# not roads: towpaths, rural tracks, park promenades, private condominium lanes, and 295
+# nameless segments. Measured on 2026-09-07: 1 440 of the 3 635 pedestrian-area segments,
+# 40 %, fall under one of the three motives below.
+#
+# What is deliberately **kept**: `Rue Saint Jean` (Vieux Lyon), `Quai Rambaud`,
+# `Rue Victor Hugo`, `Rue Moncey`, `Place de la Mairie` — real pedestrian streets a driver
+# must not enter. Dropping the whole measure to be rid of the noise would have cost 2 786
+# emprises over 54 regulations, four fifths of which describe genuine restrictions.
+#
+# The filter reads the road's name, and a name is a weak predictor — the same shape of rule
+# failed twice today on the API's refusals. It is defensible here because it qualifies
+# business content rather than guessing an API behaviour, and because each motive is
+# separately arguable. It stays coarse: `Chemin de la Digue` and `Voie Communale 6 des
+# Carrières` survive it, and may well deserve to go too.
+PEDESTRIAN_AREA_PRIVATE = r"(?i)priv"
+PEDESTRIAN_AREA_NAMELESS = r"(?i)sans d[ée]nomination|sans nom"
+PEDESTRIAN_AREA_NOT_A_ROAD = (
+    r"(?i)^(chemin rural|promenade|parc |jardin|square |esplanade|berge|voie sans"
+    r"|contre.all[ée]e|passerelle|halage)"
+)
+
 # Ceiling on the locations of one POST. Measured on staging on 2026-09-04: 1 500
 # locations are accepted in 39 s, 2 000 die on a server-side timeout after 43 s — and
 # splitting the same 2 000 across four measures fails identically, so the ceiling is per
@@ -432,6 +455,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(discard_impossible_tonnages)
             .pipe(explode_into_measures)
             .pipe(compute_measure_fields)
+            .pipe(discard_pedestrian_areas_off_the_road_network)
             .pipe(compute_vehicle_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
@@ -499,6 +523,33 @@ def discard_refused_segments(df: pl.DataFrame) -> pl.DataFrame:
             f"{len(REFUSED_SEGMENTS)} entries, measured on the preprod)"
         )
     return df.filter(~refused)
+
+
+def discard_pedestrian_areas_off_the_road_network(df: pl.DataFrame) -> pl.DataFrame:
+    """Drop the pedestrian areas that are not on a road, keep those that are.
+
+    Applied **after** the measures are qualified, so it only ever touches
+    `AIRE_PIETONNE`: a segment's speed limit or tonnage limit is unaffected by its
+    pedestrian status. See `PEDESTRIAN_AREA_*` for what the three motives are and why the
+    measure is filtered rather than dropped whole.
+    """
+    is_area = pl.col("measure_group_key") == pl.lit("AIRE_PIETONNE")
+    name = pl.col("nomvoie1").fill_null("")
+    private = pl.col("domanialite").fill_null("").str.contains(PEDESTRIAN_AREA_PRIVATE)
+    nameless = (pl.col("nomvoie1").is_null()) | name.str.contains(PEDESTRIAN_AREA_NAMELESS)
+    not_a_road = name.str.contains(PEDESTRIAN_AREA_NOT_A_ROAD)
+    discarded = is_area & (private | nameless | not_a_road)
+
+    n = df.select(discarded.sum()).item()
+    if n:
+        logger.info(
+            f"Discarding {n} pedestrian-area segments off the road network "
+            f"({df.select((is_area & private).sum()).item()} private, "
+            f"{df.select((is_area & nameless & ~private).sum()).item()} nameless, "
+            f"{df.select((is_area & not_a_road & ~private & ~nameless).sum()).item()} "
+            f"named as something other than a road)"
+        )
+    return df.filter(~discarded)
 
 
 def discard_impossible_tonnages(df: pl.DataFrame) -> pl.DataFrame:

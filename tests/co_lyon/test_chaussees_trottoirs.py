@@ -171,9 +171,9 @@ def test_a_dimension_limit_is_only_attached_to_an_order_that_mentions_it(clean_d
 
 def test_a_pedestrian_area_is_a_ban_not_a_five_kilometre_speed_limit(clean_data):
     area = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")
-    assert area.height == 1
-    assert area["measure_type_"][0] == "noEntry"
-    assert area["measure_max_speed"][0] is None
+    assert area.height == 2
+    assert set(area["measure_type_"]) == {"noEntry"}
+    assert area["measure_max_speed"].null_count() == area.height
 
 
 def test_a_segment_without_geometry_is_dropped(clean_data):
@@ -412,3 +412,48 @@ def test_a_measure_without_exemptions_stays_simple(regulations):
 
     assert vehicle_set.all_vehicles is True
     assert vehicle_set.to_dict() == {"allVehicles": True}
+
+
+# --- Pedestrian areas that are not on a road ----------------------------------------
+
+
+def test_a_pedestrian_street_is_kept(clean_data):
+    """Rue Saint Jean is the Vieux Lyon: a real ban a driver must not ignore."""
+    labels = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")["location_label"]
+
+    assert any("Saint Jean" in label for label in labels)
+
+
+def test_a_private_lane_is_not_a_pedestrian_area_we_publish():
+    """`domanialite` says private: it is not roadway open to traffic."""
+    kept = _pedestrian_labels()
+
+    assert not any("Tilleuls" in label for label in kept)
+
+
+def test_a_nameless_segment_is_dropped():
+    """295 segments read « Voie sans dénomination » — nothing to tell a driver."""
+    assert not any("sans dénomination" in label for label in _pedestrian_labels())
+
+
+def test_a_rural_track_is_dropped():
+    """A towpath, a park promenade or a rural track is not a road."""
+    assert not any("Chemin Rural" in label for label in _pedestrian_labels())
+
+
+def test_the_filter_only_touches_pedestrian_areas(clean_data):
+    """A private or nameless road keeps its speed limit and its tonnage limit.
+
+    The filter runs after the measures are qualified, so it can only ever remove an
+    `AIRE_PIETONNE`: being private says nothing about whether a 30 km/h limit is real.
+    """
+    others = clean_data.filter(pl.col("measure_group_key") != "AIRE_PIETONNE")
+
+    assert others.height > 0
+    assert "GABARIT_T3_5" in set(others["measure_group_key"])
+
+
+def _pedestrian_labels() -> list[str]:
+    source = DataSourceIntegration.__new__(DataSourceIntegration)
+    clean = source.compute_clean_data(source.validate_raw_data(pl.read_csv(FIXTURE)))
+    return clean.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")["location_label"].to_list()
