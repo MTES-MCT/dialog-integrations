@@ -14,6 +14,7 @@ import pytest
 from integrations.base_integration import BaseIntegration
 from integrations.co_lyon.chaussees_trottoirs.data_source_integration import (
     DataSourceIntegration,
+    chain_segments,
 )
 from integrations.co_lyon.chaussees_trottoirs.regulation_key import (
     is_project,
@@ -94,8 +95,30 @@ def test_dimension_mention_is_recognised():
 def test_rows_sharing_an_order_number_land_in_one_regulation(clean_data):
     """Two segments of the same order are two emprises, not two regulations."""
     order = clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-2024RP44520")
-    assert order.height == 3
-    assert set(order["measure_group_key"]) == {"V30", "AIRE_PIETONNE"}
+    assert order.height == 2
+    assert set(order["measure_group_key"]) == {"V30"}
+
+
+def test_a_numbered_order_carries_only_the_measure_it_decides(clean_data):
+    """An order regulates one thing; its number is merely typed on every segment.
+
+    The fixture's 2024RP44520 covers two 30 km/h segments and one pedestrian area. The
+    pedestrian area is a different act that happens to sit inside the calmed-traffic
+    zone, so it leaves for the metropolitan regulation of its own measure rather than
+    making the order say something it never said.
+    """
+    order = clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-2024RP44520")
+    assert set(order["measure_group_key"]) == {"V30"}
+
+    area = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")
+    assert set(area["regulation_identifier"]) == {"MGL-CT-AIRE_PIETONNE"}
+    assert any("Victor Hugo" in label for label in area["location_label"])
+
+
+def test_a_displaced_measure_drops_the_order_name_from_its_title(clean_data):
+    """A metropolitan regulation must not read "Arrêté n°…" — it is not that act."""
+    area = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")
+    assert set(area["regulation_title"]) == {"Aire piétonne – Métropole de Lyon"}
 
 
 def test_rows_without_an_order_number_group_by_measure_across_the_metropolis(clean_data):
@@ -122,11 +145,21 @@ def test_the_default_urban_speed_is_discarded_but_not_its_segment(clean_data):
     assert tonnage["vehicle_heavyweight_max_weight"][0] == 3.5
 
 
-def test_a_segment_can_feed_two_measures_at_once(clean_data):
-    """One segment, a speed limit and a dimension limit: two measures, same regulation."""
+def test_a_segment_can_feed_two_measures_that_land_in_different_regulations(clean_data):
+    """One segment, a speed limit and a dimension limit — but one act decides only one.
+
+    The order's text says "Tonnage", so the dimension measure is the one it carries; the
+    70 km/h on the same segment joins the metropolitan regulation of its speed. The same
+    segment therefore appears in two regulations, which is correct: two distinct
+    restrictions at the same place.
+    """
     numbered = clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-0AR20180018")
-    assert numbered.height == 2
-    assert set(numbered["measure_group_key"]) == {"V70", "GABARIT_T19_0_H4_5"}
+    assert set(numbered["measure_group_key"]) == {"GABARIT_T19_0_H4_5"}
+
+    speed = clean_data.filter(pl.col("measure_group_key") == "V70")
+    assert set(speed["regulation_identifier"]) == {"MGL-CT-V70"}
+    assert any("Rue du Pont" in label for label in speed["location_label"])
+    assert any("Rue du Pont" in label for label in numbered["location_label"])
 
 
 def test_a_dimension_limit_is_only_attached_to_an_order_that_mentions_it(clean_data):
@@ -249,7 +282,7 @@ def test_the_legacy_behaviour_is_untouched(clean_data):
 
     regulations = integration.create_regulations(clean_data, Ungrouped)
     order = next(r for r in regulations if r.identifier == "MGL-CT-2024RP44520")
-    assert len(measures_of(order)) == 3
+    assert len(measures_of(order)) == 2
     assert all(len(m.locations) == 1 for m in measures_of(order))
 
 
@@ -259,3 +292,123 @@ def test_base_integration_without_a_data_source_keeps_the_old_shape(clean_data):
     regulations = integration.create_regulations(clean_data)
     order = next(r for r in regulations if r.identifier == "MGL-CT-2024RP44520")
     assert all(len(m.locations) == 1 for m in measures_of(order))
+
+
+# --- Chaining contiguous segments ---------------------------------------------------
+
+
+def test_two_segments_meeting_end_to_end_become_one():
+    """AB + BC = AC. The layer cuts a street into stretches of pavement; we put it back."""
+    ab = [[0.0, 0.0], [1.0, 0.0]]
+    bc = [[1.0, 0.0], [2.0, 0.0]]
+
+    assert chain_segments([ab, bc]) == [[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]]]
+
+
+def test_a_segment_pointing_the_other_way_still_joins():
+    """The producer does not orient its geometries; only the shared point matters."""
+    ab = [[0.0, 0.0], [1.0, 0.0]]
+    cb = [[2.0, 0.0], [1.0, 0.0]]
+
+    chained = chain_segments([ab, cb])
+
+    assert len(chained) == 1
+    assert chained[0][0] == [0.0, 0.0] and chained[0][-1] == [2.0, 0.0]
+
+
+def test_a_chain_of_three_collapses_to_one():
+    segments = [
+        [[0.0, 0.0], [1.0, 0.0]],
+        [[1.0, 0.0], [2.0, 0.0]],
+        [[2.0, 0.0], [3.0, 0.0]],
+    ]
+
+    assert chain_segments(segments) == [[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]]
+
+
+def test_segments_that_do_not_touch_stay_apart():
+    """Two disjoint stretches of the same street are not one emprise."""
+    far = [[[0.0, 0.0], [1.0, 0.0]], [[5.0, 0.0], [6.0, 0.0]]]
+
+    assert len(chain_segments(far)) == 2
+
+
+def test_a_junction_stops_the_chain():
+    """Three segments meeting: which one continues which would be arbitrary.
+
+    The merge is topological, so it stops where the topology stops deciding.
+    """
+    segments = [
+        [[0.0, 0.0], [1.0, 0.0]],
+        [[1.0, 0.0], [2.0, 0.0]],
+        [[1.0, 0.0], [1.0, 1.0]],
+    ]
+
+    assert len(chain_segments(segments)) == 3
+
+
+def test_a_closed_loop_is_left_alone():
+    """A segment whose two ends are the same point has nothing to be joined to."""
+    loop = [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]]
+
+    assert chain_segments(loop) == loop
+
+
+def test_chaining_never_loses_a_coordinate():
+    """Whatever the merge does, the covered geometry is the same as before."""
+    segments = [
+        [[0.0, 0.0], [1.0, 0.0]],
+        [[2.0, 0.0], [1.0, 0.0]],
+        [[9.0, 9.0], [8.0, 8.0]],
+    ]
+
+    chained = chain_segments(segments)
+
+    before = {tuple(point) for segment in segments for point in segment}
+    after = {tuple(point) for segment in chained for point in segment}
+    assert before == after
+
+
+# --- Zone à trafic limité -----------------------------------------------------------
+
+
+def test_a_ztl_is_a_ban_with_a_local_access_exemption(clean_data):
+    """A ZTL is not a speed: it is "no entry, except to get there"."""
+    ztl = clean_data.filter(pl.col("measure_group_key") == "ZTL")
+
+    assert ztl.height == 2
+    assert set(ztl["measure_type_"]) == {"noEntry"}
+    assert ztl["vehicle_exempted_types"].to_list() == [["desserteLocale"], ["desserteLocale"]]
+    assert set(ztl["regulation_identifier"]) == {"MGL-CT-2025ZTL001"}
+
+
+def test_the_ztl_replaces_the_speed_the_source_files_for_it(clean_data):
+    """The source files the Presqu'île at 5, 20 or 30 km/h — how one drives inside it.
+
+    That is not what the sign at the entrance says, and publishing both would put two
+    measures on one segment — a redundant `noEntry` for the ones filed at 5 km/h.
+    """
+    labels = clean_data.filter(pl.col("measure_group_key") == "V30")["location_label"]
+    assert not any("Mercière" in label for label in labels)
+
+    areas = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")
+    assert not any("Tupin" in label for label in areas["location_label"])
+
+
+def test_a_ztl_measure_reaches_the_api_with_its_exemption(regulations):
+    """`desserteLocale` must survive `create_save_vehicle_dto`, not be simplified away."""
+    ztl = next(r for r in regulations if r.identifier == "MGL-CT-2025ZTL001")
+    measure = measures_of(ztl)[0]
+
+    assert measure.type_ == "noEntry"
+    assert measure.vehicle_set.all_vehicles is True
+    assert [str(t) for t in measure.vehicle_set.exempted_types] == ["desserteLocale"]
+
+
+def test_a_measure_without_exemptions_stays_simple(regulations):
+    """The simplification path every other source relies on must not change."""
+    speed = next(r for r in regulations if r.identifier == "MGL-CT-V30")
+    vehicle_set = measures_of(speed)[0].vehicle_set
+
+    assert vehicle_set.all_vehicles is True
+    assert vehicle_set.to_dict() == {"allVehicles": True}

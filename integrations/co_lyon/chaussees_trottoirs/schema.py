@@ -23,6 +23,10 @@ class LyonChausseesTrottoirsRawDataSchema(pa.DataFrameModel):
     commune1: str | None = pa.Field(nullable=True)
     insee1: str | None = pa.Field(nullable=True)
 
+    # Zone à trafic limité : accès interdit sauf desserte locale. Vrai sur 338 tronçons
+    # de la Presqu'île (Lyon 1er et 2e), et c'est une mesure à soi, pas une vitesse.
+    ztl: bool | None = pa.Field(nullable=True)
+
     # The measures themselves.
     limitationvitesse: str | None = pa.Field(nullable=True)
     limitationtonnage: float | None = pa.Field(nullable=True)
