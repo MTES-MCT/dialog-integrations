@@ -9,6 +9,7 @@ from integrations.dp_aveyron.limitations_vitesse.data_source_integration import 
     MAX_IDENTIFIER_LENGTH,
     DataSourceIntegration,
     compute_location_fields,
+    compute_period_fields,
     compute_regulation_fields,
 )
 
@@ -306,3 +307,25 @@ def test_an_unknown_side_falls_back_to_both_ways():
     result = compute_location_fields(road(cote=["centre"]))
 
     assert result["location_direction"].to_list() == [DirectionEnum.BOTH.value]
+
+
+def test_the_period_starts_on_the_day_of_the_run_in_french_local_time():
+    """R-39: the source carries no date, so we date the run and never a past day.
+
+    The offset matters as much as the day: DiaLog reads the offset it is given, and the
+    naive `2024-08-12T00:00:00` this used to send was read as UTC — two hours off, on a
+    date that was only the file's last refresh.
+    """
+    import datetime
+    from zoneinfo import ZoneInfo
+
+    expected = datetime.datetime.combine(
+        datetime.date.today(), datetime.time(), tzinfo=ZoneInfo("Europe/Paris")
+    ).isoformat()
+    assert expected.endswith(("+01:00", "+02:00"))
+
+    result = compute_period_fields(stretches())
+
+    assert result["period_start_date"].to_list() == [expected]
+    assert result["period_end_date"].to_list() == [None]
+    assert result["period_is_permanent"].to_list() == [True]

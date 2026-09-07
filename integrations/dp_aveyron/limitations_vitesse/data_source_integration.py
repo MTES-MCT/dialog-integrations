@@ -1,6 +1,7 @@
 """Data source integration for Aveyron : limitations-de-vitesse-du-departement"""
 
 import io
+from datetime import date
 
 import polars as pl
 import requests
@@ -17,6 +18,7 @@ from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_aveyron.limitations_vitesse.schema import (
     AveyronLimitationsVitesseRawDataSchema,
 )
+from integrations.local_time import start_of_local_day
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/limitations-de-vitesse-du-departement-aveyron/exports/parquet"
 
@@ -75,14 +77,27 @@ def compute_measure_fields(df: pl.DataFrame):
 def compute_period_fields(df: pl.DataFrame):
     """
     Compute all period fields for SavePeriodDTO.
-    - period_start_date: 2024-08-12, last update of the file.
-    - period_end_date / : None
+    - period_start_date: the day of the run, at French midnight
+    - period_end_date: None
     - period_recurrence_type: everyDay
     - period_is_permanent: True
+
+    The source carries no date column at all — neither the signature of the arrete nor
+    the day the limit took effect. It used to be dated 2024-08-12, the day the file was
+    last refreshed, which is neither of those: it stated that every limit in the
+    department commenced on a day nothing says it did. R-39 — we never presume a past
+    date — so the run's own day is used, on the same footing as the dateless rows of
+    `restrictions_gabarits`. The regulation being permanent and open-ended, the start
+    date only claims "this applies now".
+
+    It goes through `start_of_local_day` so it carries the real French offset of that
+    day: DiaLog reads the offset it is given, and a naive `2024-08-12T00:00:00` is read
+    as UTC.
     """
+    df = df.with_columns(pl.lit(date.today()).alias("_start_date"))
     return df.with_columns(
         [
-            pl.lit("2024-08-12T00:00:00").alias("period_start_date"),
+            start_of_local_day(df, "_start_date").alias("period_start_date"),
             pl.lit(None).alias("period_end_date"),
             pl.lit("everyDay").alias("period_recurrence_type"),
             pl.lit(True).alias("period_is_permanent"),
