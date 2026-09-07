@@ -47,10 +47,15 @@ from integrations.shared.wfs import LYON_BBOX, assert_lon_lat_bbox, fetch_wfs_fe
 WFS_LAYER = "pvo_patrimoine_voirie.pvochausseetrottoir"
 
 # Every identifier we create is prefixed, so our batch stays recognisable and removable
-# in one go. The organisation already holds 813 Lyon orders pushed by a channel absent
-# from this repository, whose identifiers use 52 municipality prefixes for ~40
-# municipalities — there is no convention to align with (R-29, P-04 still open).
-IDENTIFIER_PREFIX = "MDL-CT"
+# in one go. The organisation already holds 812 Lyon orders pushed by a channel absent
+# from this repository (Litteralis), whose identifiers use 52 municipality prefixes for
+# ~40 municipalities — there is no convention to align with (R-29, P-04 still open).
+#
+# `MGL` is the stem the whole organisation uses: the work sites of
+# `chantiers_perturbants` are `MGL-CHP-`, and these are `MGL-CT-`. One stem means one
+# handle — R-29's point is that a prefixed batch is isolable and removable as a block,
+# and two stems for one organisation would be two blocks to chase.
+IDENTIFIER_PREFIX = "MGL-CT"
 
 # 50 km/h is the default speed in a French built-up area, not a measure anyone decided.
 # It covers 14 638 segments; publishing it would nearly double the volume with an
@@ -329,10 +334,10 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     The identifier rule, in full (R-23):
 
-        MDL-CT-{order key}          when the free-text field yields an order number that
-                                    covers this measure — `MDL-CT-2024RP44520`
-        MDL-CT-{measure signature}  otherwise, one metropolitan-wide regulation per
-                                    distinct measure — `MDL-CT-V30`, `MDL-CT-GABARIT_T3_5`
+        MGL-CT-{order key}          when the free-text field yields an order number that
+                                    covers this measure — `MGL-CT-2024RP44520`
+        MGL-CT-{measure signature}  otherwise, one metropolitan-wide regulation per
+                                    distinct measure — `MGL-CT-V30`, `MGL-CT-GABARIT_T3_5`
 
     The municipality is deliberately absent from the key. Lyon's "Ville 30" order spills
     onto 12 neighbouring municipalities for a handful of boundary segments; prefixing by
