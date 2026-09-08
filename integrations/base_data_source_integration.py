@@ -34,6 +34,16 @@ class RegulationMeasure(TypedDict):
     location_to_abscissa: int | None
     location_to_side: str | None
     location_direction: str | None
+    # Named street fields (roadType = lane), geocoded by DiaLog
+    location_city_code: str | None
+    location_city_label: str | None
+    location_road_name: str | None
+    location_from_point_type: str | None
+    location_from_house_number: str | None
+    location_from_road_name: str | None
+    location_to_point_type: str | None
+    location_to_house_number: str | None
+    location_to_road_name: str | None
     # Regulation fields (prefixed with regulation_)
     regulation_identifier: str
     regulation_category: str
@@ -52,6 +62,7 @@ class RegulationMeasure(TypedDict):
     vehicle_max_length: float | None
     vehicle_exempted_types: list[str] | None
     vehicle_restricted_types: list[str] | None
+    vehicle_other_restricted_type_text: str | None
     vehicle_other_exempted_type_text: str | None
 
 

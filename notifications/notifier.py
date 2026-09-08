@@ -116,13 +116,29 @@ class TchapNotifier:
             except (json.JSONDecodeError, TypeError):
                 result = {}
 
-            success = bool(result.get("success", False)) if isinstance(result, dict) else False
+            if not isinstance(result, dict):
+                result = {}
+            success = bool(result.get("success", False))
             icon = "✅" if success else "❌"
             status_text = "Importé avec succès" if success else "Erreur lors de l'import"
 
-            text_lines.append(f"{icon} {org} : {status_text}")
+            counts = self._format_counts(result)
+            headline = f"{icon} {org} : {status_text}"
+            if counts:
+                headline += f" — {counts}"
+            text_lines.append(headline)
+
+            details = self._format_details(result)
+            text_lines += [f"    {detail}" for detail in details]
+
+            html_details = "".join(
+                f"<li>{html.escape(detail, quote=False)}</li>" for detail in details
+            )
             html_items.append(
-                f"<li>{icon} <strong>{html.escape(org, quote=False)}</strong> : {status_text}</li>"
+                f"<li>{icon} <strong>{html.escape(org, quote=False)}</strong> : {status_text}"
+                + (f" — {html.escape(counts, quote=False)}" if counts else "")
+                + (f"<ul>{html_details}</ul>" if html_details else "")
+                + "</li>"
             )
 
         if not html_items:
@@ -136,6 +152,55 @@ class TchapNotifier:
             f"<h4>{title}</h4><p>Rapport généré le {now}.</p><ul>{''.join(html_items)}</ul>"
         )
         return "\n".join(text_lines), formatted_body
+
+    # Wording of the synchronization counters, as the team reads them in Tchap.
+    COUNT_LABELS = (("created", "créé"), ("updated", "mis à jour"), ("deleted", "supprimé"))
+    HELD_LABELS = {"create": "créations", "update": "mises à jour", "delete": "suppressions"}
+
+    @classmethod
+    def _format_counts(cls, result: dict) -> str:
+        """Created / updated / deleted, when the run reported them.
+
+        Results from before synchronization existed only carry `success`; they must
+        keep rendering exactly as they did.
+        """
+        parts = []
+        for key, label in cls.COUNT_LABELS:
+            value = result.get(key)
+            if not isinstance(value, int) or isinstance(value, bool):
+                continue
+            plural = "s" if value > 1 and not label.endswith("jour") else ""
+            parts.append(f"{value} {label}{plural}")
+
+        if not parts:
+            return ""
+        if all(part.startswith("0 ") for part in parts):
+            return "aucun changement"
+
+        errors = result.get("errors")
+        if isinstance(errors, int) and errors > 0:
+            parts.append(f"{errors} en échec")
+        return ", ".join(parts)
+
+    @classmethod
+    def _format_details(cls, result: dict) -> list[str]:
+        """Held batches and source volumes, on their own lines."""
+        details = []
+
+        held = result.get("held")
+        if isinstance(held, dict) and held:
+            rendered = ", ".join(
+                f"{count} {cls.HELD_LABELS.get(operation, operation)}"
+                for operation, count in sorted(held.items())
+            )
+            details.append(f"⚠️ lot retenu (plafond dépassé) : {rendered} — à revoir")
+
+        source = result.get("source")
+        if isinstance(source, dict) and source:
+            rendered = ", ".join(f"{name} : {value}" for name, value in source.items())
+            details.append(f"Volumétries source — {rendered}")
+
+        return details
 
     @staticmethod
     def _clean(value: str | None) -> str | None:

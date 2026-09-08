@@ -152,3 +152,57 @@ def test_missing_configuration_is_skipped_locally(monkeypatch, without_configura
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
     TchapNotifier().send_notification(RESULTS)
+
+
+# --- Synchronization counters ------------------------------------------------------
+
+SYNCHRONIZED = {
+    "result_co_paris": (
+        '{"success":true,"created":12,"updated":3,"deleted":1,'
+        '"held":{"delete":60},"source":{"arrêtés du périmètre":5297,"mesures":11230}}'
+    )
+}
+
+
+def test_a_result_without_counters_reads_exactly_as_before(notifier):
+    body, formatted_body = notifier.format_message(RESULTS)
+
+    assert "✅ co_brest : Importé avec succès" in body
+    assert "—" not in body
+    assert "<ul>" in formatted_body and "<li><ul>" not in formatted_body
+
+
+def test_the_counters_are_shown_per_organization(notifier):
+    body, formatted_body = notifier.format_message(SYNCHRONIZED)
+
+    assert "✅ co_paris : Importé avec succès — 12 créés, 3 mis à jour, 1 supprimé" in body
+    assert "12 créés, 3 mis à jour, 1 supprimé" in formatted_body
+
+
+def test_a_run_that_changed_nothing_says_so(notifier):
+    body, _ = notifier.format_message(
+        {"result_co_brest": '{"success":true,"created":0,"updated":0,"deleted":0}'}
+    )
+
+    assert "aucun changement" in body
+
+
+def test_a_held_batch_is_reported_for_review(notifier):
+    body, formatted_body = notifier.format_message(SYNCHRONIZED)
+
+    assert "lot retenu (plafond dépassé) : 60 suppressions — à revoir" in body
+    assert "60 suppressions" in formatted_body
+
+
+def test_source_volumes_are_reported_when_given(notifier):
+    body, _ = notifier.format_message(SYNCHRONIZED)
+
+    assert "Volumétries source — arrêtés du périmètre : 5297, mesures : 11230" in body
+
+
+def test_failed_writes_are_counted_next_to_the_successes(notifier):
+    body, _ = notifier.format_message(
+        {"result_co_rennes": '{"success":true,"created":5,"updated":0,"deleted":0,"errors":2}'}
+    )
+
+    assert "5 créés, 0 mis à jour, 0 supprimé, 2 en échec" in body

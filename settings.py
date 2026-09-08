@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Organization = Enum(
@@ -29,6 +30,13 @@ class Settings(BaseSettings):
     base_url: str | None = None
     client_id: str | None = None
     client_secret: str | None = None
+
+    # Source credentials that are not DiaLog's own, hence read without the DIALOG_ prefix.
+    # Only co_paris uses this one; it stays None everywhere else.
+    eudonet_paris_credentials: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("EUDONET_PARIS_CREDENTIALS", "eudonet_paris_credentials"),
+    )
 
     def __init__(self, organization: str, env: str = "dev", **data: Any):
         candidates = []
@@ -61,20 +69,30 @@ class Settings(BaseSettings):
 
 
 class OrganizationSettings:
+    # Every organization must carry these to talk to the DiaLog API.
+    REQUIRED_VALUES = ("base_url", "client_id", "client_secret")
+
     organization: str
+    # Which environment the settings were loaded for; only used to label reports and
+    # to print a copy-pastable command line.
+    env: str = "dev"
     base_url: str | None = None
     client_id: str | None = None
     client_secret: str | None = None
+    # Optional, source-specific credentials. Absent for every organization but co_paris.
+    eudonet_paris_credentials: str | None = None
 
-    def __init__(self, settings: Settings, organization: str):
+    def __init__(self, settings: Settings, organization: str, env: str = "dev"):
         self.organization = organization
+        self.env = env
         self.base_url = settings.base_url
         self.client_id = settings.client_id
         self.client_secret = settings.client_secret
+        # getattr: offline tools pass a duck-typed stand-in that only carries the required
+        # values.
+        self.eudonet_paris_credentials = getattr(settings, "eudonet_paris_credentials", None)
 
-        missing_values = [
-            name for (name, value) in vars(self).items() if value is None and name != "organization"
-        ]
+        missing_values = [name for name in self.REQUIRED_VALUES if getattr(self, name) is None]
         if missing_values:
             raise Exception(f"Invalid settings for {organization}: {missing_values}")
 
@@ -82,4 +100,4 @@ class OrganizationSettings:
     def from_env(cls, organization: str, env: str = "dev") -> "OrganizationSettings":
         """Create OrganizationSettings from organization and environment."""
         settings = Settings(organization=organization, env=env)
-        return cls(settings, organization)
+        return cls(settings, organization, env=env)

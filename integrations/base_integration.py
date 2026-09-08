@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from importlib import util as importlib_util
 
 import polars as pl
@@ -17,21 +18,29 @@ from api.dia_log_client.api.private.post_api_regulations_add import (
 from api.dia_log_client.api.private.put_api_regulations_publish import (
     sync_detailed as publish_regulation,
 )
+from api.dia_log_client.api.private.put_api_regulations_update import (
+    sync_detailed as update_regulation,
+)
 from api.dia_log_client.models import (
     MeasureTypeEnum,
     PostApiRegulationsAddBody,
     PostApiRegulationsAddBodyCategory,
     PostApiRegulationsAddBodyStatus,
     PostApiRegulationsAddBodySubject,
+    PutApiRegulationsUpdateBody,
     RoadTypeEnum,
     SaveLocationDTO,
     SaveMeasureDTO,
+    SaveNamedStreetDTO,
     SaveNumberedRoadDTO,
     SavePeriodDTO,
     SaveRawGeoJSONDTO,
     SaveVehicleSetDTO,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration, RegulationMeasure
+from integrations.diff_report import SourceFunnel, render_report
+from integrations.reconciliation import IntegrationOutcome, UpdateMode, reconcile
+from integrations.state import Digest, SnapshotStore, compute_regulation_digest
 from settings import OrganizationSettings
 
 
@@ -42,6 +51,19 @@ class BaseIntegration:
     status: PostApiRegulationsAddBodyStatus = PostApiRegulationsAddBodyStatus.DRAFT
     organization_settings: OrganizationSettings
     data_sources: list[type[BaseDataSourceIntegration]]
+
+    # --- Synchronization, opt-in per organization ---------------------------------
+    # These defaults reproduce the historical behavior: purely additive, create what is
+    # missing, never update, never delete. An organization opts in by overriding them.
+    #
+    # `identifier_prefix` bounds every destructive operation to the regulations this
+    # pipeline owns; without it deletion is refused, not merely disabled.
+    identifier_prefix: str | None = None
+    max_deletions_per_run: int | None = None
+    max_updates_per_run: int | None = None
+    max_creations_per_run: int | None = None
+    delete_missing: bool = False
+    update_changed: bool = False
 
     def __init__(self, organization_settings: OrganizationSettings, client: Client):  # type: ignore
         self.organization_settings = organization_settings
@@ -86,74 +108,241 @@ class BaseIntegration:
 
         return getattr(module, "Integration")(organization_settings, client)
 
-    def integrate_regulations(self, limit_to=[], update_existing: bool | None = None) -> None:
-        """
-        Integrate regulations from all data sources.
-        Iterates over data sources, collects data, and integrates.
-        """
-        # Get all data sources
-        # Collect clean data from all sources
+    def integrate_regulations(
+        self,
+        limit_to=[],
+        update_existing: bool | None = None,
+        dry_run: bool = False,
+        force_deletions: bool = False,
+    ) -> IntegrationOutcome:
+        """Make DiaLog match what the data sources produce today.
 
-        # Get existing regulation IDs
-        try:
-            integrated_regulation_ids = self.fetch_regulation_ids()
-        except Exception as e:
-            logger.info(
-                f"Could not fetch existing regulation ids"
-                f", defaulting to update_existing=False - {e}"
-            )
-            integrated_regulation_ids = []
-            update_existing = False
+        Three operations: create what DiaLog does not have, update what changed since
+        the snapshot of our last send, delete what left the source (inside our prefix
+        only). `dry_run` computes everything and writes nothing — neither to DiaLog nor
+        to the snapshot.
+        """
+        outcome = IntegrationOutcome(organization=self.organization, dry_run=dry_run)
+
+        # A failure here used to fall back to "this organization holds nothing", which
+        # re-created the whole corpus as duplicates. It now stops the run.
+        remote_identifiers = self.fetch_regulation_ids()
+
+        update_mode = self._update_mode(update_existing)
+        regulations: dict[str, PostApiRegulationsAddBody] = {}
+        digests: dict[str, Digest] = {}
+        source_of: dict[str, str] = {}
+        funnels: list[SourceFunnel] = []
+        stores: dict[str, SnapshotStore] = {}
 
         for data_source in self.data_sources:
-            logger.info(f"Processing data source: {data_source.name}")
-            clean_data = data_source(
-                self.organization_settings, self.client
-            ).compute_data_regulations()
+            name = data_source.name or data_source.__name__
+            logger.info(f"Processing data source: {name}")
+            source = data_source(self.organization_settings, self.client)
+            clean_data, raw_rows = self._compute_clean_data(source)
 
             # Only process whitelisted identifiers
             if limit_to and len(limit_to) > 0:
                 logger.info(f"Limiting processing to following ids : {limit_to}")
                 clean_data = clean_data.filter(pl.col("regulation_identifier").is_in(limit_to))
 
-            logger.info(f"Total records from all sources: {clean_data.shape[0]}")
+            logger.info(f"Total records from source {name}: {clean_data.shape[0]}")
 
-            # Create regulations from combined data
-            regulations = self.create_regulations(clean_data)
-            for regulation in regulations:
+            source_regulations = self.create_regulations(clean_data)
+            for regulation in source_regulations:
                 regulation.identifier = f"{regulation.identifier}"
                 regulation.status = self.status
-            num_measures = sum([len(regulation.measures or []) for regulation in regulations])
-            logger.info(f"Created {len(regulations)} regulations with a total of {num_measures}")
-
-            # Filter regulations to create
-            regulation_ids_to_create = set([r.identifier for r in regulations]) - set(
-                integrated_regulation_ids
+            num_measures = sum(
+                [len(regulation.measures or []) for regulation in source_regulations]
             )
-            regulations_to_create = [
-                regulation
-                for regulation in regulations
-                if regulation.identifier in regulation_ids_to_create
-            ]
-            logger.info(f"Found {len(regulations_to_create)} new regulations to integrate")
+            logger.info(
+                f"Created {len(source_regulations)} regulations with a total of {num_measures}"
+            )
 
-            # Integrate new regulations
-            self._integrate_regulations_add(regulations_to_create)
-
-            if update_existing:
-                # Filter regulations to update
-                regulation_ids_to_update = set([r.identifier for r in regulations]) & set(
-                    integrated_regulation_ids
+            metrics = self._source_metrics(source)
+            outcome.source.update(metrics)
+            funnels.append(
+                SourceFunnel(
+                    name=name,
+                    raw_rows=raw_rows,
+                    clean_rows=clean_data.shape[0],
+                    regulations=len(source_regulations),
+                    measures=num_measures,
+                    metrics=metrics,
                 )
-                regulations_to_update = [
-                    regulation
-                    for regulation in regulations
-                    if regulation.identifier in regulation_ids_to_update
-                ]
-                logger.info(f"Found {len(regulations_to_update)} regulations to update")
+            )
 
-                # Integrate updated regulations
-                self._integrate_regulations_update(regulations_to_update)
+            for regulation in source_regulations:
+                identifier = str(regulation.identifier)
+                if identifier in regulations:
+                    logger.warning(
+                        f"Identifier {identifier} is produced by two data sources; "
+                        f"keeping the one from {name}"
+                    )
+                regulations[identifier] = regulation
+                digests[identifier] = compute_regulation_digest(regulation)
+                source_of[identifier] = name
+            stores[name] = SnapshotStore(self.organization, name)
+
+        # The snapshot only exists for organizations that opted into update detection.
+        snapshot = self._load_snapshot(stores) if self.update_changed else None
+
+        plan = reconcile(
+            digests,
+            remote_identifiers,
+            snapshot,
+            identifier_prefix=self.identifier_prefix,
+            update_mode=update_mode,
+            delete_missing=self.delete_missing,
+            max_creations=self.max_creations_per_run,
+            max_updates=self.max_updates_per_run,
+            max_deletions=self.max_deletions_per_run,
+            force_deletions=force_deletions,
+        )
+        outcome.planned = plan.planned
+        outcome.held = plan.held
+        outcome.report = render_report(
+            organization=self.organization,
+            environment=getattr(self.organization_settings, "env", "dev"),
+            dry_run=dry_run,
+            plan=plan,
+            funnels=funnels,
+            produced=digests,
+            snapshot=snapshot,
+            force_deletions=force_deletions,
+        )
+        # Logged before writing anything, so a real run leaves the same trace as a
+        # dry run in the CI log.
+        logger.info(outcome.report)
+
+        if dry_run:
+            logger.info("Dry run: nothing sent to DiaLog, snapshot left untouched")
+            return outcome
+
+        created = self._integrate_regulations_add(
+            [regulations[identifier] for identifier in plan.creations.applicable]
+        )
+        updated = self._integrate_regulations_update(
+            [regulations[identifier] for identifier in plan.updates.applicable]
+        )
+        deleted = self._delete_regulations(plan.deletions.applicable)
+
+        outcome.created = len(created)
+        outcome.updated = len(updated)
+        outcome.deleted = len(deleted)
+        attempted = (
+            len(plan.creations.applicable)
+            + len(plan.updates.applicable)
+            + len(plan.deletions.applicable)
+        )
+        outcome.errors = attempted - outcome.created - outcome.updated - outcome.deleted
+
+        if self.update_changed:
+            self._save_snapshots(
+                stores=stores,
+                source_of=source_of,
+                digests=digests,
+                snapshot=snapshot,
+                # Held or failed updates keep their previous fingerprint, so tomorrow
+                # detects them again, identically.
+                keep_previous=set(plan.updates.identifiers) - set(updated),
+                # Nothing was written for these: leave them out so they are retried.
+                skipped=set(plan.creations.identifiers) - set(created),
+            )
+
+        return outcome
+
+    def _update_mode(self, update_existing: bool | None) -> UpdateMode:
+        """Reconcile the CLI flag with the organization's own setting.
+
+        `--update-existing` keeps its historical meaning — replace everything already in
+        DiaLog, whatever the snapshot says — because it is used by hand together with
+        `--identifiers`. `update_changed` is the daily, snapshot-driven mode.
+        """
+        if update_existing is True:
+            return "all"
+        if update_existing is False:
+            return "none"
+        return "changed" if self.update_changed else "none"
+
+    @staticmethod
+    def _compute_clean_data(source: BaseDataSourceIntegration) -> tuple[pl.DataFrame, int | None]:
+        """Run the source pipeline, counting the raw rows it read on the way.
+
+        The count is taken by wrapping the instance's `fetch_raw_data`, so a source that
+        overrides `compute_data_regulations` is measured just the same, and no data
+        source has to know about the report.
+        """
+        raw_rows: list[int] = []
+        original_fetch = source.fetch_raw_data
+
+        def counting_fetch(*args, **kwargs):
+            raw = original_fetch(*args, **kwargs)
+            raw_rows.append(int(getattr(raw, "height", 0)))
+            return raw
+
+        setattr(source, "fetch_raw_data", counting_fetch)
+        try:
+            clean_data = source.compute_data_regulations()
+        finally:
+            # The wrapper only ever lived on the instance; the class is left alone.
+            source.__dict__.pop("fetch_raw_data", None)
+
+        return clean_data, sum(raw_rows) if raw_rows else None
+
+    @staticmethod
+    def _source_metrics(source: BaseDataSourceIntegration) -> dict[str, int]:
+        """Read the optional `metrics` a data source may expose.
+
+        A source that measures its own volumes (how many regulations the source holds
+        in scope, how many measures) sets `self.metrics: dict[str, int]` while fetching.
+        Keys are the French labels shown in the Tchap message. Sources that define
+        nothing are unaffected.
+        """
+        metrics = getattr(source, "metrics", None)
+        if not isinstance(metrics, dict):
+            return {}
+        return {
+            str(name): int(value)
+            for name, value in metrics.items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        }
+
+    @staticmethod
+    def _load_snapshot(stores: dict[str, SnapshotStore]) -> dict[str, Digest] | None:
+        """Merge every source snapshot, or None when not a single one exists."""
+        merged: dict[str, Digest] = {}
+        found = False
+        for store in stores.values():
+            loaded = store.load()
+            if loaded is not None:
+                found = True
+                merged.update(loaded)
+        return merged if found else None
+
+    @staticmethod
+    def _save_snapshots(
+        *,
+        stores: dict[str, SnapshotStore],
+        source_of: dict[str, str],
+        digests: dict[str, Digest],
+        snapshot: dict[str, Digest] | None,
+        keep_previous: set[str],
+        skipped: set[str],
+    ) -> None:
+        """Record what is now in DiaLog, one snapshot per data source."""
+        previous = snapshot or {}
+        for name, store in stores.items():
+            state: dict[str, Digest] = {}
+            for identifier, owner in source_of.items():
+                if owner != name or identifier in skipped:
+                    continue
+                if identifier in keep_previous:
+                    if identifier in previous:
+                        state[identifier] = previous[identifier]
+                    continue
+                state[identifier] = digests[identifier]
+            store.save(state)
 
     def publish_regulations(self) -> None:
         regulation_ids = self.fetch_regulation_ids()
@@ -176,8 +365,9 @@ class BaseIntegration:
             f"Finished publishing {len(regulation_ids) - count_error} measures successfully"
         )
 
-    def _integrate_regulations_add(self, regulations: list[PostApiRegulationsAddBody]) -> None:
-        count_error = 0
+    def _integrate_regulations_add(self, regulations: list[PostApiRegulationsAddBody]) -> list[str]:
+        """POST every regulation; return the identifiers actually created."""
+        created: list[str] = []
         for index, regulation in enumerate(regulations):
             logger.info(
                 f"Creating regulation {index + 1}/{len(regulations)}: {regulation.identifier}"
@@ -187,45 +377,83 @@ class BaseIntegration:
                 resp = add_regulation(client=self.client, body=regulation)
             except Exception as e:
                 logger.error(f"Failed to create: {regulation.identifier} - {e}")
-                count_error += 1
             else:
-                if resp.status_code != 201:
+                if resp.status_code == 201:
+                    created.append(str(regulation.identifier))
+                else:
                     logger.error(
                         f"Failed to create: {regulation.identifier} - got status {resp.status_code}"
                     )
                     logger.error(json.loads(resp.content))
-                    count_error += 1
 
-        count_success = len(regulations) - count_error
         logger.success(
-            f"Finished integrating {count_success}/{len(regulations)} regulations successfully"
+            f"Finished integrating {len(created)}/{len(regulations)} regulations successfully"
         )
+        return created
 
-    def _integrate_regulations_update(self, regulations: list[PostApiRegulationsAddBody]) -> None:
-        count_error = 0
+    def _integrate_regulations_update(
+        self, regulations: list[PostApiRegulationsAddBody]
+    ) -> list[str]:
+        """PUT every regulation; return the identifiers actually updated.
+
+        `PUT /api/regulations` replaces the regulation as a whole. It supersedes the
+        former DELETE-then-POST, which lost the regulation when the POST failed (F-05).
+        """
+        updated: list[str] = []
         for index, regulation in enumerate(regulations):
             logger.info(
                 f"Updating regulation {index + 1}/{len(regulations)}: {regulation.identifier}"
             )
             logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
 
+            body = PutApiRegulationsUpdateBody.from_dict(regulation.to_dict())
             try:
-                delete_regulation(identifier=str(regulation.identifier), client=self.client)
-                resp = add_regulation(client=self.client, body=regulation)
+                resp = update_regulation(client=self.client, body=body)
             except Exception as e:
-                logger.error(f"Failed to create: {regulation.identifier} - {e}")
-                count_error += 1
+                logger.error(f"Failed to update: {regulation.identifier} - {e}")
             else:
-                if resp.status_code != 201:
+                if resp.status_code in (200, 201, 204):
+                    updated.append(str(regulation.identifier))
+                else:
                     logger.error(
-                        f"Failed to create: {regulation.identifier} - got status {resp.status_code}"
+                        f"Failed to update: {regulation.identifier} - got status {resp.status_code}"
                     )
                     logger.error(json.loads(resp.content))
-                    count_error += 1
-        count_success = len(regulations) - count_error
+
         logger.success(
-            f"Finished updating {count_success}/{len(regulations)} regulations successfully"
+            f"Finished updating {len(updated)}/{len(regulations)} regulations successfully"
         )
+        return updated
+
+    def _delete_regulations(self, identifiers: Sequence[str]) -> list[str]:
+        """DELETE every identifier; return those that are gone from DiaLog.
+
+        Callers must have checked the prefix first: this method deletes what it is
+        given.
+        """
+        deleted: list[str] = []
+        for index, identifier in enumerate(identifiers):
+            logger.info(f"Deleting regulation {index + 1}/{len(identifiers)}: {identifier}")
+            try:
+                resp = delete_regulation(identifier=str(identifier), client=self.client)
+            except Exception as e:
+                logger.error(f"Failed to delete: {identifier} - {e}")
+                continue
+
+            if resp.status_code in (200, 204):
+                deleted.append(str(identifier))
+            elif resp.status_code == 404:
+                # Already gone: the goal state is reached, drop it from the snapshot.
+                logger.warning(f"{identifier} was already absent from DiaLog (404)")
+                deleted.append(str(identifier))
+            else:
+                logger.error(f"Failed to delete: {identifier} - got status {resp.status_code}")
+
+        if identifiers:
+            logger.success(
+                f"Finished deleting {len(deleted)}/{len(identifiers)} regulations successfully"
+            )
+        return deleted
 
     def create_measure(self, measure: RegulationMeasure) -> SaveMeasureDTO:
         """
@@ -342,8 +570,15 @@ class BaseIntegration:
                 ): SaveNumberedRoadDTO(**location_fields),
             }
             return SaveLocationDTO(**payload)
+        elif road_type == RoadTypeEnum.LANE:
+            # Named street: DiaLog geocodes cityCode + roadName (+ house numbers or
+            # intersections) itself. No geometry is sent.
+            return SaveLocationDTO(
+                road_type=road_type,
+                named_street=SaveNamedStreetDTO(**location_fields),
+            )
         else:
-            raise Exception(f"Location saving not implemented for  RoadType {road_type.value}")
+            raise Exception(f"Location saving not implemented for RoadType {road_type.value}")
 
     def create_save_vehicle_dto(self, measure: RegulationMeasure) -> SaveVehicleSetDTO:
         """

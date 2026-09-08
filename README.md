@@ -102,6 +102,12 @@ Usage: dialog integrate [OPTIONS]
 │ --update-existing    --no-update-existing                Update existing regulations    │
 │ --env                                        TEXT        Environment: dev or prod       │
 │                                                          [default: dev]                 │
+│ --dry-run                                                Compute everything, write      │
+│                                                          nothing, print the report.     │
+│ --force-deletions                                        Release a deletion batch held  │
+│                                                          by its cap.                    │
+│ --json                                                   Print the run result as JSON   │
+│                                                          on stdout (for CI).            │
 │ --help                                                   Show this message and exit.    │
 ╰─────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -110,6 +116,68 @@ Exemples :
 * `dialog integrate dp_aveyron --env=prod --update-existing --identifiers "25067/RESTRICTION-GABARIT"`
 * `dialog integrate co_brest --env=dev`
 * `dialog integrate dp_sarthe --env=prod --update-existing --identifiers=1,280,8,459,478,17`
+* `dialog integrate co_paris --env=dev --dry-run` (voir « Synchronisation » ci-dessous)
+
+
+## Synchronisation
+
+Par défaut la pipeline est **additive** : elle crée les arrêtés absents de DiaLog, ne met rien à jour et ne supprime rien. Une organisation peut activer les trois opérations en surchargeant des attributs de classe dans son `integration.py` :
+
+```python
+class Integration(BaseIntegration):
+    identifier_prefix = "PARIS-EUDO-"   # borne toute opération destructrice
+    delete_missing = True               # supprimer ce qui a disparu de la source
+    update_changed = True               # republier ce qui a changé depuis l'envoi précédent
+    max_deletions_per_run = 50
+    max_updates_per_run = 300
+    max_creations_per_run = None        # plafond non armé
+```
+
+| Opération | Source de vérité |
+|---|---|
+| Création | `GET /api/organization/identifiers` — identifiant absent de DiaLog |
+| Suppression | même endpoint — identifiant présent, **dans notre préfixe**, absent de la production du jour |
+| Mise à jour | l'**instantané** de ce qu'on a envoyé la fois précédente, via `PUT /api/regulations` |
+
+### Le préfixe, garde-fou principal
+
+Une organisation DiaLog reçoit souvent des arrêtés par d'autres canaux que ce dépôt. `identifier_prefix` borne le rayon d'action :
+
+* **sans préfixe, la suppression est refusée** (exception), pas seulement désactivée ;
+* un identifiant produit qui ne commence pas par le préfixe **arrête l'exécution** avant toute écriture : c'est le garde-fou contre un préfixe appliqué deux fois ou oublié dans une branche de la transformation.
+
+### Les plafonds et les lots retenus
+
+Un lot au-dessus de son plafond est **retenu en entier** — rien n'est appliqué — et signalé « à revoir manuellement ». Son ancienne empreinte reste dans l'instantané : il est redétecté à l'identique le lendemain, jusqu'à ce qu'on le relâche.
+
+```shell
+uv run dialog integrate co_paris --env=prod --dry-run           # lire le rapport
+uv run dialog integrate co_paris --env=prod --force-deletions   # relâcher les suppressions
+```
+
+`--force-deletions` ne relâche que le lot de suppressions.
+
+### L'instantané
+
+`state/{organisation}/{source}.json.gz` : un digest par arrêté (titre, catégorie, objet, et par mesure le type, la vitesse, la période, le jeu de véhicules et la localisation). On compare à cette empreinte de **notre propre envoi**, jamais à une relecture de DiaLog : l'API réécrit une partie de ce qu'elle reçoit et une relecture republierait tout le corpus chaque jour.
+
+* `DIALOG_STATE_DIR` déplace le dossier (en CI il vit dans le cache GitHub Actions).
+* **Instantané absent = aucune mise à jour**, et il est reconstruit à la fin de l'exécution. Un cache perdu coûte une journée de mises à jour, jamais une réécriture de masse.
+* Seuls les arrêtés effectivement écrits y entrent ; les supprimés en sortent.
+
+### `--dry-run`
+
+```shell
+uv run dialog integrate co_paris --env=dev --dry-run
+```
+
+Calcule tout — extraction, transformation, lots — et **n'écrit rien**, ni dans DiaLog ni dans l'instantané. Seule requête réseau vers DiaLog : le `GET /api/organization/identifiers`, en lecture. Le rapport donne l'entonnoir (lignes brutes, lignes nettoyées, arrêtés, mesures), les trois lots avec leurs plafonds, les identifiants concernés, un diff champ par champ pour chaque mise à jour, et les lots retenus. Le même rapport est journalisé avant écriture en exécution réelle.
+
+`--json` imprime le résultat de l'exécution sur la sortie standard (`{"success": true, "created": n, "updated": n, "deleted": n, "held": {…}, "source": {…}}`) ; les journaux restent sur la sortie d'erreur, donc `uv run dialog integrate co_paris --json > result.json` produit un fichier propre. C'est ce que consomme la CI.
+
+### Volumétries source
+
+Une source de données peut publier ses propres volumétries en renseignant `self.metrics: dict[str, int]` pendant `fetch_raw_data` (par exemple `{"arrêtés du périmètre": 5297, "mesures": 11230}`). `BaseIntegration` les lit si elles existent, les affiche dans le rapport et les fait remonter dans le message Tchap. Les sources qui n'en déclarent pas ne sont pas concernées.
 
 
 ## .env
