@@ -1,9 +1,9 @@
 """Tests for the Métropole de Lyon roadway integration.
 
-The fixture is twelve hand-written segments, one per case the source really contains:
-a numbered order spanning several segments, a pedestrian area, a dimension limit sitting
-on a 50 km/h road, an order number annotated as a mere project, and a segment without
-geometry.
+The fixture is twenty hand-written segments, one per case the source really contains:
+a numbered order spanning several segments, a pedestrian area labelled or not, a dimension
+limit sitting on a 50 km/h road or on an 80 km/h one, an order number annotated as a mere
+project, a zone à trafic limité, and a segment without geometry.
 """
 
 import json
@@ -15,6 +15,12 @@ from integrations.base_integration import BaseIntegration
 from integrations.co_lyon.chaussees_trottoirs.data_source_integration import (
     DataSourceIntegration,
     chain_segments,
+    compute_measure_fields,
+    discard_impossible_tonnages,
+    discard_pedestrian_areas_off_the_road_network,
+    discard_refused_segments,
+    explode_into_measures,
+    read_order_number,
 )
 from integrations.co_lyon.chaussees_trottoirs.regulation_key import (
     is_project,
@@ -69,6 +75,45 @@ def regulations(clean_data: pl.DataFrame):
     ],
 )
 def test_order_number_absorbs_the_observed_spellings(text, expected):
+    assert order_number(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        # The field stacks the regulatory layers of a segment, newest first — 3 481 rows
+        # in descending vintage order against 21 the other way. The first citation is the
+        # order in force, whatever separates it from the next one: a full stop, a dash or
+        # a line break.
+        (
+            "ZCA : 2022 - Arrêté N°2024RP44520. ZCA : 2019 - Arrêté N°2019RP36023 le 25/07/19",
+            "2024RP44520",
+        ),
+        (
+            "ZCA : 2022 - Arrêté N°2024RP44520 - ZCA : 2022 - Arrêté N°2022RP41281 du 17/05/2022",
+            "2024RP44520",
+        ),
+        (
+            "ZCA : Arrêté n° 2025RP48763 - 2022 - Arrêté N°2024RP44520. ZCA : 2018",
+            "2025RP48763",
+        ),
+        (
+            "ZCA : Arrêté n° 2025RP47402\r\n2022 - Arrêté N°2024RP44520. ZCA : 2019",
+            "2025RP47402",
+        ),
+        # …but a dash inside the number is not a separator. A bare dash delimiter would
+        # truncate these into another regulation.
+        ("Arrêté n°VOI-2023 - 120 du 28/06/23", "VOI-2023 - 120"),
+        ("ZCA : 2023 - Arrêté n°PV 2023 - 478 du 02/11/23", "PV 2023 - 478"),
+        # And when the second citation is tied to a measure rather than to a vintage, it
+        # is the one that governs: these rows carry the height limit, not the Ville 30.
+        (
+            "ZCA : 2022 - Arrêté N°2024RP44520 / Lim hauteur - Arrêté N°2022RP40610 du 04/03/2022",
+            "2022RP40610",
+        ),
+    ],
+)
+def test_a_field_citing_several_orders_keeps_the_one_in_force(text, expected):
     assert order_number(text) == expected
 
 
@@ -145,6 +190,14 @@ def test_the_default_urban_speed_is_discarded_but_not_its_segment(clean_data):
     assert tonnage["vehicle_heavyweight_max_weight"][0] == 3.5
 
 
+def test_the_default_rural_speed_is_discarded_like_the_urban_one(clean_data):
+    """80 km/h outside a built-up area is nobody's decision either — the tonnage stays."""
+    assert "V80" not in set(clean_data["measure_group_key"])
+    tonnage = clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-GABARIT_T7_5")
+    assert tonnage.height == 1
+    assert any("Strasbourg" in label for label in tonnage["location_label"])
+
+
 def test_a_segment_can_feed_two_measures_that_land_in_different_regulations(clean_data):
     """One segment, a speed limit and a dimension limit — but one act decides only one.
 
@@ -171,7 +224,7 @@ def test_a_dimension_limit_is_only_attached_to_an_order_that_mentions_it(clean_d
 
 def test_a_pedestrian_area_is_a_ban_not_a_five_kilometre_speed_limit(clean_data):
     area = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")
-    assert area.height == 2
+    assert area.height == 3  # Victor Hugo, Saint Jean, Fernand Rude — the three labelled
     assert set(area["measure_type_"]) == {"noEntry"}
     assert area["measure_max_speed"].null_count() == area.height
 
@@ -414,31 +467,47 @@ def test_a_measure_without_exemptions_stays_simple(regulations):
     assert vehicle_set.to_dict() == {"allVehicles": True}
 
 
-# --- Pedestrian areas that are not on a road ----------------------------------------
+# --- Pedestrian areas: what the source calls one -------------------------------------
 
 
-def test_a_pedestrian_street_is_kept(clean_data):
+def test_a_labelled_pedestrian_area_is_kept(clean_data):
     """Rue Saint Jean is the Vieux Lyon: a real ban a driver must not ignore."""
     labels = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")["location_label"]
 
     assert any("Saint Jean" in label for label in labels)
 
 
-def test_a_private_lane_is_not_a_pedestrian_area_we_publish():
-    """`domanialite` says private: it is not roadway open to traffic."""
-    kept = _pedestrian_labels()
+def test_a_label_beats_the_name(clean_data):
+    """Esplanade Fernand Rude is a pedestrian area, whatever "Esplanade" suggests.
 
-    assert not any("Tilleuls" in label for label in kept)
+    The producer states it in `reglementationzca`; guessing from the name would drop it,
+    and 44 of the 381 labelled areas are in that case.
+    """
+    labels = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")["location_label"]
+
+    assert any("Fernand Rude" in label for label in labels)
 
 
-def test_a_nameless_segment_is_dropped():
-    """295 segments read « Voie sans dénomination » — nothing to tell a driver."""
-    assert not any("sans dénomination" in label for label in _pedestrian_labels())
+def test_five_kilometres_per_hour_alone_is_not_a_pedestrian_area(clean_data):
+    """3 254 segments are filed at 5 km/h without the label — we publish none of them.
+
+    Allée des Tilleuls, Voie sans dénomination and Chemin Rural 20 all read 5 km/h and
+    carry no `reglementationzca`. Publishing a `noEntry` there would state a driving ban
+    the source never states.
+    """
+    labels = list(
+        clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")["location_label"]
+    )
+
+    assert not any("Tilleuls" in label for label in labels)
+    assert not any("sans dénomination" in label for label in labels)
+    assert not any("Chemin Rural" in label for label in labels)
 
 
-def test_a_rural_track_is_dropped():
-    """A towpath, a park promenade or a rural track is not a road."""
-    assert not any("Chemin Rural" in label for label in _pedestrian_labels())
+def test_an_unlabelled_five_kilometre_segment_is_not_published_as_a_speed_limit(clean_data):
+    """Dropping the ban must not turn it into a "5 km/h" advisory instead."""
+    assert "V5" not in set(clean_data["measure_group_key"])
+    assert not any("Tilleuls" in label for label in clean_data["location_label"])
 
 
 def test_the_filter_only_touches_pedestrian_areas(clean_data):
@@ -453,7 +522,33 @@ def test_the_filter_only_touches_pedestrian_areas(clean_data):
     assert "GABARIT_T3_5" in set(others["measure_group_key"])
 
 
-def _pedestrian_labels() -> list[str]:
+# --- The rule that preceded it, kept for rollback ------------------------------------
+
+
+def test_the_name_based_rule_still_works_if_we_roll_back():
+    """`discard_pedestrian_areas_off_the_road_network` is out of the pipeline, not gone.
+
+    It stays covered so that putting it back is one `.pipe()` call, not a rewrite. It
+    drops what its name says — and, as the fixture shows, one labelled area too.
+    """
     source = DataSourceIntegration.__new__(DataSourceIntegration)
-    clean = source.compute_clean_data(source.validate_raw_data(pl.read_csv(FIXTURE)))
-    return clean.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")["location_label"].to_list()
+    qualified = source.validate_raw_data(pl.read_csv(FIXTURE)).pipe(_qualified_measures)
+
+    kept = discard_pedestrian_areas_off_the_road_network(qualified)
+    labels = list(kept.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")["nomvoie1"])
+
+    assert "Rue Saint Jean" in labels
+    assert "Allée des Tilleuls" not in labels
+    assert "Chemin Rural 20" not in labels
+    assert "Esplanade Fernand Rude" not in labels  # the label loses to the name
+
+
+def _qualified_measures(df: pl.DataFrame) -> pl.DataFrame:
+    """Raw rows carried up to the point where the two pedestrian rules apply."""
+    return (
+        df.pipe(discard_refused_segments)
+        .pipe(read_order_number)
+        .pipe(discard_impossible_tonnages)
+        .pipe(explode_into_measures)
+        .pipe(compute_measure_fields)
+    )

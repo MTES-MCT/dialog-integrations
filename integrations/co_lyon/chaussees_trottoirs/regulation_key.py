@@ -18,19 +18,49 @@ eight spellings observed on 2026-08-12; it will not absorb the ninth.
 import re
 
 # « Arrêté N° », « Arrêté n », « Arrêté » — then the number, non-greedy, up to the first
-# closing delimiter: "du", "le", a full stop followed by a space, a comma, or the end of
-# the string. The number itself may contain a space ("UC 22-272").
+# closing delimiter. The number itself may contain a space ("UC 22-272") and a slash
+# ("08/2023").
 ORDER_NUMBER_PATTERN = re.compile(
-    r"[Aa]rr[eê]t[eé]\s*[Nn]?\s*[°ºo]?\s*"
+    # "Arrêté", and the spellings actually present: "Arrété" (é in first position,
+    # 2 rows) and "Arrêtéé" (doubled é, 2 rows).
+    r"arr[eéê]t[eéê]{1,2}"
+    # One word in between: "Arrêté permanent N° : AR-12/12/2025-17".
+    r"(?:\s+permanent)?"
+    # "N°", "n", "N° :", or nothing at all. Repeated: "Arrêté n°n°08/2023" exists.
+    r"(?:\s*[Nn]\s*[°ºo]?)*"
+    r"\s*:?\s*"
     r"([A-Za-z0-9][A-Za-z0-9\-/_\.\s]*?)"
-    r"(?=\s+(?:du|le|en|à)\s|\.\s|\.$|,|$)",
+    # End of the number: a linking word, a punctuation mark, or the end of the string.
+    #
+    # A slash only closes it when **preceded by a space** ("N°A_2022_0839 / Proposition");
+    # glued to the digits it belongs to the number ("n°08/2023"). And only when no other
+    # order follows it: "N°2024RP44520 / Lim hauteur - Arrêté N°2022RP40610" ties the
+    # second number to the height limit those rows carry, so the slash must not close the
+    # first one and hand the row to the generic calmed-traffic order.
+    #
+    # A dash closes it only when what follows opens a new regulatory layer — "ZCA", "ZTL"
+    # or a vintage year. 2 377 segments stack several orders in one field, separated by a
+    # full stop, a dash or a line break, and the producer writes them **newest first**:
+    # 3 481 rows in descending vintage order against 21 the other way (2026-09-09 draw).
+    # So the first citation is the order in force, and the dash has to close the number
+    # for the first one to win. Qualified, because a number can hold a dash of its own:
+    # "Arrêté n°VOI-2023 - 120" (6 rows) and "Arrêté n°PV 2023 - 478" (3 rows) are single
+    # numbers, and a bare dash would truncate them into a different regulation.
+    #
+    # A colon is **not** a closing delimiter: only "Arrêté 607-2023 : circulation
+    # interdite…" (3 rows) would need it, and a colon is what separates "ZCA" from its
+    # vintage everywhere else.
+    r"(?=\s+(?:du|le|en|à)\s|\s+/(?!.*arr[eéê]t[eéê])"
+    r"|\s+-\s(?=(?:ZCA|ZTL)\b|\d{4}\b)|[\r\n]|\.\s|\.$|,|$)",
     re.IGNORECASE,
 )
 
 # The annotation that marks a *project* rather than an order in force. 6 057 segments
 # carry it, and 5 985 of them are still limited to 50 km/h: reading the order number it
 # cites as a justification would publish 682 km of 30 km/h zones that do not exist.
-PROJECT_PATTERN = re.compile(r"proposition", re.IGNORECASE)
+# "apaisable" is there to absorb the typo "Prpoposition zone apaisable" (1 row): the
+# word never appears outside a proposal.
+PROJECT_PATTERN = re.compile(r"propos|apaisab", re.IGNORECASE)
 
 # Words that show the cited order is about vehicle dimensions and not only about the
 # calmed-traffic zone the field otherwise describes.

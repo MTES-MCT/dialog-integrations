@@ -24,8 +24,10 @@ qualified separately, so discarding one never discards the other, and the same s
 legitimately appears in two regulations — its speed under its order, its tonnage under
 the metropolitan regulation of that tonnage. Two distinct restrictions at one place.
 
-Measured on the 2026-08-12 snapshot: 25 171 emprises → 990 measures → 677 regulations,
-of which 599 carry a real order number and 78 are metropolitan-wide fallbacks.
+Replayed on 2026-09-09 on the 2026-09-07 export: 21 503 emprises → 701 regulations, one
+measure each — 597 carry a real order number, 104 are metropolitan-wide fallbacks — then
+10 070 emprises once contiguous segments are chained, and 703 POSTs once the two
+regulations above the ceiling are split.
 """
 
 import datetime
@@ -75,11 +77,36 @@ IDENTIFIER_PREFIX = "MGL-CT"
 # information no order carries.
 DEFAULT_URBAN_SPEED = "50"
 
+# 80 km/h is the default speed outside a built-up area since 2018, the counterpart of the
+# 50 inside: a segment filed at 80 states no decision either. The layer carries no "inside
+# a built-up area" flag, so the rule is on the value alone. Measured on the 2026-09-07
+# export: 138 segments, 118 once the API's refusals are removed — routes départementales
+# and their bypasses (RD 306, RD 303, Déviation Jonage), 56 emprises once chained.
+# Decision of 2026-09-09.
+DEFAULT_RURAL_SPEED = "80"
+
+# Segments whose `domanialite` is "État" — the A46, the A7, the Rocade Est — are kept on
+# purpose, under the Métropole's name. The Métropole did not decide those limits, but its
+# inventory is the only channel through which they reach DiaLog at all. Decision of
+# 2026-09-09, recorded in `ai/docs/vers-l-equipe.md` ("Les libertés qu'on prend"): 375
+# speed-bearing segments at 70, 90, 110 or 130 km/h on the 2026-09-07 export, once the
+# API's own refusals are removed.
+
 # The source files a pedestrian area as a 5 km/h speed limit. A pedestrian area is first
 # a ban on driving, and "5 km/h" would read as a speed advisory on a GPS. Business call
 # of 2026-09-04: publish it as `noEntry`, pending the product team's answer on the
 # exemptions (residents, deliveries, emergency services) which the source does not carry.
 PEDESTRIAN_AREA_SPEED = "5"
+
+# …but 5 km/h alone does not make a pedestrian area. `reglementationzca` is the producer's
+# own word for the zone, and it agrees with the speed exactly wherever it is filled:
+# "Zone 30" is always 30, "Zone de rencontre" always 20, "Aire Piétonne" always 5. It is
+# filled on 381 of the 3 635 segments we would otherwise publish (2026-09-09 draw), so
+# inferring the area from the speed would state a driving ban on 1 860 streets the source
+# never calls pedestrian — Rue du Pavé, Place de Milan, Allée de la Prairie. We publish
+# what the producer asserts and drop the rest (R-35 again: no invented threshold, and no
+# invented ban either).
+PEDESTRIAN_AREA_LABEL = "Aire Piétonne"
 
 # Does an order number read off the free-text field also cover the dimension limit of
 # the same row? The field describes the calmed-traffic zone, so by default it does not:
@@ -101,7 +128,9 @@ ZTL_REPLACES_SPEED = True
 # Segments the API refuses whatever regulation they are put in — 271 of the 23 896 we
 # post, measured on the preprod on 2026-09-07 by `ai/tools/probe_refused_segments.py`
 # (3 309 probes, deliberately not versioned). Keyed on `codetroncon`, which comes from the
-# road reference system rather than from the export, so an entry survives a re-export.
+# road reference system rather than from the export, so an entry survives a re-export —
+# but not a split or a merge of the segment: the producer reshapes ~20 segments a month
+# (R-22), so the list also rots slowly, in both directions.
 #
 # **Do not try to replace this list with a rule.** Two were tested against it and both
 # fail: naming (190 refused segments are called "Autoroute", but 81 are not — RD 342,
@@ -455,7 +484,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(discard_impossible_tonnages)
             .pipe(explode_into_measures)
             .pipe(compute_measure_fields)
-            .pipe(discard_pedestrian_areas_off_the_road_network)
+            .pipe(discard_unlabelled_pedestrian_areas)
             .pipe(compute_vehicle_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
@@ -525,6 +554,43 @@ def discard_refused_segments(df: pl.DataFrame) -> pl.DataFrame:
     return df.filter(~refused)
 
 
+def discard_unlabelled_pedestrian_areas(df: pl.DataFrame) -> pl.DataFrame:
+    """Keep the pedestrian areas the producer labels as such, drop the rest.
+
+    Applied **after** the measures are qualified, so it only ever touches
+    `AIRE_PIETONNE`: the tonnage or height limit of the same segment is unaffected, and a
+    5 km/h segment inside a ZTL keeps its ban.
+
+    What it drops is not noise — it is the part we cannot vouch for. A segment at 5 km/h
+    with no `reglementationzca` may be a pedestrian area the producer has not labelled
+    yet, or a road genuinely limited to walking pace. Nothing in the layer separates the
+    two, and the error is not symmetric: publishing `noEntry` on an open street sends a
+    GPS elsewhere, while publishing nothing merely stays silent about a restriction.
+    The volume dropped is reported to the team in `ai/docs/vers-l-equipe.md`, with the
+    question that would settle it — is `reglementationzca` exhaustive, or only filled on
+    recent zones?
+    """
+    is_area = pl.col("measure_group_key") == pl.lit("AIRE_PIETONNE")
+    labelled = pl.col("reglementationzca") == pl.lit(PEDESTRIAN_AREA_LABEL)
+    discarded = is_area & ~labelled.fill_null(False)
+
+    n = df.select(discarded.sum()).item()
+    if n:
+        logger.info(
+            f"Discarding {n} segments filed at {PEDESTRIAN_AREA_SPEED} km/h that the source "
+            f"does not call a « {PEDESTRIAN_AREA_LABEL} »; keeping "
+            f"{df.select((is_area & labelled.fill_null(False)).sum()).item()} labelled ones"
+        )
+    return df.filter(~discarded)
+
+
+# Out of the pipeline since 2026-09-09, kept for rollback: it was the rule that decided,
+# on names and on `domanialite` alone, which of the 5 km/h segments were real pedestrian
+# areas — because the label above was not read. Reinstating it is one `.pipe()` call in
+# `compute_clean_data`. Note that it also drops 44 of the 381 *labelled* areas (27 on a
+# private domain, 3 nameless, 14 named "Esplanade", "Promenade", "Passage"…), which is
+# the producer being second-guessed on its own statement: Esplanade Fernand Rude and
+# Jardin de la Grande Côte are pedestrian areas, whatever their name suggests.
 def discard_pedestrian_areas_off_the_road_network(df: pl.DataFrame) -> pl.DataFrame:
     """Drop the pedestrian areas that are not on a road, keep those that are.
 
@@ -590,8 +656,9 @@ def explode_into_measures(df: pl.DataFrame) -> pl.DataFrame:
     """Turn one row per road segment into one row per (segment, measure).
 
     A segment limited to 30 km/h *and* closed to vehicles over 3.5 t states two measures.
-    Qualifying them separately is what lets us drop the 50 km/h without losing the
-    tonnage limit that sits on the same segment.
+    Qualifying them separately is what lets us drop a default speed — 50 km/h inside a
+    built-up area, 80 outside — without losing the tonnage limit that sits on the same
+    segment.
 
     A **zone à trafic limité** is the exception: it replaces the speed of its segments
     instead of sitting beside it. The source files the ZTL of the Presqu'île as 5, 20 or
@@ -602,12 +669,13 @@ def explode_into_measures(df: pl.DataFrame) -> pl.DataFrame:
     the speed alongside instead.
     """
     is_ztl = pl.col("ztl").fill_null(False)
+    default_speeds = [DEFAULT_URBAN_SPEED, DEFAULT_RURAL_SPEED]
 
     ztl = df.filter(is_ztl).with_columns(pl.lit("ztl").alias("measure_kind"))
 
     speeds = df.filter(
         pl.col("limitationvitesse").is_not_null()
-        & (pl.col("limitationvitesse") != DEFAULT_URBAN_SPEED)
+        & ~pl.col("limitationvitesse").is_in(default_speeds)
         & (~is_ztl if ZTL_REPLACES_SPEED else pl.lit(True))
     ).with_columns(pl.lit("speed").alias("measure_kind"))
 
@@ -627,8 +695,8 @@ def explode_into_measures(df: pl.DataFrame) -> pl.DataFrame:
     logger.info(
         f"Exploded {df.height} segments into {total} measures "
         f"({speeds.height} speed, {dimensions.height} dimension, {ztl.height} ZTL); "
-        f"{df.height - speeds.height - ztl.height} speed measures discarded as the default "
-        f"{DEFAULT_URBAN_SPEED} km/h or an empty speed"
+        f"{df.height - speeds.height - ztl.height} speed measures discarded as a default "
+        f"speed ({' or '.join(default_speeds)} km/h) or an empty speed"
     )
     return pl.concat([speeds, dimensions, ztl], how="vertical")
 
@@ -796,12 +864,14 @@ def principal_measure_of_each_order(df: pl.DataFrame) -> pl.DataFrame:
     noEntry *and* two tonnage limits *and* 20 km/h: an administrative act saying seven
     things it never said.
 
-    The order's own measure is the one covering the most of its emprises. Measured on the
-    2026-09-07 draw: 46 of the 48 multi-measure orders have a strict majority, and it is
-    overwhelming where it matters — 5 462 of 5 701 emprises for 2024RP44520 (96 %). Ties
-    and the two orders below 50 % (`2025ZTL001` at 41 %, `0AR20180018` at 47 %) are broken
-    on emprise count then on the signature itself, so the choice never depends on row
-    order and stays identical from one run to the next (R-20).
+    The order's own measure is the one covering the most of its emprises — R-28's
+    "reasonable effort", not a truth: which measure an act really carries is asked of the
+    Métropole in `ai/docs/vers-l-equipe.md`. Replayed on 2026-09-09: 45 orders carry
+    several measures, 38 have a strict majority, and it is overwhelming where it matters —
+    5 462 of 5 701 emprises for 2024RP44520 on the 2026-09-07 draw (96 %). The 7 ties
+    (6 emprises or fewer each) are broken on emprise count then on the signature itself,
+    so the choice never depends on row order and stays identical from one run to the next
+    (R-20). Since the ZTL replaces the speed of its segments, no order sits below 50 %.
     """
     return (
         df.filter(pl.col("order_key").is_not_null())

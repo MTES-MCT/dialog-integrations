@@ -9,12 +9,13 @@ from .chaussees_trottoirs.data_source_integration import (
 class Integration(BaseIntegration):
     """Main integration class for Métropole de Lyon.
 
-    ⚠️ `PUBLISHED` is set on purpose for the staging run of 2026-09-04. Publishing is
-    **irreversible** — a published regulation never goes back to draft — and a published
-    regulation is broadcast (DATEX II, CIFS). Switch back to `DRAFT` before pointing this
-    integration at production.
+    `DRAFT` on purpose. Publishing is **irreversible** — a published regulation never goes
+    back to draft — and a published regulation is broadcast (DATEX II, CIFS). The batch is
+    created as drafts, checked by the bizdev (P-10, step 6), and published once the
+    producer agrees (step 8). The staging run of 2026-09-04 was made with `PUBLISHED`;
+    that setting must not reach production.
     """
 
-    status = PostApiRegulationsAddBodyStatus.PUBLISHED
+    status = PostApiRegulationsAddBodyStatus.DRAFT
 
     data_sources = [ChausseesTrottoirs]

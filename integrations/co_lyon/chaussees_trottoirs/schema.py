@@ -14,7 +14,8 @@ class LyonChausseesTrottoirsRawDataSchema(pa.DataFrameModel):
 
     # Segment identity. `codetroncon` is unique across the layer and comes from the road
     # reference system rather than from the export, which makes it a better candidate
-    # than a `gid` — its stability over time is still unverified (R-22).
+    # than a `gid`. It is not stable for good: the producer confirmed on 2026-09-07 that
+    # segments get split and merged, ~20 a month (R-22, measured at ~0,04 % per month).
     codetroncon: str
     codefuv: str | None = pa.Field(nullable=True)
 
@@ -31,6 +32,13 @@ class LyonChausseesTrottoirsRawDataSchema(pa.DataFrameModel):
     # Zone à trafic limité : accès interdit sauf desserte locale. Vrai sur 338 tronçons
     # de la Presqu'île (Lyon 1er et 2e), et c'est une mesure à soi, pas une vitesse.
     ztl: bool | None = pa.Field(nullable=True)
+
+    # What the producer itself calls the calmed-traffic zone: "Zone 30" (15 206 rows,
+    # all at 30 km/h), "Zone de rencontre" (1 632, all at 20) and "Aire Piétonne" (472,
+    # all at 5). The agreement with `limitationvitesse` is exact wherever the column is
+    # filled, which is what makes it trustworthy — but it is filled on 12 % of the 5 km/h
+    # rows only. See `discard_unlabelled_pedestrian_areas`.
+    reglementationzca: str | None = pa.Field(nullable=True)
 
     # The measures themselves.
     limitationvitesse: str | None = pa.Field(nullable=True)
