@@ -45,21 +45,44 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         )
 
 
-def compute_measure_fields(df: pl.DataFrame):
+def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     """
-    Compute mesure fields
-    - measure_type_ : "NOENTRY" (travaux)
+    Compute measure fields from `mode_exp` (the traffic arrangement during the works).
+
+    Mapping, value by value (case-insensitive):
+    - contains "alternat" (Alternat, Alternat feux, Alternat manuel) -> ALTERNATEROAD
+    - "Route barrée avec déviation" -> NOENTRY
+    - "Déviation 2 sens" -> NOENTRY (traffic diverted in both directions: the section is closed)
+
+    Any other value is dropped and counted. The source has no speed column, so a
+    "Limitation de vitesse" cannot be published as a speed limitation and is dropped too.
+    Never fall back to NOENTRY: a wrongly published road closure is broadcast to GPS apps.
     """
-    return df.with_columns(
+    mode_exp = pl.col("mode_exp").str.to_lowercase().str.strip_chars()
+
+    df = df.with_columns(
         [
-            pl.when(pl.col("mode_exp").str.to_lowercase() == "alternat")
+            pl.when(mode_exp.str.contains("alternat"))
             .then(pl.lit(MeasureTypeEnum.ALTERNATEROAD.value))
-            .when(pl.col("mode_exp").str.to_lowercase().str.contains("Limitation de vitesse"))
-            .then(pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value))
-            .otherwise(pl.lit(MeasureTypeEnum.NOENTRY.value))
+            .when(mode_exp.str.starts_with("route barrée"))
+            .then(pl.lit(MeasureTypeEnum.NOENTRY.value))
+            .when(mode_exp == "déviation 2 sens")
+            .then(pl.lit(MeasureTypeEnum.NOENTRY.value))
+            .otherwise(pl.lit(None))
             .alias("measure_type_"),
         ]
     )
+
+    unmapped = df.filter(pl.col("measure_type_").is_null())
+    if unmapped.height > 0:
+        values = unmapped["mode_exp"].value_counts().sort("count", descending=True)
+        logger.warning(
+            f"Dropping {unmapped.height} rows due to unable to infer restriction type "
+            f"from mode_exp: {values.rows()}"
+        )
+    df = df.filter(pl.col("measure_type_").is_not_null())
+
+    return df
 
 
 def compute_period_fields(df: pl.DataFrame):
