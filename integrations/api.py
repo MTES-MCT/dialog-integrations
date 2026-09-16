@@ -18,6 +18,9 @@ from api.dia_log_client.api.private.delete_api_regulations_delete import (
 from api.dia_log_client.api.private.get_api_organization_identifiers import (
     sync_detailed as get_identifiers,
 )
+from api.dia_log_client.api.private.get_api_regulations_get import (
+    sync_detailed as get_regulation,
+)
 from api.dia_log_client.api.private.post_api_regulations_add import (
     sync_detailed as add_regulation,
 )
@@ -53,6 +56,18 @@ class DialogApi:
         if resp.parsed is None or not hasattr(resp.parsed, "identifiers"):
             raise Exception("Failed to fetch identifiers")
         return list(resp.parsed.identifiers)  # type: ignore
+
+    def get(self, identifier: str) -> dict | None:
+        """GET a regulation as the API serializes it; None when it cannot be read."""
+        try:
+            resp = get_regulation(identifier=identifier, client=self.client)
+        except Exception as e:
+            logger.error(f"Failed to read: {identifier} - {e}")
+            return None
+        if resp.status_code != 200:
+            logger.error(f"Failed to read: {identifier} - got status {resp.status_code}")
+            return None
+        return json.loads(resp.content)
 
     def add(self, regulation: PostApiRegulationsAddBody) -> bool:
         """POST a regulation; True when the API answered 201."""

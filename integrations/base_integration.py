@@ -22,6 +22,8 @@ from api.dia_log_client.models import (
 from integrations import payloads
 from integrations.api import DialogApi, build_client
 from integrations.base_data_source_integration import BaseDataSourceIntegration, RegulationMeasure
+from integrations.shared.zone_sections import MAX_SECTIONS_PER_LENGTH, MIN_SECTION_LENGTH_M
+from integrations.zone_flow import create_zone_regulation, has_zone
 from settings import OrganizationSettings
 
 
@@ -33,6 +35,13 @@ class BaseIntegration:
     status: PostApiRegulationsAddBodyStatus = PostApiRegulationsAddBodyStatus.DRAFT
     organization_settings: OrganizationSettings
     data_sources: list[type[BaseDataSourceIntegration]]
+
+    # When True, a regulation whose locations are zones is created through
+    # `zone_flow.create_zone_regulation`: four calls that republish only the street
+    # sections worth publishing, and refuse a zone covering several parallel roads.
+    resolve_zones_to_sections: bool = False
+    min_section_length_m: float = MIN_SECTION_LENGTH_M
+    max_sections_per_length: float = MAX_SECTIONS_PER_LENGTH
 
     def __init__(self, organization_settings: OrganizationSettings, client: Client):  # type: ignore
         self.organization_settings = organization_settings
@@ -165,19 +174,35 @@ class BaseIntegration:
         return identifiers
 
     def _integrate_regulations_add(self, regulations: list[PostApiRegulationsAddBody]) -> None:
-        count_error = 0
+        count_error = count_refused = 0
         for index, regulation in enumerate(regulations):
             logger.info(
                 f"Creating regulation {index + 1}/{len(regulations)}: {regulation.identifier}"
             )
             logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
-            if not self.api.add(regulation):
+            outcome = self._create_regulation(regulation)
+            if outcome == "failed":
                 count_error += 1
+            elif outcome == "refused":
+                count_refused += 1
 
-        count_success = len(regulations) - count_error
+        count_success = len(regulations) - count_error - count_refused
+        if count_refused:
+            logger.warning(f"{count_refused} regulation(s) refused by the pipeline itself")
         logger.success(
             f"Finished integrating {count_success}/{len(regulations)} regulations successfully"
         )
+
+    def _create_regulation(self, regulation: PostApiRegulationsAddBody) -> str:
+        """One regulation, through the zone flow when it applies."""
+        if self.resolve_zones_to_sections and has_zone(regulation):
+            return create_zone_regulation(
+                self.api,
+                regulation,
+                min_length_m=self.min_section_length_m,
+                max_sections_per_length=self.max_sections_per_length,
+            )
+        return "created" if self.api.add(regulation) else "failed"
 
     def _integrate_regulations_update(self, regulations: list[PostApiRegulationsAddBody]) -> None:
         """DELETE then POST. If the POST fails the regulation is gone (D-06); unchanged here."""

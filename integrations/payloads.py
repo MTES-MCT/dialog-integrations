@@ -24,6 +24,7 @@ from api.dia_log_client.models import (
     SaveRawGeoJSONDTO,
     SaveTimeSlotDTO,
     SaveVehicleSetDTO,
+    SaveZoneDTO,
 )
 from integrations.base_data_source_integration import RegulationMeasure
 
@@ -124,6 +125,10 @@ def build_location(measure: RegulationMeasure) -> SaveLocationDTO:
             road_type=road_type,
             raw_geo_json=SaveRawGeoJSONDTO(**location_fields),
         )
+    if road_type == RoadTypeEnum.ZONE:
+        # A polygon drawn by the producer; DiaLog computes the street sections it
+        # covers. Same fields as rawGeoJSON: a label and a GeoJSON geometry.
+        return SaveLocationDTO(road_type=road_type, zone=SaveZoneDTO(**location_fields))
     if road_type in (RoadTypeEnum.DEPARTMENTALROAD, RoadTypeEnum.NATIONALROAD):
         numbered = SaveNumberedRoadDTO(**location_fields)
         if road_type == RoadTypeEnum.NATIONALROAD:
