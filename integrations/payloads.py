@@ -22,6 +22,7 @@ from api.dia_log_client.models import (
     SaveNumberedRoadDTO,
     SavePeriodDTO,
     SaveRawGeoJSONDTO,
+    SaveTimeSlotDTO,
     SaveVehicleSetDTO,
 )
 from integrations.base_data_source_integration import RegulationMeasure
@@ -95,10 +96,20 @@ def build_period(measure: RegulationMeasure) -> SavePeriodDTO:
     `startTime` and `endTime` are mirrored from the dates. The API splits a single
     instant across two fields: it takes the day from `startDate` and the clock from
     `startTime`, and reads that clock in Europe/Paris.
+
+    `period_time_slots` is the one period field that is not a scalar: it carries the
+    daily slots, which the API expects as `SaveTimeSlotDTO` objects rather than plain
+    mappings. Absent or null, the measure applies around the clock.
     """
     period_fields = _fields_with_prefix(measure, "period_")
     period_fields["start_time"] = period_fields.get("start_date")
     period_fields["end_time"] = period_fields.get("end_date")
+
+    time_slots = period_fields.pop("time_slots", None) or []
+    period_fields["time_slots"] = [
+        SaveTimeSlotDTO(start_time=slot["start_time"], end_time=slot["end_time"])
+        for slot in time_slots
+    ]
     return SavePeriodDTO(**period_fields)
 
 

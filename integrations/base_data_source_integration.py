@@ -19,6 +19,7 @@ class RegulationMeasure(TypedDict):
     period_end_date: str | None
     period_recurrence_type: str | None
     period_is_permanent: bool | None
+    period_time_slots: list[dict[str, str]] | None
     # Location fields (prefixed with location_)
     location_road_type: str
     location_label: str | None
