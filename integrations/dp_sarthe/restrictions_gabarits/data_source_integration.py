@@ -16,7 +16,7 @@ from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_sarthe.restrictions_gabarits.schema import (
     SartheRestrictionGabaritsRawDataSchema,
 )
-from integrations.local_time import start_of_local_day
+from integrations.shared.local_time import start_of_local_day
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_restrictions_gabarits/exports/csv?lang=fr&timezone=Europe%2FLondon&use_labels=true&delimiter=%3B"
 

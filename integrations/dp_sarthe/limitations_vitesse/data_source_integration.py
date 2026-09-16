@@ -13,7 +13,7 @@ from api.dia_log_client.models import (
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_sarthe.limitations_vitesse.schema import SartheRawDataSchema
-from integrations.local_time import start_of_local_day
+from integrations.shared.local_time import start_of_local_day
 
 URL = (
     "https://data.sarthe.fr"

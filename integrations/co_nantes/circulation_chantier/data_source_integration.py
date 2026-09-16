@@ -13,7 +13,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
-from integrations.local_time import from_epoch_ms
+from integrations.shared.local_time import from_epoch_ms
 
 from .schema import NantesCirculationChantierRawDataSchema
 

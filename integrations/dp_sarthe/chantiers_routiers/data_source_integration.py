@@ -13,7 +13,7 @@ from api.dia_log_client.models import (
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_sarthe.chantiers_routiers.schema import SartheChantiersRoutiersSchema
-from integrations.local_time import end_of_local_day, start_of_local_day
+from integrations.shared.local_time import end_of_local_day, start_of_local_day
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_chantiers_routiers/exports/parquet"
 LOCAL_FILE = "explorations/dp_sarthe/data/227200029_chantiers_routiers.parquet"

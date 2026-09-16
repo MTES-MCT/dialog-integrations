@@ -10,7 +10,7 @@ from datetime import date, datetime
 import polars as pl
 import pytest
 
-from integrations.local_time import end_of_local_day, start_of_local_day
+from integrations.shared.local_time import end_of_local_day, start_of_local_day
 
 
 def naive_frame(*days: date) -> pl.DataFrame:
