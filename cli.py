@@ -21,6 +21,18 @@ IdsOption = Annotated[
 ]
 UpdateOption = Annotated[bool | None, typer.Option(help="Update existing regulations")]
 EnvOption = Annotated[str, typer.Option(help="Environment: dev or prod")]
+DryRunOption = Annotated[
+    bool,
+    typer.Option("--dry-run", help="Compute everything, write nothing, print the report."),
+]
+ForceDeletionsOption = Annotated[
+    bool,
+    typer.Option("--force-deletions", help="Release a deletion batch held by its cap."),
+]
+JsonOption = Annotated[
+    bool,
+    typer.Option("--json", help="Print the run result as JSON on stdout (for CI)."),
+]
 
 
 @app.command()
@@ -29,11 +41,25 @@ def integrate(
     identifiers: IdsOption = None,
     update_existing: UpdateOption = None,
     env: EnvOption = "dev",
+    dry_run: DryRunOption = False,
+    force_deletions: ForceDeletionsOption = False,
+    json_output: JsonOption = False,
 ):
     """Sync data for a specific organization to Dialog API."""
     dialog_integration = BaseIntegration.from_organization(organization.name, env=env)
     logger.info(f"Integrating measures for organization: {organization.name} (env: {env})")
-    dialog_integration.integrate_regulations(limit_to=identifiers, update_existing=update_existing)
+    outcome = dialog_integration.integrate_regulations(
+        limit_to=identifiers,
+        update_existing=update_existing,
+        dry_run=dry_run,
+        force_deletions=force_deletions,
+    )
+
+    # Logs go to stderr, so `dialog integrate ... --json > result.json` stays clean.
+    if json_output:
+        typer.echo(json.dumps(outcome.to_result(), ensure_ascii=False))
+    elif dry_run:
+        typer.echo(outcome.report)
 
 
 @app.command()

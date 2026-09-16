@@ -41,3 +41,6 @@ CLAUDE.md
 
 # Rapports lors des runs
 reports/
+
+# Instantané de synchronisation (voir README, section Synchronisation)
+state/
