@@ -6,14 +6,312 @@
         "version": "1.0.0"
     },
     "paths": {
+        "/api/regulations/datex": {
+            "get": {
+                "tags": [
+                    "Public"
+                ],
+                "operationId": "get_api_regulations_datex",
+                "parameters": [
+                    {
+                        "name": "includePermanent",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    },
+                    {
+                        "name": "includeTemporary",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    },
+                    {
+                        "name": "includeExpired",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": ""
+                    }
+                }
+            },
+            "head": {
+                "tags": [
+                    "Public"
+                ],
+                "operationId": "head_api_regulations_datex",
+                "parameters": [
+                    {
+                        "name": "includePermanent",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    },
+                    {
+                        "name": "includeTemporary",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    },
+                    {
+                        "name": "includeExpired",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/regulations/csv": {
+            "get": {
+                "tags": [
+                    "Public"
+                ],
+                "summary": "Exporter les restrictions de circulation au format CSV",
+                "description": "Exporte la base nationale des restrictions au format CSV. **Une ligne = une emprise**\n(localisation d'une mesure). Les colonnes exposent notamment l'UUID et le titre de l'arr\u00eat\u00e9,\nle lien vers le document source (PDF), ainsi que le type de restriction.\n\n### Comportement par d\u00e9faut\nSans aucun filtre, l'export porte sur **toute la base publi\u00e9e** (tous statuts confondus). Cet\nexport complet est pr\u00e9-g\u00e9n\u00e9r\u00e9 et servi depuis un cache pour un t\u00e9l\u00e9chargement rapide.\n\n### Filtres\nLes m\u00eames filtres que l'API JSON de recherche (`GET /api/regulations/json`) sont disponibles.\nD\u00e8s qu'un filtre est fourni, l'export est calcul\u00e9 \u00e0 la vol\u00e9e.\n\n### Authentification\nCette route est publique : aucune authentification n'est requise.\n\n### Format de la r\u00e9ponse\nUn fichier CSV encod\u00e9 en UTF-8 (avec BOM), d\u00e9limit\u00e9 par des points-virgules (`;`).",
+                "operationId": "get_api_regulations_csv",
+                "parameters": [
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Statut de vigueur : `current` (en vigueur), `expired` (expir\u00e9), `upcoming` (\u00e0 venir) ou `all` (tous statuts confondus, d\u00e9faut de l'export).",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "all",
+                            "enum": [
+                                "current",
+                                "expired",
+                                "upcoming",
+                                "all"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "inseeCode",
+                        "in": "query",
+                        "description": "Code INSEE exact d'une commune.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "nullable": true,
+                            "default": null
+                        }
+                    },
+                    {
+                        "name": "dateStart",
+                        "in": "query",
+                        "description": "D\u00e9but de la plage des arr\u00eat\u00e9s en vigueur \u00e0 cette date (ISO 8601).",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date",
+                            "example": "2026-01-01",
+                            "nullable": true,
+                            "default": null
+                        }
+                    },
+                    {
+                        "name": "dateEnd",
+                        "in": "query",
+                        "description": "Fin de la plage de dates de vigueur (ISO 8601).",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date",
+                            "example": "2026-12-31",
+                            "nullable": true,
+                            "default": null
+                        }
+                    },
+                    {
+                        "name": "category",
+                        "in": "query",
+                        "description": "Nature de l'arr\u00eat\u00e9 : `permanentRegulation` ou `temporaryRegulation`.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "nullable": true,
+                            "default": null,
+                            "enum": [
+                                "permanentRegulation",
+                                "temporaryRegulation"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "measureType",
+                        "in": "query",
+                        "description": "Type de restriction recherch\u00e9.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "nullable": true,
+                            "default": null,
+                            "enum": [
+                                "alternateRoad",
+                                "noOvertaking",
+                                "noEntry",
+                                "speedLimitation",
+                                "parkingProhibited"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "includeHeavyGoodsVehicle",
+                        "in": "query",
+                        "description": "Inclure les restrictions poids lourds. D\u00e9faut : `true`.",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Fichier CSV des restrictions.",
+                        "content": {
+                            "text/csv": {}
+                        }
+                    },
+                    "400": {
+                        "description": "Param\u00e8tre de filtre invalide."
+                    }
+                }
+            },
+            "head": {
+                "tags": [
+                    "Public"
+                ],
+                "operationId": "head_api_regulations_csv",
+                "parameters": [
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "all"
+                        }
+                    },
+                    {
+                        "name": "inseeCode",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "nullable": true,
+                            "default": null
+                        }
+                    },
+                    {
+                        "name": "dateStart",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "nullable": true,
+                            "default": null
+                        }
+                    },
+                    {
+                        "name": "dateEnd",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "nullable": true,
+                            "default": null
+                        }
+                    },
+                    {
+                        "name": "category",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "nullable": true,
+                            "default": null
+                        }
+                    },
+                    {
+                        "name": "measureType",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "nullable": true,
+                            "default": null
+                        }
+                    },
+                    {
+                        "name": "includeHeavyGoodsVehicle",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/regulations/search": {
+            "get": {
+                "tags": [
+                    "Public"
+                ],
+                "summary": "[D\u00e9pr\u00e9ci\u00e9] Rechercher les arr\u00eat\u00e9s de circulation",
+                "description": "Endpoint d\u00e9pr\u00e9ci\u00e9 : utilisez `GET /api/regulations/json`. Cette URL redirige (301) vers le nouvel endpoint en conservant les param\u00e8tres de requ\u00eate.",
+                "operationId": "get_api_regulations_search",
+                "responses": {
+                    "default": {
+                        "description": ""
+                    }
+                },
+                "deprecated": true
+            }
+        },
+        "/api/regulations/json": {
             "get": {
                 "tags": [
                     "Public"
                 ],
                 "summary": "Rechercher les arr\u00eat\u00e9s de circulation et leurs restrictions",
                 "description": "Retourne la liste des arr\u00eat\u00e9s de circulation \u00ab regulation orders \u00bb **publi\u00e9s** de toutes les\norganisations, accompagn\u00e9s de leurs mesures (restrictions) et de leurs emprises.\n\nUn arr\u00eat\u00e9 est constitu\u00e9 de plusieurs **mesures** (ce qui est r\u00e9glement\u00e9), chaque mesure\nportant une ou plusieurs **emprises** (`locations`, o\u00f9 la mesure s'applique) et une ou\nplusieurs **p\u00e9riodes** (`periods`, quand la mesure s'applique).\n\n### Comportement par d\u00e9faut\nSans aucun filtre, seuls les arr\u00eat\u00e9s **en vigueur** (`status=current`) sont retourn\u00e9s.\n\n### Authentification\nCette route est publique : aucune authentification n'est requise.\n\n### Format de la r\u00e9ponse\nUn objet JSON contenant un tableau `regulations` (chaque arr\u00eat\u00e9 ayant la m\u00eame structure que\n`GET /api/regulations/{identifier}`) et un objet `metadata` de pagination. Toutes les dates\nsont au format ISO 8601 (RFC 3339).",
-                "operationId": "get_api_regulations_search",
+                "operationId": "get_api_regulations_json",
                 "parameters": [
                     {
                         "name": "status",
@@ -38,8 +336,8 @@
                         "required": false,
                         "schema": {
                             "type": "string",
-                            "default": null,
-                            "nullable": true
+                            "nullable": true,
+                            "default": null
                         }
                     },
                     {
@@ -50,9 +348,9 @@
                         "schema": {
                             "type": "string",
                             "format": "date",
-                            "default": null,
                             "example": "2026-01-01",
-                            "nullable": true
+                            "nullable": true,
+                            "default": null
                         }
                     },
                     {
@@ -63,9 +361,9 @@
                         "schema": {
                             "type": "string",
                             "format": "date",
-                            "default": null,
                             "example": "2026-12-31",
-                            "nullable": true
+                            "nullable": true,
+                            "default": null
                         }
                     },
                     {
@@ -75,12 +373,12 @@
                         "required": false,
                         "schema": {
                             "type": "string",
+                            "nullable": true,
                             "default": null,
                             "enum": [
                                 "permanentRegulation",
                                 "temporaryRegulation"
-                            ],
-                            "nullable": true
+                            ]
                         }
                     },
                     {
@@ -90,6 +388,7 @@
                         "required": false,
                         "schema": {
                             "type": "string",
+                            "nullable": true,
                             "default": null,
                             "enum": [
                                 "alternateRoad",
@@ -97,8 +396,7 @@
                                 "noEntry",
                                 "speedLimitation",
                                 "parkingProhibited"
-                            ],
-                            "nullable": true
+                            ]
                         }
                     },
                     {
@@ -296,41 +594,15 @@
                 "tags": [
                     "Public"
                 ],
+                "summary": "[D\u00e9pr\u00e9ci\u00e9] Export DATEX II",
+                "description": "Endpoint d\u00e9pr\u00e9ci\u00e9 : utilisez `GET /api/regulations/datex.xml`. Cette URL redirige (301) vers le nouvel endpoint en conservant les param\u00e8tres de requ\u00eate.",
                 "operationId": "get_api_regulations_list",
-                "parameters": [
-                    {
-                        "name": "includePermanent",
-                        "in": "query",
-                        "required": false,
-                        "schema": {
-                            "type": "boolean",
-                            "default": true
-                        }
-                    },
-                    {
-                        "name": "includeTemporary",
-                        "in": "query",
-                        "required": false,
-                        "schema": {
-                            "type": "boolean",
-                            "default": true
-                        }
-                    },
-                    {
-                        "name": "includeExpired",
-                        "in": "query",
-                        "required": false,
-                        "schema": {
-                            "type": "boolean",
-                            "default": false
-                        }
-                    }
-                ],
                 "responses": {
                     "default": {
                         "description": ""
                     }
-                }
+                },
+                "deprecated": true
             },
             "put": {
                 "tags": [
@@ -347,47 +619,47 @@
                                 "properties": {
                                     "identifier": {
                                         "type": "string",
-                                        "maxLength": 60,
-                                        "example": "F2025/001"
+                                        "example": "F2025/001",
+                                        "maxLength": 60
                                     },
                                     "status": {
                                         "type": "string",
+                                        "example": "draft",
                                         "enum": [
                                             "draft",
                                             "published"
-                                        ],
-                                        "example": "draft"
+                                        ]
                                     },
                                     "category": {
                                         "type": "string",
+                                        "example": "temporaryRegulation",
                                         "enum": [
                                             "temporaryRegulation",
                                             "permanentRegulation"
-                                        ],
-                                        "example": "temporaryRegulation"
+                                        ]
                                     },
                                     "subject": {
                                         "type": "string",
+                                        "example": "roadMaintenance",
+                                        "nullable": true,
                                         "enum": [
                                             "roadMaintenance",
                                             "incident",
                                             "event",
                                             "winterMaintenance",
                                             "other"
-                                        ],
-                                        "example": "roadMaintenance",
-                                        "nullable": true
+                                        ]
                                     },
                                     "otherCategoryText": {
                                         "type": "string",
-                                        "maxLength": 100,
                                         "example": null,
-                                        "nullable": true
+                                        "nullable": true,
+                                        "maxLength": 100
                                     },
                                     "title": {
                                         "type": "string",
-                                        "maxLength": 255,
-                                        "example": "Travaux de voirie rue Exemple"
+                                        "example": "Travaux de voirie rue Exemple",
+                                        "maxLength": 255
                                     },
                                     "measures": {
                                         "type": "array",
@@ -395,14 +667,14 @@
                                             "properties": {
                                                 "type": {
                                                     "type": "string",
+                                                    "example": "speedLimitation",
                                                     "enum": [
                                                         "alternateRoad",
                                                         "noEntry",
                                                         "speedLimitation",
                                                         "parkingProhibited",
                                                         "noOvertaking"
-                                                    ],
-                                                    "example": "speedLimitation"
+                                                    ]
                                                 },
                                                 "maxSpeed": {
                                                     "type": "integer",
@@ -547,11 +819,11 @@
                                                                 "properties": {
                                                                     "recurrenceType": {
                                                                         "type": "string",
+                                                                        "nullable": true,
                                                                         "enum": [
                                                                             "everyDay",
                                                                             "certainDays"
-                                                                        ],
-                                                                        "nullable": true
+                                                                        ]
                                                                     },
                                                                     "applicableDays": {
                                                                         "type": "array",
@@ -603,13 +875,14 @@
                                                         "properties": {
                                                             "roadType": {
                                                                 "type": "string",
+                                                                "example": "lane",
                                                                 "enum": [
                                                                     "lane",
                                                                     "departmentalRoad",
                                                                     "nationalRoad",
-                                                                    "rawGeoJSON"
-                                                                ],
-                                                                "example": "lane"
+                                                                    "rawGeoJSON",
+                                                                    "zone"
+                                                                ]
                                                             },
                                                             "namedStreet": {
                                                                 "properties": {
@@ -651,12 +924,12 @@
                                                                     },
                                                                     "direction": {
                                                                         "type": "string",
+                                                                        "nullable": true,
                                                                         "enum": [
                                                                             "BOTH",
                                                                             "A_TO_B",
                                                                             "B_TO_A"
-                                                                        ],
-                                                                        "nullable": true
+                                                                        ]
                                                                     }
                                                                 },
                                                                 "type": "object",
@@ -706,12 +979,12 @@
                                                                     },
                                                                     "direction": {
                                                                         "type": "string",
+                                                                        "nullable": true,
                                                                         "enum": [
                                                                             "BOTH",
                                                                             "A_TO_B",
                                                                             "B_TO_A"
-                                                                        ],
-                                                                        "nullable": true
+                                                                        ]
                                                                     }
                                                                 },
                                                                 "type": "object",
@@ -761,12 +1034,12 @@
                                                                     },
                                                                     "direction": {
                                                                         "type": "string",
+                                                                        "nullable": true,
                                                                         "enum": [
                                                                             "BOTH",
                                                                             "A_TO_B",
                                                                             "B_TO_A"
-                                                                        ],
-                                                                        "nullable": true
+                                                                        ]
                                                                     }
                                                                 },
                                                                 "type": "object",
@@ -780,6 +1053,26 @@
                                                                     },
                                                                     "geometry": {
                                                                         "type": "string",
+                                                                        "nullable": true
+                                                                    }
+                                                                },
+                                                                "type": "object",
+                                                                "nullable": true
+                                                            },
+                                                            "zone": {
+                                                                "description": "Trac\u00e9 de zone. Renseign\u00e9 lorsque `roadType` vaut `zone`. Le p\u00e9rim\u00e8tre dessin\u00e9 (`geometry`) est un polygone GeoJSON ; les tron\u00e7ons de rues couverts par ce p\u00e9rim\u00e8tre sont calcul\u00e9s automatiquement et constituent la g\u00e9om\u00e9trie effective de la localisation. Une zone ne contenant aucune rue est refus\u00e9e (erreur 400).",
+                                                                "properties": {
+                                                                    "label": {
+                                                                        "description": "Libell\u00e9 descriptif de la zone.",
+                                                                        "type": "string",
+                                                                        "example": "Quartier des Docks",
+                                                                        "nullable": true,
+                                                                        "maxLength": 255
+                                                                    },
+                                                                    "geometry": {
+                                                                        "description": "Polygone GeoJSON s\u00e9rialis\u00e9 en cha\u00eene JSON d\u00e9limitant la zone.",
+                                                                        "type": "string",
+                                                                        "example": "{\"type\":\"Polygon\",\"coordinates\":[[[2.325,48.9125],[2.331,48.9125],[2.331,48.9152],[2.325,48.9152],[2.325,48.9125]]]}",
                                                                         "nullable": true
                                                                     }
                                                                 },
@@ -819,11 +1112,11 @@
                                         },
                                         "status": {
                                             "type": "string",
+                                            "example": "draft",
                                             "enum": [
                                                 "draft",
                                                 "published"
-                                            ],
-                                            "example": "draft"
+                                            ]
                                         }
                                     },
                                     "type": "object"
@@ -941,47 +1234,47 @@
                                 "properties": {
                                     "identifier": {
                                         "type": "string",
-                                        "maxLength": 60,
-                                        "example": "F2025/001"
+                                        "example": "F2025/001",
+                                        "maxLength": 60
                                     },
                                     "status": {
                                         "type": "string",
+                                        "example": "draft",
                                         "enum": [
                                             "draft",
                                             "published"
-                                        ],
-                                        "example": "draft"
+                                        ]
                                     },
                                     "category": {
                                         "type": "string",
+                                        "example": "temporaryRegulation",
                                         "enum": [
                                             "temporaryRegulation",
                                             "permanentRegulation"
-                                        ],
-                                        "example": "temporaryRegulation"
+                                        ]
                                     },
                                     "subject": {
                                         "type": "string",
+                                        "example": "roadMaintenance",
+                                        "nullable": true,
                                         "enum": [
                                             "roadMaintenance",
                                             "incident",
                                             "event",
                                             "winterMaintenance",
                                             "other"
-                                        ],
-                                        "example": "roadMaintenance",
-                                        "nullable": true
+                                        ]
                                     },
                                     "otherCategoryText": {
                                         "type": "string",
-                                        "maxLength": 100,
                                         "example": null,
-                                        "nullable": true
+                                        "nullable": true,
+                                        "maxLength": 100
                                     },
                                     "title": {
                                         "type": "string",
-                                        "maxLength": 255,
-                                        "example": "Travaux de voirie rue Exemple"
+                                        "example": "Travaux de voirie rue Exemple",
+                                        "maxLength": 255
                                     },
                                     "measures": {
                                         "type": "array",
@@ -989,14 +1282,14 @@
                                             "properties": {
                                                 "type": {
                                                     "type": "string",
+                                                    "example": "speedLimitation",
                                                     "enum": [
                                                         "alternateRoad",
                                                         "noEntry",
                                                         "speedLimitation",
                                                         "parkingProhibited",
                                                         "noOvertaking"
-                                                    ],
-                                                    "example": "speedLimitation"
+                                                    ]
                                                 },
                                                 "maxSpeed": {
                                                     "type": "integer",
@@ -1141,11 +1434,11 @@
                                                                 "properties": {
                                                                     "recurrenceType": {
                                                                         "type": "string",
+                                                                        "nullable": true,
                                                                         "enum": [
                                                                             "everyDay",
                                                                             "certainDays"
-                                                                        ],
-                                                                        "nullable": true
+                                                                        ]
                                                                     },
                                                                     "applicableDays": {
                                                                         "type": "array",
@@ -1197,13 +1490,14 @@
                                                         "properties": {
                                                             "roadType": {
                                                                 "type": "string",
+                                                                "example": "lane",
                                                                 "enum": [
                                                                     "lane",
                                                                     "departmentalRoad",
                                                                     "nationalRoad",
-                                                                    "rawGeoJSON"
-                                                                ],
-                                                                "example": "lane"
+                                                                    "rawGeoJSON",
+                                                                    "zone"
+                                                                ]
                                                             },
                                                             "namedStreet": {
                                                                 "properties": {
@@ -1245,12 +1539,12 @@
                                                                     },
                                                                     "direction": {
                                                                         "type": "string",
+                                                                        "nullable": true,
                                                                         "enum": [
                                                                             "BOTH",
                                                                             "A_TO_B",
                                                                             "B_TO_A"
-                                                                        ],
-                                                                        "nullable": true
+                                                                        ]
                                                                     }
                                                                 },
                                                                 "type": "object",
@@ -1300,12 +1594,12 @@
                                                                     },
                                                                     "direction": {
                                                                         "type": "string",
+                                                                        "nullable": true,
                                                                         "enum": [
                                                                             "BOTH",
                                                                             "A_TO_B",
                                                                             "B_TO_A"
-                                                                        ],
-                                                                        "nullable": true
+                                                                        ]
                                                                     }
                                                                 },
                                                                 "type": "object",
@@ -1355,12 +1649,12 @@
                                                                     },
                                                                     "direction": {
                                                                         "type": "string",
+                                                                        "nullable": true,
                                                                         "enum": [
                                                                             "BOTH",
                                                                             "A_TO_B",
                                                                             "B_TO_A"
-                                                                        ],
-                                                                        "nullable": true
+                                                                        ]
                                                                     }
                                                                 },
                                                                 "type": "object",
@@ -1374,6 +1668,26 @@
                                                                     },
                                                                     "geometry": {
                                                                         "type": "string",
+                                                                        "nullable": true
+                                                                    }
+                                                                },
+                                                                "type": "object",
+                                                                "nullable": true
+                                                            },
+                                                            "zone": {
+                                                                "description": "Trac\u00e9 de zone. Renseign\u00e9 lorsque `roadType` vaut `zone`. Le p\u00e9rim\u00e8tre dessin\u00e9 (`geometry`) est un polygone GeoJSON ; les tron\u00e7ons de rues couverts par ce p\u00e9rim\u00e8tre sont calcul\u00e9s automatiquement et constituent la g\u00e9om\u00e9trie effective de la localisation. Une zone ne contenant aucune rue est refus\u00e9e (erreur 400).",
+                                                                "properties": {
+                                                                    "label": {
+                                                                        "description": "Libell\u00e9 descriptif de la zone.",
+                                                                        "type": "string",
+                                                                        "example": "Quartier des Docks",
+                                                                        "nullable": true,
+                                                                        "maxLength": 255
+                                                                    },
+                                                                    "geometry": {
+                                                                        "description": "Polygone GeoJSON s\u00e9rialis\u00e9 en cha\u00eene JSON d\u00e9limitant la zone.",
+                                                                        "type": "string",
+                                                                        "example": "{\"type\":\"Polygon\",\"coordinates\":[[[2.325,48.9125],[2.331,48.9125],[2.331,48.9152],[2.325,48.9152],[2.325,48.9125]]]}",
                                                                         "nullable": true
                                                                     }
                                                                 },
@@ -1495,35 +1809,6 @@
                     "Public"
                 ],
                 "operationId": "head_api_regulations_list",
-                "parameters": [
-                    {
-                        "name": "includePermanent",
-                        "in": "query",
-                        "required": false,
-                        "schema": {
-                            "type": "boolean",
-                            "default": true
-                        }
-                    },
-                    {
-                        "name": "includeTemporary",
-                        "in": "query",
-                        "required": false,
-                        "schema": {
-                            "type": "boolean",
-                            "default": true
-                        }
-                    },
-                    {
-                        "name": "includeExpired",
-                        "in": "query",
-                        "required": false,
-                        "schema": {
-                            "type": "boolean",
-                            "default": false
-                        }
-                    }
-                ],
                 "responses": {
                     "default": {
                         "description": ""
@@ -1569,9 +1854,9 @@
                                     },
                                     "title": {
                                         "type": "string",
-                                        "maxLength": 30,
                                         "example": "Arr\u00eat\u00e9 municipal",
-                                        "nullable": true
+                                        "nullable": true,
+                                        "maxLength": 30
                                     }
                                 },
                                 "type": "object"
@@ -1753,6 +2038,11 @@
                                 "schema": {
                                     "description": "Repr\u00e9sentation compl\u00e8te d'un arr\u00eat\u00e9 de circulation.",
                                     "properties": {
+                                        "uuid": {
+                                            "description": "Identifiant technique (UUID) de l'arr\u00eat\u00e9 dans DiaLog. Permet de reconstituer l'URL publique de l'arr\u00eat\u00e9 sur DiaLog : `https://dialog.beta.gouv.fr/regulations/{uuid}`.",
+                                            "type": "string",
+                                            "example": "123e4567-e89b-12d3-a456-426614174000"
+                                        },
                                         "identifier": {
                                             "description": "Identifiant m\u00e9tier de l'arr\u00eat\u00e9, unique au sein de l'organisation \u00e9mettrice.",
                                             "type": "string",
@@ -1761,20 +2051,20 @@
                                         "status": {
                                             "description": "Statut de l'arr\u00eat\u00e9 : `draft` (brouillon, non encore publi\u00e9, visible uniquement de son organisation) ou `published` (publi\u00e9 et opposable, diffus\u00e9 publiquement).",
                                             "type": "string",
+                                            "example": "draft",
                                             "enum": [
                                                 "draft",
                                                 "published"
-                                            ],
-                                            "example": "draft"
+                                            ]
                                         },
                                         "category": {
                                             "description": "Nature de l'arr\u00eat\u00e9 : `permanentRegulation` (r\u00e9glementation permanente, sans date de fin) ou `temporaryRegulation` (r\u00e9glementation temporaire, avec une p\u00e9riode de validit\u00e9 born\u00e9e par `startDate` et `endDate`).",
                                             "type": "string",
+                                            "example": "temporaryRegulation",
                                             "enum": [
                                                 "permanentRegulation",
                                                 "temporaryRegulation"
-                                            ],
-                                            "example": "temporaryRegulation"
+                                            ]
                                         },
                                         "subject": {
                                             "description": "Motif de l'arr\u00eat\u00e9 lorsqu'il est temporaire. Valeurs possibles : `roadMaintenance` (travaux de voirie), `incident`, `event` (manifestation), `winterMaintenance` (viabilit\u00e9 hivernale), `other`. `null` pour un arr\u00eat\u00e9 permanent.",
@@ -1807,6 +2097,12 @@
                                             "example": "2025-10-15T18:00:00+00:00",
                                             "nullable": true
                                         },
+                                        "documentUrl": {
+                                            "description": "URL du document original de l'arr\u00eat\u00e9 (PDF ou autre) : fichier t\u00e9l\u00e9vers\u00e9 sur DiaLog, ou \u00e0 d\u00e9faut lien externe fourni par l'organisation. `null` si aucun document n'est associ\u00e9 \u00e0 l'arr\u00eat\u00e9.",
+                                            "type": "string",
+                                            "example": "https://storage.dialog.beta.gouv.fr/regulationOrder/123e4567/arrete.pdf",
+                                            "nullable": true
+                                        },
                                         "organization": {
                                             "description": "Organisation (collectivit\u00e9, gestionnaire de voirie, etc.) \u00e9mettrice de l'arr\u00eat\u00e9.",
                                             "properties": {
@@ -1837,14 +2133,14 @@
                                                     "type": {
                                                         "description": "Type de mesure : `alternateRoad` (circulation altern\u00e9e), `noOvertaking` (interdiction de d\u00e9passer), `noEntry` (interdiction de circuler), `speedLimitation` (limitation de vitesse), `parkingProhibited` (stationnement interdit).",
                                                         "type": "string",
+                                                        "example": "speedLimitation",
                                                         "enum": [
                                                             "alternateRoad",
                                                             "noOvertaking",
                                                             "noEntry",
                                                             "speedLimitation",
                                                             "parkingProhibited"
-                                                        ],
-                                                        "example": "speedLimitation"
+                                                        ]
                                                     },
                                                     "maxSpeed": {
                                                         "description": "Vitesse maximale autoris\u00e9e en km/h. Renseign\u00e9 uniquement lorsque `type` vaut `speedLimitation`, `null` sinon.",
@@ -1888,11 +2184,11 @@
                                                                 "recurrenceType": {
                                                                     "description": "Mode de r\u00e9currence : `everyDay` (tous les jours sur la plage `startDateTime` \u2192 `endDateTime`) ou `certainDays` (uniquement certains jours de la semaine, voir `dailyRange`).",
                                                                     "type": "string",
+                                                                    "example": "everyDay",
                                                                     "enum": [
                                                                         "everyDay",
                                                                         "certainDays"
-                                                                    ],
-                                                                    "example": "everyDay"
+                                                                    ]
                                                                 },
                                                                 "startDateTime": {
                                                                     "description": "Date et heure de d\u00e9but de la p\u00e9riode (ISO 8601).",
@@ -1944,7 +2240,7 @@
                                                         }
                                                     },
                                                     "locations": {
-                                                        "description": "Emplacements g\u00e9ographiques sur lesquels la mesure s'applique. Chaque emplacement est d\u00e9crit selon son type de voirie (`roadType`) ; un seul des champs `namedStreet`, `numberedRoad`, `rawGeoJSON` ou `storageArea` est renseign\u00e9, les autres valent `null`.",
+                                                        "description": "Emplacements g\u00e9ographiques sur lesquels la mesure s'applique. Chaque emplacement est d\u00e9crit selon son type de voirie (`roadType`) ; un seul des champs `namedStreet`, `numberedRoad`, `rawGeoJSON`, `storageArea` ou `zone` est renseign\u00e9, les autres valent `null`.",
                                                         "type": "array",
                                                         "items": {
                                                             "properties": {
@@ -1953,15 +2249,16 @@
                                                                     "type": "string"
                                                                 },
                                                                 "roadType": {
-                                                                    "description": "Type de voirie : `lane` (voie nomm\u00e9e en milieu urbain), `departmentalRoad` (route d\u00e9partementale), `nationalRoad` (route nationale), `rawGeoJSON` (g\u00e9om\u00e9trie GeoJSON brute fournie par l'organisation).",
+                                                                    "description": "Type de voirie : `lane` (voie nomm\u00e9e en milieu urbain), `departmentalRoad` (route d\u00e9partementale), `nationalRoad` (route nationale), `rawGeoJSON` (g\u00e9om\u00e9trie GeoJSON brute fournie par l'organisation), `zone` (trac\u00e9 de zone : les tron\u00e7ons de rues couverts par le p\u00e9rim\u00e8tre dessin\u00e9).",
                                                                     "type": "string",
+                                                                    "example": "lane",
                                                                     "enum": [
                                                                         "lane",
                                                                         "departmentalRoad",
                                                                         "nationalRoad",
-                                                                        "rawGeoJSON"
-                                                                    ],
-                                                                    "example": "lane"
+                                                                        "rawGeoJSON",
+                                                                        "zone"
+                                                                    ]
                                                                 },
                                                                 "namedStreet": {
                                                                     "description": "Voie nomm\u00e9e (rues, places, etc.). Renseign\u00e9 lorsque `roadType` vaut `lane`.",
@@ -2070,8 +2367,20 @@
                                                                     "type": "object",
                                                                     "nullable": true
                                                                 },
+                                                                "zone": {
+                                                                    "description": "Trac\u00e9 de zone. Renseign\u00e9 lorsque `roadType` vaut `zone`. Les tron\u00e7ons de rues couverts par le p\u00e9rim\u00e8tre dessin\u00e9 sont expos\u00e9s par le champ `geometry`.",
+                                                                    "properties": {
+                                                                        "label": {
+                                                                            "description": "Libell\u00e9 descriptif de la zone.",
+                                                                            "type": "string",
+                                                                            "example": "Quartier des Docks"
+                                                                        }
+                                                                    },
+                                                                    "type": "object",
+                                                                    "nullable": true
+                                                                },
                                                                 "geometry": {
-                                                                    "description": "G\u00e9om\u00e9trie effective de la localisation, s\u00e9rialis\u00e9e en GeoJSON (cha\u00eene JSON). Permet \u00e0 un consommateur d'afficher la zone sur une carte sans avoir \u00e0 r\u00e9soudre lui-m\u00eame les r\u00e9f\u00e9rences de voirie.",
+                                                                    "description": "G\u00e9om\u00e9trie effective de la localisation, s\u00e9rialis\u00e9e en GeoJSON (cha\u00eene JSON). Permet \u00e0 un consommateur d'afficher la zone sur une carte sans avoir \u00e0 r\u00e9soudre lui-m\u00eame les r\u00e9f\u00e9rences de voirie. Pour un trac\u00e9 de zone (`roadType` = `zone`), contient l'ensemble des tron\u00e7ons de rues couverts par le p\u00e9rim\u00e8tre dessin\u00e9.",
                                                                     "type": "string",
                                                                     "nullable": true
                                                                 }
@@ -2485,10 +2794,20 @@
                         ]
                     },
                     "applicableDays": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
+                        "oneOf": [
+                            {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "string"
+                                }
+                            }
+                        ],
                         "default": []
                     }
                 },
@@ -2522,16 +2841,26 @@
                     },
                     "isPermanent": {
                         "type": "boolean",
-                        "default": false,
-                        "nullable": true
+                        "nullable": true,
+                        "default": false
                     },
                     "timeSlots": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/SaveTimeSlotDTO"
-                        },
-                        "default": [],
-                        "nullable": true
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/SaveTimeSlotDTO"
+                                }
+                            },
+                            {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "$ref": "#/components/schemas/SaveTimeSlotDTO"
+                                }
+                            }
+                        ],
+                        "default": []
                     },
                     "dailyRange": {
                         "nullable": true,
@@ -2690,6 +3019,19 @@
                 },
                 "type": "object"
             },
+            "SaveZoneDTO": {
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "geometry": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
             "SaveLocationDTO": {
                 "properties": {
                     "roadType": {
@@ -2731,6 +3073,14 @@
                                 "$ref": "#/components/schemas/SaveRawGeoJSONDTO"
                             }
                         ]
+                    },
+                    "zone": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/SaveZoneDTO"
+                            }
+                        ]
                     }
                 },
                 "type": "object"
@@ -2742,13 +3092,37 @@
                         "nullable": true
                     },
                     "critairTypes": {
-                        "type": "array",
-                        "items": {},
+                        "oneOf": [
+                            {
+                                "type": "array",
+                                "items": {
+                                    "nullable": true
+                                }
+                            },
+                            {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "nullable": true
+                                }
+                            }
+                        ],
                         "default": []
                     },
                     "restrictedTypes": {
-                        "type": "array",
-                        "items": {},
+                        "oneOf": [
+                            {
+                                "type": "array",
+                                "items": {
+                                    "nullable": true
+                                }
+                            },
+                            {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "nullable": true
+                                }
+                            }
+                        ],
                         "default": []
                     },
                     "heavyweightMaxWeight": {
@@ -2776,8 +3150,20 @@
                         "nullable": true
                     },
                     "exemptedTypes": {
-                        "type": "array",
-                        "items": {},
+                        "oneOf": [
+                            {
+                                "type": "array",
+                                "items": {
+                                    "nullable": true
+                                }
+                            },
+                            {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "nullable": true
+                                }
+                            }
+                        ],
                         "default": []
                     },
                     "otherExemptedTypeText": {
@@ -2806,17 +3192,37 @@
                         "nullable": true
                     },
                     "periods": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/SavePeriodDTO"
-                        },
+                        "oneOf": [
+                            {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/SavePeriodDTO"
+                                }
+                            },
+                            {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "$ref": "#/components/schemas/SavePeriodDTO"
+                                }
+                            }
+                        ],
                         "default": []
                     },
                     "locations": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/SaveLocationDTO"
-                        },
+                        "oneOf": [
+                            {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/SaveLocationDTO"
+                                }
+                            },
+                            {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "$ref": "#/components/schemas/SaveLocationDTO"
+                                }
+                            }
+                        ],
                         "default": []
                     },
                     "vehicleSet": {
@@ -2848,11 +3254,7 @@
                         "nullable": true
                     },
                     "status": {
-                        "oneOf": [
-                            {
-                                "$ref": "#/components/schemas/RegulationOrderRecordStatusEnum"
-                            }
-                        ]
+                        "$ref": "#/components/schemas/RegulationOrderRecordStatusEnum"
                     },
                     "otherCategoryText": {
                         "type": "string",
@@ -2863,11 +3265,21 @@
                         "nullable": true
                     },
                     "measures": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/SaveMeasureDTO"
-                        },
-                        "nullable": true
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/SaveMeasureDTO"
+                                }
+                            },
+                            {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "$ref": "#/components/schemas/SaveMeasureDTO"
+                                }
+                            }
+                        ]
                     }
                 },
                 "type": "object"
