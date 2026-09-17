@@ -27,7 +27,10 @@ from api.dia_log_client.api.private.post_api_regulations_add import (
 from api.dia_log_client.api.private.put_api_regulations_publish import (
     sync_detailed as publish_regulation,
 )
-from api.dia_log_client.models import PostApiRegulationsAddBody
+from api.dia_log_client.api.private.put_api_regulations_update import (
+    sync_detailed as update_regulation,
+)
+from api.dia_log_client.models import PostApiRegulationsAddBody, PutApiRegulationsUpdateBody
 from settings import OrganizationSettings
 
 
@@ -84,17 +87,43 @@ class DialogApi:
             return False
         return True
 
-    def delete(self, identifier: str) -> bool:
-        """DELETE a regulation; True when the API answered 204."""
+    def update(self, regulation: PostApiRegulationsAddBody) -> bool:
+        """PUT a regulation — a full replacement; True when the API answered 2xx.
+
+        Not for a regulation holding a zone: the API answers 500 on those (2026-09-16).
+        """
+        body = PutApiRegulationsUpdateBody.from_dict(regulation.to_dict())
+        try:
+            resp = update_regulation(client=self.client, body=body)
+        except Exception as e:
+            logger.error(f"Failed to update: {regulation.identifier} - {e}")
+            return False
+        if resp.status_code not in (200, 201, 204):
+            logger.error(
+                f"Failed to update: {regulation.identifier} - got status {resp.status_code}"
+            )
+            logger.error(json.loads(resp.content))
+            return False
+        return True
+
+    def delete(self, identifier: str, *, missing_is_gone: bool = False) -> bool:
+        """DELETE a regulation; True when the API answered 204.
+
+        With `missing_is_gone`, a 404 counts as success: the goal state — the regulation
+        is not there — is reached.
+        """
         try:
             resp = delete_regulation(identifier=identifier, client=self.client)
         except Exception as e:
             logger.error(f"Failed to delete: {identifier} - {e}")
             return False
-        if resp.status_code != 204:
-            logger.error(f"Failed to delete: {identifier} - got status {resp.status_code}")
-            return False
-        return True
+        if resp.status_code == 204:
+            return True
+        if resp.status_code == 404 and missing_is_gone:
+            logger.warning(f"{identifier} was already absent from DiaLog (404)")
+            return True
+        logger.error(f"Failed to delete: {identifier} - got status {resp.status_code}")
+        return False
 
     def publish(self, identifier: str) -> bool:
         """Publish a draft; True unless the call raised.

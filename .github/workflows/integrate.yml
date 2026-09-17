@@ -25,6 +25,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
 
+      # The snapshot of what was last sent, used to detect updates. A missing snapshot
+      # costs one day of updates, never a mass rewrite: the run rebuilds it.
+      # A fresh key every run so the post-step always saves; restore-keys picks up
+      # yesterday's. Caches are evicted after 7 days without use.
+      - name: Restore synchronization state for ${{ matrix.organization }}
+        uses: actions/cache@v4
+        with:
+          path: state
+          key: dialog-state-${{ matrix.organization }}-${{ github.run_id }}
+          restore-keys: |
+            dialog-state-${{ matrix.organization }}-
+
       - name: Install dependencies
         run: make app:build-ci
 
@@ -38,16 +50,21 @@ jobs:
           DIALOG_CLIENT_ID: ${{ secrets.DIALOG_CLIENT_ID }}
           DIALOG_CLIENT_SECRET: ${{ secrets.DIALOG_CLIENT_SECRET }}
         # Write a JSON result to the step output named after this org.
-        # The || block runs on failure so we still capture a result.
+        # `--json` prints the run counters on stdout; the logs stay on stderr.
         run: |
           org="${{ matrix.organization }}"
-          if uv run dialog integrate "$org"; then
-            echo "result_${org}={\"success\":true}"  >> "$GITHUB_OUTPUT"
+          if uv run dialog integrate "$org" --json > result.json; then
+            result="$(tr -d '\n' < result.json)"
+            if [ -z "$result" ]; then
+              result='{"success":true}'
+            fi
           else
-            echo "result_${org}={\"success\":false}" >> "$GITHUB_OUTPUT"
+            result='{"success":false}'
+            echo "failed=true" >> "$GITHUB_OUTPUT"
           fi
+          echo "result_${org}=${result}" >> "$GITHUB_OUTPUT"
       - name: Fail job if integration failed
-        if: ${{ steps.integration.outputs[format('result_{0}', matrix.organization)] == '{"success":false}' }}
+        if: ${{ steps.integration.outputs.failed == 'true' }}
         run: exit 1
 
   notify:

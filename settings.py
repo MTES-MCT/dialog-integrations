@@ -66,15 +66,21 @@ class OrganizationSettings:
     client_id: str | None = None
     client_secret: str | None = None
 
-    def __init__(self, settings: Settings, organization: str):
+    # Every organization must carry these to talk to the DiaLog API.
+    REQUIRED_VALUES = ("base_url", "client_id", "client_secret")
+
+    # Which environment the settings were loaded for; only used to label reports and
+    # to print a copy-pastable command line.
+    env: str = "dev"
+
+    def __init__(self, settings: Settings, organization: str, env: str = "dev"):
+        self.env = env
         self.organization = organization
         self.base_url = settings.base_url
         self.client_id = settings.client_id
         self.client_secret = settings.client_secret
 
-        missing_values = [
-            name for (name, value) in vars(self).items() if value is None and name != "organization"
-        ]
+        missing_values = [name for name in self.REQUIRED_VALUES if getattr(self, name) is None]
         if missing_values:
             raise Exception(f"Invalid settings for {organization}: {missing_values}")
 
@@ -82,4 +88,4 @@ class OrganizationSettings:
     def from_env(cls, organization: str, env: str = "dev") -> "OrganizationSettings":
         """Create OrganizationSettings from organization and environment."""
         settings = Settings(organization=organization, env=env)
-        return cls(settings, organization)
+        return cls(settings, organization, env=env)
