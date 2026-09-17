@@ -1,5 +1,6 @@
 import json
 from typing import Annotated
+from urllib.parse import urlparse
 
 import typer
 from loguru import logger
@@ -60,7 +61,12 @@ def integrate(
 
     # Logs go to stderr, so `dialog integrate ... --json > result.json` stays clean.
     if json_output:
-        typer.echo(json.dumps(outcome.to_result(), ensure_ascii=False))
+        result = outcome.to_result()
+        # The host actually written to, so the Tchap report can flag a non-production run.
+        # Scheme and trailing slash are dropped; a URL without scheme is kept as is.
+        base_url = dialog_integration.organization_settings.base_url or ""
+        result["target"] = urlparse(base_url).hostname or base_url.strip("/")
+        typer.echo(json.dumps(result, ensure_ascii=False))
     elif dry_run:
         typer.echo(outcome.report)
 

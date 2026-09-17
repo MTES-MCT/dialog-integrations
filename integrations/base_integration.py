@@ -91,6 +91,11 @@ class BaseIntegration:
     @classmethod
     def from_settings(cls, organization_settings: OrganizationSettings) -> "BaseIntegration":
         """Create Integration from pre-configured settings."""
+        # Which instance we are about to write to: nothing else in the logs says it.
+        logger.info(
+            f"DiaLog target for {organization_settings.organization}: "
+            f"{organization_settings.base_url}"
+        )
         client = build_client(organization_settings)
 
         # Import the Integration class from the organization's module

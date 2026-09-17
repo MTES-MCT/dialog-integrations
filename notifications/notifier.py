@@ -10,6 +10,9 @@ from loguru import logger
 
 REQUEST_TIMEOUT_SECONDS = 10
 
+# Runs against any other host (a staging) are flagged as such in the report.
+PRODUCTION_HOST = "dialog.beta.gouv.fr"
+
 
 class TchapNotifier:
     """Post the integration report to a Tchap (Matrix) room.
@@ -121,6 +124,12 @@ class TchapNotifier:
             success = bool(result.get("success", False))
             icon = "✅" if success else "❌"
             status_text = "Importé avec succès" if success else "Erreur lors de l'import"
+
+            # A run that did not write to production says so next to its name: the
+            # team reads one report for every organization, whatever its target.
+            target = result.get("target")
+            if isinstance(target, str) and target and target != PRODUCTION_HOST:
+                org = f"{org} [{target}]"
 
             counts = self._format_counts(result)
             headline = f"{icon} {org} : {status_text}"

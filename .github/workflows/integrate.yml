@@ -10,9 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # `target` names the DiaLog instance the organization writes to. The GitHub
+      # environment holding its secrets is the organization for `prod` (`co_brest`),
+      # suffixed otherwise (`co_paris-staging`). Promoting an organization means
+      # flipping its target; its snapshot then starts afresh.
       matrix:
-        organization: [co_brest, dp_sarthe, co_rennes, dp_aveyron, co_issy-les-moulineaux]
-    environment: ${{ matrix.organization }}
+        include:
+          - { organization: co_brest, target: prod }
+          - { organization: dp_sarthe, target: prod }
+          - { organization: co_rennes, target: prod }
+          - { organization: dp_aveyron, target: prod }
+          - { organization: co_issy-les-moulineaux, target: prod }
+    environment: ${{ matrix.target == 'prod' && matrix.organization || format('{0}-{1}', matrix.organization, matrix.target) }}
     outputs:
       # One output per matrix value — names must be static
       result_co_brest:   ${{ steps.integration.outputs.result_co_brest }}
@@ -28,14 +37,15 @@ jobs:
       # The snapshot of what was last sent, used to detect updates. A missing snapshot
       # costs one day of updates, never a mass rewrite: the run rebuilds it.
       # A fresh key every run so the post-step always saves; restore-keys picks up
-      # yesterday's. Caches are evicted after 7 days without use.
-      - name: Restore synchronization state for ${{ matrix.organization }}
+      # yesterday's. Caches are evicted after 7 days without use. The target is part of
+      # the key: what was sent to staging says nothing about production.
+      - name: Restore synchronization state for ${{ matrix.organization }} (${{ matrix.target }})
         uses: actions/cache@v4
         with:
           path: state
-          key: dialog-state-${{ matrix.organization }}-${{ github.run_id }}
+          key: dialog-state-${{ matrix.organization }}-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: |
-            dialog-state-${{ matrix.organization }}-
+            dialog-state-${{ matrix.organization }}-${{ matrix.target }}-
 
       - name: Install dependencies
         run: make app:build-ci
@@ -43,7 +53,7 @@ jobs:
       - name: Generate API client
         run: make api:generate-client
 
-      - name: Run integration for ${{ matrix.organization }}
+      - name: Run integration for ${{ matrix.organization }} (${{ matrix.target }})
         id: integration
         env:
           DIALOG_BASE_URL: ${{ secrets.DIALOG_BASE_URL }}

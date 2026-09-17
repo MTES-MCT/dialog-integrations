@@ -254,3 +254,24 @@ def test_a_closing_organization_that_changed_nothing_says_so(notifier):
     )
 
     assert "aucun changement" in body
+
+
+# --- Target ------------------------------------------------------------------------
+
+
+def test_a_run_against_production_is_not_flagged(notifier):
+    body, _ = notifier.format_message(
+        {"result_co_brest": '{"success":true,"target":"dialog.beta.gouv.fr"}'}
+    )
+
+    assert "✅ co_brest : Importé avec succès" in body
+    assert "[" not in body
+
+
+def test_a_run_against_another_host_is_flagged_next_to_the_organization(notifier):
+    body, formatted_body = notifier.format_message(
+        {"result_co_paris": '{"success":true,"target":"dialog-staging-pr2096.osc-fr1.scalingo.io"}'}
+    )
+
+    assert "✅ co_paris [dialog-staging-pr2096.osc-fr1.scalingo.io] : Importé avec succès" in body
+    assert "<strong>co_paris [dialog-staging-pr2096.osc-fr1.scalingo.io]</strong>" in formatted_body
