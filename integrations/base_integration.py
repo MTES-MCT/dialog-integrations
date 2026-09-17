@@ -156,7 +156,7 @@ class BaseIntegration:
 
             logger.info(f"Total records from source {name}: {clean_data.shape[0]}")
 
-            source_regulations = self.create_regulations(clean_data)
+            source_regulations = self.create_regulations(clean_data, source)
             for regulation in source_regulations:
                 regulation.identifier = f"{regulation.identifier}"
                 regulation.status = self.status
@@ -575,11 +575,22 @@ class BaseIntegration:
 
     # --- payloads: kept as methods so an organization can override one ------------
 
-    def create_regulations(self, clean_data: pl.DataFrame) -> list[PostApiRegulationsAddBody]:
-        return payloads.build_regulations(clean_data, self.status, self.create_measure)
+    def create_regulations(
+        self, clean_data: pl.DataFrame, source: BaseDataSourceIntegration | None = None
+    ) -> list[PostApiRegulationsAddBody]:
+        """The source decides how its rows fold into measures and regulations."""
+        return payloads.build_regulations(
+            clean_data,
+            self.status,
+            self.create_measure,
+            group_locations_by_measure=bool(source and source.group_locations_by_measure),
+            max_locations_per_regulation=source.max_locations_per_regulation if source else None,
+        )
 
-    def create_measure(self, measure: RegulationMeasure) -> SaveMeasureDTO:
-        return payloads.build_measure(measure)
+    def create_measure(
+        self, measure: RegulationMeasure, locations: list[RegulationMeasure] | None = None
+    ) -> SaveMeasureDTO:
+        return payloads.build_measure(measure, locations)
 
     def create_save_period_dto(self, measure: RegulationMeasure) -> SavePeriodDTO:
         return payloads.build_period(measure)
