@@ -4,7 +4,7 @@ fold into measures and regulations."""
 import polars as pl
 
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
-from integrations.payloads import build_measure, build_period, build_regulations
+from integrations.payloads import build_location, build_measure, build_period, build_regulations
 
 
 def period(**overrides):
@@ -128,3 +128,39 @@ def test_a_regulation_above_the_ceiling_is_cut_into_numbered_slices_along_the_sp
 def test_a_regulation_within_the_ceiling_keeps_its_identifier():
     [regulation] = regulations(rows(("A", "30", 1), ("A", "30", 2)), max_locations_per_regulation=2)
     assert regulation.identifier == "A"
+
+
+def test_a_named_street_is_sent_without_geometry():
+    """`lane` carries names, not a line: DiaLog geocodes city + road (+ bounds) itself.
+
+    Paris (Eudonet) describes every section this way: a road name bounded by two house
+    numbers, or by two crossing streets.
+    """
+    dto = build_location(
+        {  # type: ignore[arg-type]
+            "location_road_type": "lane",
+            "location_city_code": "75116",
+            "location_city_label": "Paris 16e",
+            "location_road_name": "Rue d'Auteuil",
+            "location_from_point_type": "houseNumber",
+            "location_from_house_number": "12",
+            "location_from_road_name": None,
+            "location_to_point_type": "intersection",
+            "location_to_house_number": None,
+            "location_to_road_name": "Rue Michel-Ange",
+        }
+    )
+    assert dto.to_dict() == {
+        "roadType": "lane",
+        "namedStreet": {
+            "cityCode": "75116",
+            "cityLabel": "Paris 16e",
+            "roadName": "Rue d'Auteuil",
+            "fromPointType": "houseNumber",
+            "fromHouseNumber": "12",
+            "fromRoadName": None,
+            "toPointType": "intersection",
+            "toHouseNumber": None,
+            "toRoadName": "Rue Michel-Ange",
+        },
+    }
