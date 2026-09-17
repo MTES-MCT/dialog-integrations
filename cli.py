@@ -27,7 +27,10 @@ DryRunOption = Annotated[
 ]
 ForceDeletionsOption = Annotated[
     bool,
-    typer.Option("--force-deletions", help="Release a deletion batch held by its cap."),
+    typer.Option(
+        "--force-deletions",
+        help="Release a deletion or closure batch held by its cap.",
+    ),
 ]
 JsonOption = Annotated[
     bool,

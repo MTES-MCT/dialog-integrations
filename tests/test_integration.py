@@ -67,7 +67,7 @@ class _RecordingApi:
         self.deleted.append(str(identifier))
         return self.delete_ok
 
-    def get(self, identifier):
+    def get(self, identifier) -> dict | None:
         return None
 
     def publish(self, identifier):
@@ -286,3 +286,150 @@ def test_a_pipeline_refusal_is_counted_apart_from_failures(monkeypatch, tmp_path
     assert outcome.to_result()["refused"] == 1
     # Built, then refused: not in DiaLog, so not counted as integrated.
     assert outcome.to_result()["integrated"] == {"regulations": 0, "measures": 0, "rows": 1}
+
+
+# --- Closure: a regulation that left the source keeps its history --------------------
+
+from datetime import datetime  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+from tests.sync.test_closure import READ  # noqa: E402
+
+
+def _read_of(identifier: str, end: str = "2026-10-20T21:59:00+00:00") -> dict:
+    read = json.loads(json.dumps(READ))
+    read["identifier"] = identifier
+    read["measures"][0]["periods"][0]["endDateTime"] = end
+    return read
+
+
+class _ReadingApi(_RecordingApi):
+    """The recording API plus GET, which the closure needs to rebuild the payload."""
+
+    def __init__(self, reads: dict[str, dict], **kwargs):
+        super().__init__(**kwargs)
+        self.reads = reads
+        self.read: list[str] = []
+        self.put_bodies: list[dict] = []
+
+    def get(self, identifier) -> dict | None:
+        self.read.append(str(identifier))
+        return self.reads.get(str(identifier))
+
+    def update(self, regulation):
+        self.put_bodies.append(regulation.to_dict())
+        return super().update(regulation)
+
+
+def _closing_org(monkeypatch, tmp_path, produced, remote, api, **attributes):
+    return _build_integration(
+        monkeypatch,
+        tmp_path,
+        measure_rows(produced),
+        remote,
+        api=api,
+        identifier_prefix=PREFIX,
+        close_missing=True,
+        update_changed=True,
+        **attributes,
+    )
+
+
+def test_what_left_the_source_is_closed_through_put_never_deleted(monkeypatch, tmp_path):
+    api = _ReadingApi({f"{PREFIX}gone": _read_of(f"{PREFIX}gone")})
+    integration = _closing_org(
+        monkeypatch, tmp_path, [f"{PREFIX}a"], [f"{PREFIX}a", f"{PREFIX}gone", "LYON_X"], api
+    )
+
+    outcome = integration.integrate_regulations()
+
+    assert api.deleted == []
+    assert api.read == [f"{PREFIX}gone"] and api.put == [f"{PREFIX}gone"]
+    period = api.put_bodies[0]["measures"][0]["periods"][0]
+    yesterday = datetime.now(tz=ZoneInfo("Europe/Paris")).date().toordinal() - 1
+    assert datetime.fromisoformat(period["endDate"]).date().toordinal() == yesterday
+    assert period["endDate"][11:] in ("23:59:59+02:00", "23:59:59+01:00")
+    assert outcome.closed == 1 and outcome.deleted == 0 and outcome.errors == 0
+    assert outcome.to_result()["closed"] == 1
+    # The closed regulation stays in the snapshot, with its new end, so tomorrow
+    # knows it ended without reading it again.
+    snapshot = _snapshot(tmp_path)
+    assert set(snapshot) == {f"{PREFIX}a", f"{PREFIX}gone"}
+    assert snapshot[f"{PREFIX}gone"]["measures"][0]["periods"][0]["endDate"] == period["endDate"]
+
+
+def test_a_regulation_that_ended_on_its_own_needs_no_write(monkeypatch, tmp_path):
+    api = _ReadingApi({f"{PREFIX}done": _read_of(f"{PREFIX}done", "2026-09-01T21:59:00+00:00")})
+    integration = _closing_org(
+        monkeypatch, tmp_path, [f"{PREFIX}a"], [f"{PREFIX}a", f"{PREFIX}done"], api
+    )
+
+    outcome = integration.integrate_regulations()
+
+    assert api.read == [f"{PREFIX}done"] and api.put == [] and api.deleted == []
+    assert outcome.closed == 1 and outcome.errors == 0
+    assert set(_snapshot(tmp_path)) == {f"{PREFIX}a", f"{PREFIX}done"}
+
+
+def test_an_already_closed_regulation_is_skipped_the_next_day(monkeypatch, tmp_path):
+    api = _ReadingApi({f"{PREFIX}gone": _read_of(f"{PREFIX}gone")})
+    integration = _closing_org(
+        monkeypatch, tmp_path, [f"{PREFIX}a"], [f"{PREFIX}a", f"{PREFIX}gone"], api
+    )
+    integration.integrate_regulations()
+    assert api.put == [f"{PREFIX}gone"]
+
+    outcome = integration.integrate_regulations()
+
+    # Second day: nothing read, nothing written, still remembered.
+    assert api.read == [f"{PREFIX}gone"] and api.put == [f"{PREFIX}gone"]
+    assert outcome.closed == 0
+    assert outcome.planned == {"create": 0, "update": 0, "delete": 0, "close": 0}
+    assert f"{PREFIX}gone" in _snapshot(tmp_path)
+
+
+def test_a_failed_closure_is_retried_tomorrow(monkeypatch, tmp_path):
+    api = _ReadingApi({f"{PREFIX}gone": _read_of(f"{PREFIX}gone")}, update_ok=False)
+    integration = _closing_org(
+        monkeypatch, tmp_path, [f"{PREFIX}a"], [f"{PREFIX}a", f"{PREFIX}gone"], api
+    )
+
+    outcome = integration.integrate_regulations()
+
+    assert api.put == [f"{PREFIX}gone"] and api.deleted == []
+    assert outcome.closed == 0 and outcome.errors == 1
+    # Not in the snapshot: unknown tomorrow, so it is read and closed again.
+    assert set(_snapshot(tmp_path)) == {f"{PREFIX}a"}
+
+
+def test_a_reappearing_site_is_reopened_as_an_update(monkeypatch, tmp_path):
+    api = _ReadingApi({f"{PREFIX}back": _read_of(f"{PREFIX}back")})
+    gone = _closing_org(monkeypatch, tmp_path, [f"{PREFIX}a"], [f"{PREFIX}a", f"{PREFIX}back"], api)
+    gone.integrate_regulations()
+    assert api.put == [f"{PREFIX}back"]
+
+    back = _closing_org(
+        monkeypatch,
+        tmp_path,
+        [f"{PREFIX}a", f"{PREFIX}back"],
+        [f"{PREFIX}a", f"{PREFIX}back"],
+        api,
+    )
+    outcome = back.integrate_regulations()
+
+    assert outcome.planned == {"create": 0, "update": 1, "delete": 0, "close": 0}
+    assert api.put == [f"{PREFIX}back", f"{PREFIX}back"]
+
+
+def test_a_dry_run_reports_closures_without_reading_anything(monkeypatch, tmp_path):
+    api = _ReadingApi({})
+    integration = _closing_org(
+        monkeypatch, tmp_path, [f"{PREFIX}a"], [f"{PREFIX}a", f"{PREFIX}gone"], api
+    )
+
+    outcome = integration.integrate_regulations(dry_run=True)
+
+    assert api.read == [] and api.put == []
+    assert outcome.planned == {"create": 0, "update": 0, "delete": 0, "close": 1}
+    assert "à clore : 1" in outcome.report
+    assert f"  - {PREFIX}gone" in outcome.report

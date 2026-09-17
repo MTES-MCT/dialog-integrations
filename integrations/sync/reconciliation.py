@@ -1,18 +1,23 @@
 """Decide what to create, update and delete on a given run.
 
-Three operations, three sources of truth (`ai/docs/synchronisation.md`):
+Four operations, three sources of truth (`ai/docs/synchronisation.md`):
 
 | Operation | Source of truth                                                          |
 |-----------|--------------------------------------------------------------------------|
 | create    | `GET /api/organization/identifiers` — identifier missing from DiaLog      |
 | delete    | same endpoint — present in DiaLog, **inside our prefix**, absent today    |
+| close     | same as delete, but the regulation stays and its end date is brought back |
 | update    | the snapshot of what we sent last time (`integrations/state.py`)          |
+
+An organization chooses what happens to a regulation that left its source: nothing
+(the default), deletion, or closure (`integrations/closure.py`) — never both. A closed
+regulation that has already ended, according to the snapshot, is left alone.
 
 Two guard rails:
 
-- `identifier_prefix` bounds every destructive operation. Without a prefix deletion is
-  *refused*, not merely disabled: an organization usually also receives regulations from
-  channels outside this repository.
+- `identifier_prefix` bounds every destructive operation. Without a prefix deletion
+  and closure are *refused*, not merely disabled: an organization usually also
+  receives regulations from channels outside this repository.
 - a batch over its cap is held **whole** and flagged for manual review; its previous
   digest stays in the snapshot so it is detected again, identically, the next day.
 """
@@ -21,13 +26,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Literal
 
+from integrations.sync.closure import is_ended
 from integrations.sync.state import Digest, fingerprint
 
 CREATE = "create"
 UPDATE = "update"
 DELETE = "delete"
+CLOSE = "close"
 
 # "none": never update. "changed": update what differs from the snapshot (the class
 # attribute `update_changed`). "all": update everything already in DiaLog — what the
@@ -40,7 +48,11 @@ class SynchronizationError(Exception):
 
 
 class DeletionsWithoutPrefixError(SynchronizationError):
-    """Deletion was requested without an identifier prefix to bound it."""
+    """Deletion or closure was requested without an identifier prefix to bound it."""
+
+
+class ConflictingMissingPoliciesError(SynchronizationError):
+    """An organization asked to both delete and close what left its source."""
 
 
 class IdentifierOutsidePrefixError(SynchronizationError):
@@ -72,6 +84,11 @@ class ReconciliationPlan:
     updates: Batch
     deletions: Batch
     unchanged: tuple[str, ...] = ()
+    # Only for organizations that close what left their source.
+    closures: Batch | None = None
+    closed_at: datetime | None = None
+    # Missing from the source but already ended according to the snapshot: not touched.
+    already_ended: tuple[str, ...] = ()
     update_mode: "UpdateMode" = "none"
     snapshot_present: bool = False
     identifier_prefix: str | None = None
@@ -79,8 +96,11 @@ class ReconciliationPlan:
     remote_in_prefix: int = 0
 
     @property
-    def batches(self) -> tuple[Batch, Batch, Batch]:
-        return (self.creations, self.updates, self.deletions)
+    def batches(self) -> tuple[Batch, ...]:
+        batches: tuple[Batch, ...] = (self.creations, self.updates, self.deletions)
+        if self.closures is not None:
+            batches += (self.closures,)
+        return batches
 
     @property
     def held(self) -> dict[str, int]:
@@ -101,6 +121,8 @@ class IntegrationOutcome:
     created: int = 0
     updated: int = 0
     deleted: int = 0
+    # None for organizations that do not close what left their source.
+    closed: int | None = None
     # Regulations the API refused, one by one. They do not fail the run: the historical
     # behavior is to log them and carry on, and the CI marks a run failed only when the
     # command itself exits non-zero.
@@ -127,6 +149,8 @@ class IntegrationOutcome:
             "updated": self.updated,
             "deleted": self.deleted,
         }
+        if self.closed is not None:
+            result["closed"] = self.closed
         if self.dry_run:
             result["dry_run"] = True
             result["planned"] = self.planned
@@ -169,13 +193,25 @@ def reconcile(
     identifier_prefix: str | None = None,
     update_mode: UpdateMode = "none",
     delete_missing: bool = False,
+    close_missing: bool = False,
+    closed_at: datetime | None = None,
     max_creations: int | None = None,
     max_updates: int | None = None,
     max_deletions: int | None = None,
+    max_closures: int | None = None,
     force_deletions: bool = False,
 ) -> ReconciliationPlan:
-    """Split today's production into the three batches."""
+    """Split today's production into its batches.
+
+    `force_deletions` releases the batch of what left the source — deletions or
+    closures, whichever the organization chose — when its cap holds it.
+    """
     assert_identifiers_in_prefix(produced.keys(), identifier_prefix)
+    if delete_missing and close_missing:
+        raise ConflictingMissingPoliciesError(
+            "delete_missing and close_missing are both set: a regulation that left the "
+            "source is either deleted or closed, not both."
+        )
 
     remote = {str(identifier) for identifier in remote_identifiers}
     in_prefix = (
@@ -204,16 +240,29 @@ def reconcile(
     updated_set = set(to_update)
     unchanged = tuple(identifier for identifier in already_there if identifier not in updated_set)
 
-    if delete_missing:
-        if not identifier_prefix:
-            raise DeletionsWithoutPrefixError(
-                "Refusing to compute deletions without an identifier_prefix: an "
-                "unbounded deletion pass would remove regulations this pipeline "
-                "does not own."
-            )
-        to_delete = tuple(sorted(in_prefix - set(produced)))
-    else:
-        to_delete = ()
+    if (delete_missing or close_missing) and not identifier_prefix:
+        raise DeletionsWithoutPrefixError(
+            "Refusing to compute deletions or closures without an identifier_prefix: "
+            "an unbounded pass would touch regulations this pipeline does not own."
+        )
+    missing = tuple(sorted(in_prefix - set(produced)))
+    to_delete = missing if delete_missing else ()
+
+    closures = None
+    already_ended: tuple[str, ...] = ()
+    if close_missing:
+        if closed_at is None:
+            raise SynchronizationError("close_missing needs the closing instant")
+        already_ended = tuple(
+            identifier
+            for identifier in missing
+            if snapshot is not None
+            and identifier in snapshot
+            and is_ended(snapshot[identifier], closed_at)
+        )
+        ended = set(already_ended)
+        to_close = tuple(identifier for identifier in missing if identifier not in ended)
+        closures = _batch(CLOSE, to_close, max_closures, released=force_deletions)
 
     return ReconciliationPlan(
         creations=_batch(CREATE, to_create, max_creations),
@@ -221,6 +270,9 @@ def reconcile(
         # --force-deletions releases the deletion batch only.
         deletions=_batch(DELETE, to_delete, max_deletions, released=force_deletions),
         unchanged=unchanged,
+        closures=closures,
+        closed_at=closed_at if close_missing else None,
+        already_ended=already_ended,
         update_mode=update_mode,
         snapshot_present=snapshot is not None,
         identifier_prefix=identifier_prefix,

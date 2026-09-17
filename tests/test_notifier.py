@@ -225,8 +225,32 @@ def test_the_corpus_size_is_shown_under_the_organization(notifier):
 def test_the_corpus_size_without_a_row_count(notifier):
     body, _ = notifier.format_message(
         {
-            "result_co_brest": '{"success":true,"created":0,"updated":0,"deleted":0,"integrated":{"regulations":1577,"measures":3085}}'
+            "result_co_brest": (
+                '{"success":true,"created":0,"updated":0,"deleted":0,'
+                '"integrated":{"regulations":1577,"measures":3085}}'
+            )
         }
     )
 
     assert "au total 1577 arrêtés et 3085 mesures intégrés" in body
+
+
+def test_closures_are_counted_and_refusals_are_not(notifier):
+    body, _ = notifier.format_message(
+        {
+            "result_co_lyon": (
+                '{"success":true,"created":0,"updated":0,"deleted":0,"closed":2,"refused":3}'
+            )
+        }
+    )
+
+    assert "0 créé, 0 mis à jour, 0 supprimé, 2 clos" in body
+    assert "refus" not in body
+
+
+def test_a_closing_organization_that_changed_nothing_says_so(notifier):
+    body, _ = notifier.format_message(
+        {"result_co_lyon": '{"success":true,"created":0,"updated":0,"deleted":0,"closed":0}'}
+    )
+
+    assert "aucun changement" in body

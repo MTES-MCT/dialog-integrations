@@ -104,8 +104,8 @@ Usage: dialog integrate [OPTIONS]
 │                                                          [default: dev]                 │
 │ --dry-run                                                Compute everything, write      │
 │                                                          nothing, print the report.     │
-│ --force-deletions                                        Release a deletion batch held  │
-│                                                          by its cap.                    │
+│ --force-deletions                                        Release a deletion or closure  │
+│                                                          batch held by its cap.         │
 │ --json                                                   Print the run result as JSON   │
 │                                                          on stdout (for CI).            │
 │ --help                                                   Show this message and exit.    │
@@ -121,29 +121,32 @@ Exemples :
 
 ## Synchronisation
 
-Par défaut la pipeline est **additive** : elle crée les arrêtés absents de DiaLog, ne met rien à jour et ne supprime rien. Une organisation peut activer les trois opérations en surchargeant des attributs de classe dans son `integration.py` :
+Par défaut la pipeline est **additive** : elle crée les arrêtés absents de DiaLog, ne met rien à jour et ne touche pas à ce qui a disparu de la source. Une organisation active les autres opérations en surchargeant des attributs de classe dans son `integration.py` :
 
 ```python
 class Integration(BaseIntegration):
-    identifier_prefix = "MGL-CHP-"   # borne toute opération destructrice
-    delete_missing = True               # supprimer ce qui a disparu de la source
+    identifier_prefix = "MGL-CHP-"   # borne toute opération hors création
     update_changed = True               # republier ce qui a changé depuis l'envoi précédent
-    max_deletions_per_run = 50
+    close_missing = True                # clore ce qui a disparu de la source (ou delete_missing = True pour le supprimer)
     max_updates_per_run = 50
+    max_closures_per_run = 50           # ou max_deletions_per_run
     max_creations_per_run = None        # plafond non armé
 ```
 
 | Opération | Source de vérité |
 |---|---|
 | Création | `GET /api/organization/identifiers` — identifiant absent de DiaLog |
-| Suppression | même endpoint — identifiant présent, **dans notre préfixe**, absent de la production du jour |
+| Suppression (`delete_missing`) | même endpoint — identifiant présent, **dans notre préfixe**, absent de la production du jour |
+| Clôture (`close_missing`) | même critère, mais l'arrêté **reste** : sa date de fin est ramenée à la veille de l'exécution (fin de journée, Europe/Paris). L'arrêté est relu dans DiaLog, reconstruit en corps d'écriture et renvoyé par `PUT` (`integrations/sync/closure.py`). Un arrêté déjà expiré n'est pas réécrit. Un chantier annulé avant d'avoir commencé se termine à sa date de début |
 | Mise à jour | l'**instantané** de ce qu'on a envoyé la fois précédente, via `PUT /api/regulations` — sauf pour un arrêté à emprises `zone`, que l'API refuse en PUT (500) : il est supprimé puis recréé par le flux zone |
+
+`delete_missing` et `close_missing` s'excluent. Une source qui est un instantané de chantiers en cours (Lyon) **clôt** : l'équipe veut garder l'historique des chantiers.
 
 ### Le préfixe, garde-fou principal
 
 Une organisation DiaLog reçoit souvent des arrêtés par d'autres canaux que ce dépôt. `identifier_prefix` borne le rayon d'action :
 
-* **sans préfixe, la suppression est refusée** (exception), pas seulement désactivée ;
+* **sans préfixe, la suppression et la clôture sont refusées** (exception), pas seulement désactivées ;
 * un identifiant produit qui ne commence pas par le préfixe **arrête l'exécution** avant toute écriture : c'est le garde-fou contre un préfixe appliqué deux fois ou oublié dans une branche de la transformation.
 
 ### Les plafonds et les lots retenus
@@ -152,10 +155,10 @@ Un lot au-dessus de son plafond est **retenu en entier** — rien n'est appliqu�
 
 ```shell
 uv run dialog integrate co_lyon --env=prod --dry-run           # lire le rapport
-uv run dialog integrate co_lyon --env=prod --force-deletions   # relâcher les suppressions
+uv run dialog integrate co_lyon --env=prod --force-deletions   # relâcher les suppressions ou les clôtures
 ```
 
-`--force-deletions` ne relâche que le lot de suppressions.
+`--force-deletions` ne relâche que le lot de ce qui a disparu de la source — suppressions ou clôtures, selon l'organisation.
 
 ### L'instantané
 
@@ -163,7 +166,7 @@ uv run dialog integrate co_lyon --env=prod --force-deletions   # relâcher les s
 
 * `DIALOG_STATE_DIR` déplace le dossier (en CI il vit dans le cache GitHub Actions).
 * **Instantané absent = aucune mise à jour**, et il est reconstruit à la fin de l'exécution. Un cache perdu coûte une journée de mises à jour, jamais une réécriture de masse.
-* Seuls les arrêtés effectivement écrits y entrent ; les supprimés en sortent.
+* Seuls les arrêtés effectivement écrits y entrent ; les supprimés en sortent. Les arrêtés **clos** y restent, avec leur nouvelle date de fin : c'est ainsi que le lendemain les sait terminés sans les relire. Un arrêté disparu de la source et inconnu de l'instantané est relu dans DiaLog, et n'est réécrit que s'il court encore.
 
 ### `--dry-run`
 
@@ -173,7 +176,7 @@ uv run dialog integrate co_lyon --env=dev --dry-run
 
 Calcule tout — extraction, transformation, lots — et **n'écrit rien**, ni dans DiaLog ni dans l'instantané. Seule requête réseau vers DiaLog : le `GET /api/organization/identifiers`, en lecture. Le rapport donne l'entonnoir (lignes brutes, lignes nettoyées, arrêtés, mesures), les trois lots avec leurs plafonds, les identifiants concernés, un diff champ par champ pour chaque mise à jour, et les lots retenus. Le même rapport est journalisé avant écriture en exécution réelle.
 
-`--json` imprime le résultat de l'exécution sur la sortie standard (`{"success": true, "created": n, "updated": n, "deleted": n, "refused": n, "held": {…}, "source": {…}}` — `refused` compte les arrêtés que la pipeline elle-même a refusés (zone couvrant plusieurs routes parallèles), réessayés chaque nuit) ; les journaux restent sur la sortie d'erreur, donc `uv run dialog integrate co_lyon --json > result.json` produit un fichier propre. C'est ce que consomme la CI.
+`--json` imprime le résultat de l'exécution sur la sortie standard (`{"success": true, "created": n, "updated": n, "deleted": n, "closed": n, "refused": n, "held": {…}, "source": {…}}` — `refused` compte les arrêtés que la pipeline elle-même a refusés (zone couvrant plusieurs routes parallèles), réessayés chaque nuit) ; les journaux restent sur la sortie d'erreur, donc `uv run dialog integrate co_lyon --json > result.json` produit un fichier propre. C'est ce que consomme la CI.
 
 ### Volumétries source
 

@@ -11,7 +11,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from integrations.sync.reconciliation import CREATE, DELETE, UPDATE, Batch, ReconciliationPlan
+from integrations.sync.reconciliation import (
+    CLOSE,
+    CREATE,
+    DELETE,
+    UPDATE,
+    Batch,
+    ReconciliationPlan,
+)
 from integrations.sync.state import Digest
 
 # Beyond that, only the head of the list is printed: the report has to stay readable
@@ -25,6 +32,7 @@ OPERATION_LABELS = {
     CREATE: "à créer",
     UPDATE: "à mettre à jour",
     DELETE: "à supprimer",
+    CLOSE: "à clore",
 }
 
 _MISSING = object()
@@ -133,6 +141,13 @@ def render_report(
     for batch in plan.batches:
         lines.append(f"  {_render_batch_header(batch)}")
     lines.append(f"  inchangés : {len(plan.unchanged)}")
+    if plan.closures is not None:
+        lines.append(f"  déjà clos, laissés tels quels : {len(plan.already_ended)}")
+        if plan.closed_at is not None:
+            lines.append(
+                "  date de fin donnée aux arrêtés clos : "
+                f"{plan.closed_at.isoformat(timespec='seconds')}"
+            )
 
     for batch in plan.batches:
         if batch.size:
@@ -150,9 +165,11 @@ def render_report(
                 f"  {OPERATION_LABELS[batch.operation]} : {batch.size} > plafond "
                 f"{batch.limit} — lot non appliqué, redétecté à l'identique demain"
             )
-        if plan.deletions.held and not force_deletions:
+        missing_held = plan.deletions.held or (plan.closures is not None and plan.closures.held)
+        if missing_held and not force_deletions:
+            what = "suppressions" if plan.deletions.held else "clôtures"
             lines.append(
-                f"  Relâcher les suppressions : uv run dialog integrate {organization} "
+                f"  Relâcher les {what} : uv run dialog integrate {organization} "
                 f"--env={environment} --force-deletions"
             )
 

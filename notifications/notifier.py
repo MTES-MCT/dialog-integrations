@@ -154,8 +154,20 @@ class TchapNotifier:
         return "\n".join(text_lines), formatted_body
 
     # Wording of the synchronization counters, as the team reads them in Tchap.
-    COUNT_LABELS = (("created", "créé"), ("updated", "mis à jour"), ("deleted", "supprimé"))
-    HELD_LABELS = {"create": "créations", "update": "mises à jour", "delete": "suppressions"}
+    # `closed` only appears for organizations that close what left their source.
+    COUNT_LABELS = (
+        ("created", "créé"),
+        ("updated", "mis à jour"),
+        ("deleted", "supprimé"),
+        ("closed", "clos"),
+    )
+    INVARIABLE_LABELS = ("mis à jour", "clos")
+    HELD_LABELS = {
+        "create": "créations",
+        "update": "mises à jour",
+        "delete": "suppressions",
+        "close": "clôtures",
+    }
 
     @classmethod
     def _format_counts(cls, result: dict) -> str:
@@ -169,7 +181,7 @@ class TchapNotifier:
             value = result.get(key)
             if not isinstance(value, int) or isinstance(value, bool):
                 continue
-            plural = "s" if value > 1 and not label.endswith("jour") else ""
+            plural = "s" if value > 1 and label not in cls.INVARIABLE_LABELS else ""
             parts.append(f"{value} {label}{plural}")
 
         if not parts:

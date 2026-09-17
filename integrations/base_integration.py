@@ -1,12 +1,13 @@
 """One organization: its data sources, and what it does with their regulations.
 
 The class is the orchestrator. Building the payloads lives in `payloads.py`, talking to
-DiaLog in `api.py`, zones in `zone_flow.py`, and deciding what to create, update and
-delete in `sync/`; an organization's `integration.py` subclasses this and declares its
+DiaLog in `api.py`, zones in `zone_flow.py`, and deciding what to create, update,
+close and delete in `sync/`; an organization's `integration.py` subclasses this and declares its
 data sources, default status and synchronization options.
 """
 
 from collections.abc import Sequence
+from datetime import datetime
 from importlib import util as importlib_util
 
 import polars as pl
@@ -25,6 +26,12 @@ from integrations import payloads
 from integrations.api import DialogApi, build_client
 from integrations.base_data_source_integration import BaseDataSourceIntegration, RegulationMeasure
 from integrations.shared.zone_sections import MAX_SECTIONS_PER_LENGTH, MIN_SECTION_LENGTH_M
+from integrations.sync.closure import (
+    ClosureNotRebuildable,
+    close_payload,
+    closing_instant,
+    save_payload_from_read,
+)
 from integrations.sync.reconciliation import IntegrationOutcome, UpdateMode, reconcile
 from integrations.sync.report import SourceFunnel, render_report
 from integrations.sync.state import Digest, SnapshotStore, compute_regulation_digest
@@ -56,9 +63,14 @@ class BaseIntegration:
     # pipeline owns; without it deletion is refused, not merely disabled.
     identifier_prefix: str | None = None
     max_deletions_per_run: int | None = None
+    max_closures_per_run: int | None = None
     max_updates_per_run: int | None = None
     max_creations_per_run: int | None = None
+    # What happens to a regulation that left the source: deleted, or closed — its end
+    # date brought back to the day before the run, the regulation itself kept
+    # (`sync/closure.py`). At most one of the two.
     delete_missing: bool = False
+    close_missing: bool = False
     update_changed: bool = False
 
     def __init__(self, organization_settings: OrganizationSettings, client: Client):  # type: ignore
@@ -108,10 +120,10 @@ class BaseIntegration:
     ) -> IntegrationOutcome:
         """Make DiaLog match what the data sources produce today.
 
-        Three operations: create what DiaLog does not have, update what changed since
-        the snapshot of our last send, delete what left the source (inside our prefix
-        only). `dry_run` computes everything and writes nothing — neither to DiaLog nor
-        to the snapshot.
+        Four operations: create what DiaLog does not have, update what changed since
+        the snapshot of our last send, delete or close what left the source (inside
+        our prefix only). `dry_run` computes everything and writes nothing — neither
+        to DiaLog nor to the snapshot.
         """
         outcome = IntegrationOutcome(organization=self.organization, dry_run=dry_run)
 
@@ -175,8 +187,15 @@ class BaseIntegration:
                 source_of[identifier] = name
             stores[name] = SnapshotStore(self.organization, name)
 
-        # The snapshot only exists for organizations that opted into update detection.
-        snapshot = self._load_snapshot(stores) if self.update_changed else None
+        # The snapshot only exists for organizations that opted into update detection
+        # or closure: both need to know what was last sent.
+        snapshot_by_source: dict[str, dict[str, Digest]] = {}
+        snapshot = (
+            self._load_snapshot(stores, snapshot_by_source)
+            if self.update_changed or self.close_missing
+            else None
+        )
+        closed_at = closing_instant()
 
         plan = reconcile(
             digests,
@@ -185,9 +204,12 @@ class BaseIntegration:
             identifier_prefix=self.identifier_prefix,
             update_mode=update_mode,
             delete_missing=self.delete_missing,
+            close_missing=self.close_missing,
+            closed_at=closed_at,
             max_creations=self.max_creations_per_run,
             max_updates=self.max_updates_per_run,
             max_deletions=self.max_deletions_per_run,
+            max_closures=self.max_closures_per_run,
             force_deletions=force_deletions,
         )
         outcome.planned = plan.planned
@@ -221,6 +243,10 @@ class BaseIntegration:
             [regulations[identifier] for identifier in plan.updates.applicable]
         )
         deleted = self._delete_regulations(plan.deletions.applicable)
+        closed_digests: dict[str, Digest] = {}
+        if plan.closures is not None:
+            closed_digests = self._close_regulations(plan.closures.applicable, closed_at)
+            outcome.closed = len(closed_digests)
 
         outcome.created = len(created)
         outcome.updated = len(updated)
@@ -230,16 +256,35 @@ class BaseIntegration:
             len(plan.creations.applicable)
             + len(plan.updates.applicable)
             + len(plan.deletions.applicable)
+            + (len(plan.closures.applicable) if plan.closures is not None else 0)
         )
         outcome.errors = (
-            attempted - outcome.created - outcome.updated - outcome.deleted - outcome.refused
+            attempted
+            - outcome.created
+            - outcome.updated
+            - outcome.deleted
+            - (outcome.closed or 0)
+            - outcome.refused
         )
         # Not in DiaLog after the run: the creations that were held, refused or failed.
         not_integrated = set(plan.creations.identifiers) - set(created)
         outcome.regulations -= len(not_integrated)
         outcome.measures -= sum(len(regulations[i].measures or []) for i in not_integrated)
 
-        if self.update_changed:
+        if self.update_changed or self.close_missing:
+            # Closed today, or missing from the source and still in DiaLog: these stay
+            # in the snapshot so tomorrow knows they have ended (or retries a closure
+            # that failed or was held).
+            carried: dict[str, Digest] = dict(closed_digests)
+            if self.close_missing and snapshot:
+                remaining = set(plan.already_ended) | (
+                    set(plan.closures.identifiers) - set(closed_digests)
+                    if plan.closures is not None
+                    else set()
+                )
+                carried.update(
+                    {i: snapshot[i] for i in remaining if i in snapshot and i not in carried}
+                )
             self._save_snapshots(
                 stores=stores,
                 source_of=source_of,
@@ -250,6 +295,8 @@ class BaseIntegration:
                 keep_previous=set(plan.updates.identifiers) - set(updated),
                 # Nothing was written for these: leave them out so they are retried.
                 skipped=set(plan.creations.identifiers) - set(created),
+                carried=carried,
+                snapshot_by_source=snapshot_by_source,
             )
 
         return outcome
@@ -310,15 +357,24 @@ class BaseIntegration:
         }
 
     @staticmethod
-    def _load_snapshot(stores: dict[str, SnapshotStore]) -> dict[str, Digest] | None:
-        """Merge every source snapshot, or None when not a single one exists."""
+    def _load_snapshot(
+        stores: dict[str, SnapshotStore],
+        by_source: dict[str, dict[str, Digest]] | None = None,
+    ) -> dict[str, Digest] | None:
+        """Merge every source snapshot, or None when not a single one exists.
+
+        `by_source`, when given, receives each source's own digests: a regulation that
+        left its source is written back to the snapshot it came from.
+        """
         merged: dict[str, Digest] = {}
         found = False
-        for store in stores.values():
+        for name, store in stores.items():
             loaded = store.load()
             if loaded is not None:
                 found = True
                 merged.update(loaded)
+                if by_source is not None:
+                    by_source[name] = loaded
         return merged if found else None
 
     @staticmethod
@@ -330,9 +386,19 @@ class BaseIntegration:
         snapshot: dict[str, Digest] | None,
         keep_previous: set[str],
         skipped: set[str],
+        carried: dict[str, Digest] | None = None,
+        snapshot_by_source: dict[str, dict[str, Digest]] | None = None,
     ) -> None:
-        """Record what is now in DiaLog, one snapshot per data source."""
+        """Record what is now in DiaLog, one snapshot per data source.
+
+        `carried` holds regulations absent from today's production that must stay in
+        the snapshot (closed, or already ended): each goes back to the source snapshot
+        that held it, or to the first source when no snapshot remembers it.
+        """
         previous = snapshot or {}
+        carried = carried or {}
+        by_source = snapshot_by_source or {}
+        first = next(iter(stores), None)
         for name, store in stores.items():
             state: dict[str, Digest] = {}
             for identifier, owner in source_of.items():
@@ -343,6 +409,12 @@ class BaseIntegration:
                         state[identifier] = previous[identifier]
                     continue
                 state[identifier] = digests[identifier]
+            for identifier, digest in carried.items():
+                if identifier in source_of:
+                    continue
+                owners = [n for n, loaded in by_source.items() if identifier in loaded]
+                if name == (owners[0] if owners else first):
+                    state[identifier] = digest
             store.save(state)
 
     def publish_regulations(self) -> None:
@@ -371,7 +443,7 @@ class BaseIntegration:
         logger.info(f"Found {len(identifiers)} identifier(s) for organization {self.organization}")
         return identifiers
 
-    # --- the three write passes ----------------------------------------------------
+    # --- the write passes ----------------------------------------------------
 
     def _integrate_regulations_add(
         self, regulations: list[PostApiRegulationsAddBody]
@@ -434,6 +506,48 @@ class BaseIntegration:
             f"Finished updating {len(updated)}/{len(regulations)} regulations successfully"
         )
         return updated
+
+    def _close_regulations(
+        self, identifiers: Sequence[str], closed_at: datetime
+    ) -> dict[str, Digest]:
+        """Bring the end date of every identifier back to `closed_at`, keeping it in DiaLog.
+
+        The source no longer has the row, so each regulation is read back from DiaLog,
+        rebuilt as a write payload and sent through `PUT` with its periods clamped
+        (`sync/closure.py`). One that already ended on its own needs no write. Returns,
+        for every regulation now known to be closed, the digest of what DiaLog holds —
+        it goes into the snapshot so tomorrow skips it without a call.
+        """
+        closed: dict[str, Digest] = {}
+        for index, identifier in enumerate(identifiers):
+            logger.info(f"Closing regulation {index + 1}/{len(identifiers)}: {identifier}")
+            read = self.api.get(identifier)
+            if read is None:
+                continue
+            try:
+                payload = save_payload_from_read(read)
+            except ClosureNotRebuildable as e:
+                logger.error(f"Cannot close {identifier}, it would lose a detail: {e}")
+                continue
+
+            closed_payload, changed = close_payload(payload, closed_at)
+            regulation = PostApiRegulationsAddBody.from_dict(closed_payload)
+            digest = compute_regulation_digest(regulation)
+            if not changed:
+                logger.info(f"{identifier} had already ended, nothing to write")
+                closed[identifier] = digest
+                continue
+            if not self.api.update(regulation):
+                continue
+            logger.success(
+                f"{identifier} closed: its periods now end on "
+                f"{closed_at.isoformat(timespec='seconds')} at the latest"
+            )
+            closed[identifier] = digest
+
+        if identifiers:
+            logger.success(f"Finished closing {len(closed)}/{len(identifiers)} regulations")
+        return closed
 
     def _delete_regulations(self, identifiers: Sequence[str]) -> list[str]:
         """DELETE every identifier; return those that are gone from DiaLog.

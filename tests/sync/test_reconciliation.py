@@ -204,3 +204,105 @@ def test_an_unchanged_regulation_produces_no_operation():
     )
 
     assert plan.planned == {"create": 0, "update": 0, "delete": 0}
+
+
+# --- Closure: what left the source is closed, not deleted ----------------------------
+
+from datetime import datetime  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+from integrations.sync.reconciliation import ConflictingMissingPoliciesError  # noqa: E402
+
+CLOSED_AT = datetime(2026, 9, 16, 23, 59, 59, tzinfo=ZoneInfo("Europe/Paris"))
+
+
+def _ending(end: str) -> dict:
+    return {"title": "t", "measures": [{"periods": [{"endDate": end, "isPermanent": False}]}]}
+
+
+def test_closure_targets_what_left_the_source_inside_the_prefix():
+    plan = reconcile(
+        digests(f"{PREFIX}a"),
+        [f"{PREFIX}a", f"{PREFIX}gone", "LYON_2009RP05617"],
+        {},
+        identifier_prefix=PREFIX,
+        close_missing=True,
+        closed_at=CLOSED_AT,
+    )
+    assert plan.closures is not None
+    assert plan.closures.identifiers == (f"{PREFIX}gone",)
+    assert plan.deletions.size == 0
+    assert plan.planned == {"create": 0, "update": 0, "delete": 0, "close": 1}
+    assert plan.closed_at == CLOSED_AT
+
+
+def test_a_regulation_that_already_ended_is_not_closed_again():
+    snapshot = {
+        f"{PREFIX}ended": _ending("2026-09-10T23:59:59+02:00"),
+        f"{PREFIX}running": _ending("2026-10-10T23:59:59+02:00"),
+    }
+    plan = reconcile(
+        digests(),
+        [f"{PREFIX}ended", f"{PREFIX}running", f"{PREFIX}unknown"],
+        snapshot,
+        identifier_prefix=PREFIX,
+        close_missing=True,
+        closed_at=CLOSED_AT,
+    )
+    assert plan.closures is not None
+    # Unknown to the snapshot: closed anyway, the closure reads DiaLog and decides.
+    assert plan.closures.identifiers == (f"{PREFIX}running", f"{PREFIX}unknown")
+    assert plan.already_ended == (f"{PREFIX}ended",)
+
+
+def test_closure_is_capped_and_released_like_deletion():
+    remote = [f"{PREFIX}{i}" for i in range(4)]
+    held = reconcile(
+        digests(),
+        remote,
+        {},
+        identifier_prefix=PREFIX,
+        close_missing=True,
+        closed_at=CLOSED_AT,
+        max_closures=3,
+    )
+    released = reconcile(
+        digests(),
+        remote,
+        {},
+        identifier_prefix=PREFIX,
+        close_missing=True,
+        closed_at=CLOSED_AT,
+        max_closures=3,
+        force_deletions=True,
+    )
+    assert held.closures is not None and held.closures.held
+    assert held.closures.applicable == ()
+    assert held.held == {"close": 4}
+    assert released.closures is not None and released.closures.applicable == tuple(remote)
+
+
+def test_closure_without_a_prefix_is_refused():
+    with pytest.raises(DeletionsWithoutPrefixError):
+        reconcile(digests("A-1"), ["A-1", "A-2"], {}, close_missing=True, closed_at=CLOSED_AT)
+
+
+def test_deleting_and_closing_at_once_is_refused():
+    with pytest.raises(ConflictingMissingPoliciesError):
+        reconcile(
+            digests(),
+            [],
+            {},
+            identifier_prefix=PREFIX,
+            delete_missing=True,
+            close_missing=True,
+            closed_at=CLOSED_AT,
+        )
+
+
+def test_an_organization_that_does_not_close_has_no_closure_batch():
+    plan = reconcile(
+        digests(f"{PREFIX}a"), [f"{PREFIX}a", f"{PREFIX}gone"], {}, identifier_prefix=PREFIX
+    )
+    assert plan.closures is None
+    assert "close" not in plan.planned
