@@ -18,17 +18,22 @@ jobs:
         include:
           - { organization: co_brest, target: prod }
           - { organization: dp_sarthe, target: prod }
-          - { organization: co_rennes, target: prod }
-          - { organization: dp_aveyron, target: prod }
           - { organization: co_issy-les-moulineaux, target: prod }
+          # Under review on the staging: never written to production by this workflow.
+          - { organization: dp_aveyron, target: staging }
+          - { organization: co_lyon, target: staging }
+          - { organization: co_rennes, target: staging }
+          - { organization: co_nantes, target: staging }
     environment: ${{ matrix.target == 'prod' && matrix.organization || format('{0}-{1}', matrix.organization, matrix.target) }}
     outputs:
       # One output per matrix value — names must be static
       result_co_brest:   ${{ steps.integration.outputs.result_co_brest }}
       result_dp_sarthe:  ${{ steps.integration.outputs.result_dp_sarthe }}
-      result_co_rennes:  ${{ steps.integration.outputs.result_co_rennes }}
-      result_dp_aveyron: ${{ steps.integration.outputs.result_dp_aveyron }}
       result_co_issy-les-moulineaux: ${{ steps.integration.outputs['result_co_issy-les-moulineaux'] }}
+      result_dp_aveyron: ${{ steps.integration.outputs.result_dp_aveyron }}
+      result_co_lyon:    ${{ steps.integration.outputs.result_co_lyon }}
+      result_co_rennes:  ${{ steps.integration.outputs.result_co_rennes }}
+      result_co_nantes:  ${{ steps.integration.outputs.result_co_nantes }}
 
     steps:
       - uses: actions/checkout@v4
