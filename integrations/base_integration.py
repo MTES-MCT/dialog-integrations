@@ -576,9 +576,15 @@ class BaseIntegration:
     # --- payloads: kept as methods so an organization can override one ------------
 
     def create_regulations(
-        self, clean_data: pl.DataFrame, source: BaseDataSourceIntegration | None = None
+        self,
+        clean_data: pl.DataFrame,
+        source: BaseDataSourceIntegration | type[BaseDataSourceIntegration] | None = None,
     ) -> list[PostApiRegulationsAddBody]:
-        """The source decides how its rows fold into measures and regulations."""
+        """The source decides how its rows fold into measures and regulations.
+
+        Only class attributes are read, so the class itself does as well as an instance
+        (tests build payloads without instantiating a source).
+        """
         return payloads.build_regulations(
             clean_data,
             self.status,

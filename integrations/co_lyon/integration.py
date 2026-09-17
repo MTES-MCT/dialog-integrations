@@ -1,14 +1,19 @@
 """Métropole de Lyon integration.
 
-Scope agreed with the team: **disruptive work sites only**. The other Grand Lyon
-layers explored in June/August 2026 (chaussées et trottoirs, zones apaisées…) are out
-of scope for this integration.
+Two Grand Lyon layers, each its own data source and identifier namespace:
 
-The source is a snapshot: a work site that ends, or is withdrawn, disappears from
-the layer. The regulation is then **closed, never deleted** — its end date is brought
-back to the day before the run and it stays in DiaLog, because the team wants the
-history of work sites kept. A site that ends on its announced date needs no write at
-all: the regulation expired on its own, on the right day.
+- `chantiers_perturbants` (`MGL-CHP-`): disruptive work sites, temporary, one
+  regulation per site;
+- `chaussees_trottoirs` (`MGL-CT-`): the permanent regulation of the road network,
+  one regulation per order (or per measure for the unnumbered stretches).
+
+The work-site layer is a snapshot: a site that ends, or is withdrawn, disappears from
+it. The regulation is then **closed, never deleted** — its end date is brought back to
+the day before the run and it stays in DiaLog, because the team wants the history of
+work sites kept. A site that ends on its announced date needs no write at all: the
+regulation expired on its own, on the right day. The same policy applies to the road
+network layer for want of a per-source one: a stretch that leaves it is closed, and
+a batch of more than 50 updates or closures is held for review.
 
 `PUBLISHED` is deliberate: a draft is not visible on staging, and this source is
 being shown to the team there. It also means that adding `co_lyon` to the matrix in
@@ -36,6 +41,9 @@ from integrations.base_integration import BaseIntegration
 from .chantiers_perturbants.data_source_integration import (
     DataSourceIntegration as ChantiersPerturbants,
 )
+from .chaussees_trottoirs.data_source_integration import (
+    DataSourceIntegration as ChausseesTrottoirs,
+)
 
 
 class Integration(BaseIntegration):
@@ -53,13 +61,13 @@ class Integration(BaseIntegration):
     # or is withdrawn leaves it, and one that is extended changes its end date. A site
     # that left the layer is closed (end date brought back to yesterday), not deleted:
     # the history of work sites is kept. Every write outside today's production stays
-    # inside the `MGL-CHP-` prefix: the organization also holds ~800 regulations from
-    # another channel (`LYON_…`) that are not ours. The caps hold a batch whole for
-    # review; a real day moves a handful of sites.
-    identifier_prefix = "MGL-CHP-"
+    # inside the `MGL-` prefix (`MGL-CHP-`, `MGL-CT-`): the organization also holds
+    # ~800 regulations from another channel (`LYON_…`) that are not ours. The caps hold
+    # a batch whole for review; a real day moves a handful of sites.
+    identifier_prefix = "MGL-"
     update_changed = True
     close_missing = True
     max_updates_per_run = 50
     max_closures_per_run = 50
 
-    data_sources = [ChantiersPerturbants]
+    data_sources = [ChantiersPerturbants, ChausseesTrottoirs]
