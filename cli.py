@@ -7,6 +7,7 @@ from loguru import logger
 
 from integrations.base_integration import BaseIntegration
 from notifications.notifier import Notifier
+from notifications.summary import render_summary
 from notifications.tchap_bot import TchapBot
 from settings import Organization
 
@@ -38,6 +39,13 @@ JsonOption = Annotated[
     bool,
     typer.Option("--json", help="Print the run result as JSON on stdout (for CI)."),
 ]
+SummaryOption = Annotated[
+    str | None,
+    typer.Option(
+        "--summary",
+        help="Append a markdown summary of the run to this file (CI: $GITHUB_STEP_SUMMARY).",
+    ),
+]
 
 
 @app.command()
@@ -49,6 +57,7 @@ def integrate(
     dry_run: DryRunOption = False,
     force_deletions: ForceDeletionsOption = False,
     json_output: JsonOption = False,
+    summary: SummaryOption = None,
 ):
     """Sync data for a specific organization to Dialog API."""
     dialog_integration = BaseIntegration.from_organization(organization.name, env=env)
@@ -58,6 +67,10 @@ def integrate(
     base_url = dialog_integration.organization_settings.base_url or ""
     target = urlparse(base_url).hostname or base_url.strip("/")
 
+    # The summary keeps every alert and error the run logs, without reading any log
+    # file: a sink collects them while the run lasts.
+    records: list = []
+    sink = logger.add(lambda m: records.append(m.record), level="WARNING") if summary else None
     try:
         outcome = dialog_integration.integrate_regulations(
             limit_to=identifiers,
@@ -65,7 +78,13 @@ def integrate(
             dry_run=dry_run,
             force_deletions=force_deletions,
         )
-    except Exception:
+    except Exception as error:
+        if sink is not None:
+            logger.remove(sink)
+        if summary:
+            _append_summary(
+                summary, render_summary(organization.name, target, None, records, repr(error))
+            )
         if not json_output:
             raise
         # A crashed run still reports its target: without it the Tchap report would
@@ -73,6 +92,10 @@ def integrate(
         logger.exception(f"Integration failed for {organization.name}")
         typer.echo(json.dumps({"success": False, "target": target}, ensure_ascii=False))
         raise typer.Exit(code=1)
+    if sink is not None:
+        logger.remove(sink)
+    if summary:
+        _append_summary(summary, render_summary(organization.name, target, outcome, records))
 
     # Logs go to stderr, so `dialog integrate ... --json > result.json` stays clean.
     if json_output:
@@ -81,6 +104,11 @@ def integrate(
         typer.echo(json.dumps(result, ensure_ascii=False))
     elif dry_run:
         typer.echo(outcome.report)
+
+
+def _append_summary(path: str, markdown: str) -> None:
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(markdown)
 
 
 @app.command()

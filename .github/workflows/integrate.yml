@@ -68,7 +68,8 @@ jobs:
         # `--json` prints the run counters on stdout; the logs stay on stderr.
         run: |
           org="${{ matrix.organization }}"
-          if uv run dialog integrate "$org" --json > result.json; then
+          # --summary: the run's counters, funnel, alerts and errors, shown on the run page.
+          if uv run dialog integrate "$org" --json --summary "$GITHUB_STEP_SUMMARY" > result.json; then
             result="$(tr -d '\n' < result.json)"
             if [ -z "$result" ]; then
               result='{"success":true}'
