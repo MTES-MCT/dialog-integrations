@@ -6,7 +6,8 @@ import typer
 from loguru import logger
 
 from integrations.base_integration import BaseIntegration
-from notifications.notifier import TchapNotifier
+from notifications.notifier import Notifier
+from notifications.tchap_bot import TchapBot
 from settings import Organization
 
 app = typer.Typer(help="Dialog CLI")
@@ -106,12 +107,11 @@ def notify(
         raise typer.Exit(code=1)
 
     logger.info(f"Processing integration results: {results_data}")
-    notifier = TchapNotifier()
+    body, formatted_body = Notifier().format_message(results_data)
     if dry_run:
-        body, formatted_body = notifier.format_message(results_data)
         typer.echo(body)
         typer.echo("\n--- formatted_body (HTML) ---\n")
         typer.echo(formatted_body)
         return
 
-    notifier.send_notification(results_data)
+    TchapBot().send(body, formatted_body)
