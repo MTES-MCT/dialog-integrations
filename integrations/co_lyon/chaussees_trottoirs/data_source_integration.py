@@ -128,7 +128,9 @@ ZTL_REPLACES_SPEED = True
 # the EPCI from geo.api.gouv.fr, unioned, simplified at 0.002° — so we rebuild it and drop
 # upstream what DiaLog would refuse (`integrations/shared/perimeter.py`). Measured on the
 # 2026-09-07 probe: 270 of the 271 refused segments fall outside this perimeter, the last
-# one touches its edge; nothing accepted by the API is dropped. Before 2026-09-15 this was
+# one touches its edge; nothing accepted by the API is dropped. Since 2026-09-18 a segment
+# must also touch the exact contour (2 refusals on the first staging run, 1 165 emprises
+# lost; the rule costs 11 accepted boundary segments). Before 2026-09-15 this was
 # a hand-probed blocklist of 271 `codetroncon`, believed unpredictable from the source —
 # it was: neither the name nor `domanialite` decide, the position does.
 ORGANIZATION_PERIMETER = ("epci", "200046977")  # Métropole de Lyon, code SIREN de l'EPCI
@@ -207,10 +209,14 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         return (
-            raw_data.pipe(self.discard_outside_perimeter)
-            .pipe(read_order_number)
+            raw_data.pipe(read_order_number)
             .pipe(discard_impossible_tonnages)
             .pipe(explode_into_measures)
+            # One row per restriction a segment states: the unit of the retention rate.
+            .pipe(self.count_dataset_restrictions)
+            # After the explosion, so the segments outside the perimeter count as stated
+            # and not retained. It drops rows on their geometry alone: the order is free.
+            .pipe(self.discard_outside_perimeter)
             .pipe(compute_measure_fields)
             .pipe(discard_unlabelled_pedestrian_areas)
             .pipe(discard_pedestrian_areas_off_the_road_network)
@@ -218,6 +224,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
             .pipe(compute_regulation_fields)
+            # Before the chaining: it merges rows, it discards none.
+            .pipe(self.count_retained_restrictions)
             # Après l'identifiant : le chaînage regroupe par (arrêté, mesure, voie).
             .pipe(merge_contiguous_segments)
             .pipe(compute_geographic_split_order)

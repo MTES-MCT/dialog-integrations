@@ -74,7 +74,12 @@ jobs:
               result='{"success":true}'
             fi
           else
-            result='{"success":false}'
+            # A crash still prints {"success":false,"target":...}; an empty file means
+            # the command died before it could.
+            result="$(tr -d '\n' < result.json)"
+            if [ -z "$result" ]; then
+              result='{"success":false}'
+            fi
             echo "failed=true" >> "$GITHUB_OUTPUT"
           fi
           echo "result_${org}=${result}" >> "$GITHUB_OUTPUT"

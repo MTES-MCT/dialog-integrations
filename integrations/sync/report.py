@@ -47,6 +47,12 @@ class SourceFunnel:
     regulations: int = 0
     measures: int = 0
     raw_rows: int | None = None
+    # Restrictions stated by the dataset and kept by the pipeline, in the source's unit.
+    restrictions: int | None = None
+    retained: int | None = None
+    # "permanent" or "temporaire", read from the produced regulations. Sources of one
+    # organization sharing a label are reported together.
+    label: str = ""
     metrics: dict[str, int] = field(default_factory=dict)
 
 
@@ -116,8 +122,15 @@ def render_report(
 
     for funnel in funnels:
         raw = f"{funnel.raw_rows} lignes brutes → " if funnel.raw_rows is not None else ""
+        retained = ""
+        if funnel.restrictions and funnel.retained is not None:
+            share = 100 * funnel.retained / funnel.restrictions
+            retained = (
+                f"{funnel.retained}/{funnel.restrictions} restrictions retenues ({share:.1f} %) → "
+            )
+        name = f"{funnel.name} ({funnel.label})" if funnel.label else funnel.name
         lines.append(
-            f"  {funnel.name} : {raw}{funnel.clean_rows} lignes nettoyées → "
+            f"  {name} : {raw}{retained}{funnel.clean_rows} lignes nettoyées → "
             f"{funnel.regulations} arrêtés, {funnel.measures} mesures"
         )
         if funnel.metrics:

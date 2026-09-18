@@ -26,9 +26,11 @@ URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/limitations
 # Ceiling on the locations of one POST. Lyon cuts at 1 000, measured on rawGeoJSON
 # stretches of a few dozen metres. A departmental-road location is different: DiaLog
 # geocodes it from its milestones, and a stretch here runs for kilometres, so the
-# server-side timeout comes far sooner. 100 is the margin chosen by Thibaut on
-# 2026-09-17. Only the grouped fallbacks (`AV-LV-V50`, `AV-LV-V90`…) reach it.
-MAX_LOCATIONS_PER_REGULATION = 100
+# server-side timeout comes far sooner. Only the grouped fallbacks (`AV-LV-V50`,
+# `AV-LV-V90`…) reach it. Measured on the staging on 2026-09-18 with 100: the POSTs that
+# answered took 11 to 39 s, and 18 of the 24 grouped chunks hit the router's 60 s timeout
+# (the back end still committed them, see `DialogApi.add`). 50 keeps a POST well under.
+MAX_LOCATIONS_PER_REGULATION = 50
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
@@ -80,6 +82,9 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(discard_directional_stretches)
             # Après les emprises : la liste noire les désigne par leurs points de repère.
             .pipe(discard_refused_segments)
+            # Before `compute_regulation_fields` merges the duplicated stretches: the
+            # rows fetched count them too, so both sides of the rate do.
+            .pipe(self.count_retained_restrictions)
             .pipe(compute_regulation_fields)
             .pipe(compute_vehicle_fields)
             .pipe(compute_split_order)
@@ -103,8 +108,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 # What it costs to get this wrong: the API validates a regulation as a whole, so these 7
 # emprises alone sank 4 regulations and 92 emprises on 2026-09-07 — `AV-LV-V50`
 # lost 63 of them by itself.
+#
+# Re-probed on the staging on 2026-09-18 (2 676 emprises, batches of 40, 124 calls): four
+# more stretches, which had sunk 3 grouped chunks of 100 emprises on the first CI run.
 REFUSED_SEGMENTS: frozenset[str] = frozenset(
     {
+        # 2026-09-07
         "D1088B1-de-0+0-a-999+0",
         "D888-de-84+468-a-85+945",
         "D888-de-85+945-a-86+286",
@@ -112,6 +121,11 @@ REFUSED_SEGMENTS: frozenset[str] = frozenset(
         "D911-de-6+636-a-15+52",
         "D920AB1-de-0+0-a-999+0",
         "D920AB2-de-0+0-a-999+0",
+        # 2026-09-18
+        "D259-de-1+235-a-2+0",
+        "D259-de-2+0-a-999+0",
+        "D33-de-18+878-a-18+1017",
+        "D568-de-1+924-a-2+239",
     }
 )
 

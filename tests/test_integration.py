@@ -270,6 +270,16 @@ def test_the_json_result_carries_the_counters(monkeypatch, tmp_path):
         "updated": 0,
         "deleted": 1,
         "integrated": {"regulations": 1, "measures": 1, "rows": 1},
+        "datasets": [
+            {
+                "label": "temporaire",
+                "sources": ["fake"],
+                "regulations": 1,
+                "measures": 1,
+                "restrictions": 1,
+                "retained": 1,
+            }
+        ],
     }
     assert json.loads(json.dumps(result)) == result
 
@@ -286,6 +296,15 @@ def test_a_pipeline_refusal_is_counted_apart_from_failures(monkeypatch, tmp_path
     assert outcome.to_result()["refused"] == 1
     # Built, then refused: not in DiaLog, so not counted as integrated.
     assert outcome.to_result()["integrated"] == {"regulations": 0, "measures": 0, "rows": 1}
+    # The dataset still stated one restriction and the pipeline retained it.
+    assert outcome.to_result()["datasets"][0] == {
+        "label": "temporaire",
+        "sources": ["fake"],
+        "regulations": 0,
+        "measures": 0,
+        "restrictions": 1,
+        "retained": 1,
+    }
 
 
 # --- Closure: a regulation that left the source keeps its history --------------------

@@ -105,62 +105,93 @@ class TchapNotifier:
         now = datetime.now().strftime("%d/%m/%Y %H:%M")
         title = "Rapport d'intégration Open Data"
 
-        text_lines = [title, f"Rapport généré le {now}.", ""]
-        html_items: list[str] = []
+        text_lines = [title, f"Rapport généré le {now}."]
+        html_parts: list[str] = []
 
-        # Sorted: the output order of a GitHub matrix job is not guaranteed.
+        results = self._parse_results(results_data)
+        if not results:
+            # An empty report means the integration job produced nothing.
+            # This is an anomaly, and it should be reported.
+            anomaly = "Aucun résultat d'intégration reçu."
+            text_lines += ["", f"⚠️ {anomaly}"]
+            html_parts.append(f"<ul><li>⚠️ <strong>{anomaly}</strong></li></ul>")
+
+        # Production first, then every staging: the team reads what is live before what
+        # is under review. A result without a target predates the staging runs.
+        production = [(org, r) for org, r in results if self._target(r) in (None, PRODUCTION_HOST)]
+        staging = [(org, r) for org, r in results if self._target(r) not in (None, PRODUCTION_HOST)]
+        hosts = sorted({self._target(r) or "" for _, r in staging})
+        for heading, group, single_host in (
+            ("Production", production, True),
+            (f"Staging — {', '.join(hosts)}", staging, len(hosts) == 1),
+        ):
+            if not group:
+                continue
+            text_lines += ["", heading]
+            html_items: list[str] = []
+            for org, result in group:
+                # With several staging hosts, each organization names its own.
+                target = self._target(result)
+                if not single_host and target:
+                    org = f"{org} [{target}]"
+                text, item = self._format_organization(org, result)
+                text_lines += text
+                html_items.append(item)
+            html_parts.append(
+                f"<p><strong>{html.escape(heading, quote=False)}</strong></p>"
+                f"<ul>{''.join(html_items)}</ul>"
+            )
+
+        formatted_body = f"<h4>{title}</h4><p>Rapport généré le {now}.</p>{''.join(html_parts)}"
+        return "\n".join(text_lines), formatted_body
+
+    @staticmethod
+    def _parse_results(results_data: dict) -> list[tuple[str, dict]]:
+        """The (organization, result) pairs, in a stable order.
+
+        Sorted: the output order of a GitHub matrix job is not guaranteed. Values are
+        JSON strings such as '{"success": true}'; anything unreadable counts as a failure.
+        """
+        results = []
         for key, raw in sorted(results_data.items()):
             if not key.startswith("result_"):
                 continue
-            org = key.removeprefix("result_")
-            # Values are JSON strings such as '{"success": true}'
             try:
                 result = json.loads(raw) if isinstance(raw, str) else raw
             except (json.JSONDecodeError, TypeError):
                 result = {}
-
             if not isinstance(result, dict):
                 result = {}
-            success = bool(result.get("success", False))
-            icon = "✅" if success else "❌"
-            status_text = "Importé avec succès" if success else "Erreur lors de l'import"
+            results.append((key.removeprefix("result_"), result))
+        return results
 
-            # A run that did not write to production says so next to its name: the
-            # team reads one report for every organization, whatever its target.
-            target = result.get("target")
-            if isinstance(target, str) and target and target != PRODUCTION_HOST:
-                org = f"{org} [{target}]"
+    @staticmethod
+    def _target(result: dict) -> str | None:
+        target = result.get("target")
+        return target if isinstance(target, str) and target else None
 
-            counts = self._format_counts(result)
-            headline = f"{icon} {org} : {status_text}"
-            if counts:
-                headline += f" - {counts}"
-            text_lines.append(headline)
+    def _format_organization(self, org: str, result: dict) -> tuple[list[str], str]:
+        """One organization: the text lines, and the HTML list item."""
+        success = bool(result.get("success", False))
+        icon = "✅" if success else "❌"
+        status_text = "Importé avec succès" if success else "Erreur lors de l'import"
 
-            details = self._format_details(result)
-            text_lines += [f"    {detail}" for detail in details]
+        counts = self._format_counts(result)
+        headline = f"{icon} {org} : {status_text}"
+        if counts:
+            headline += f" - {counts}"
 
-            html_details = "".join(
-                f"<li>{html.escape(detail, quote=False)}</li>" for detail in details
-            )
-            html_items.append(
-                f"<li>{icon} <strong>{html.escape(org, quote=False)}</strong> : {status_text}"
-                + (f" - {html.escape(counts, quote=False)}" if counts else "")
-                + (f"<ul>{html_details}</ul>" if html_details else "")
-                + "</li>"
-            )
+        details = self._format_details(result)
+        text_lines = [headline] + [f"    {detail}" for detail in details]
 
-        if not html_items:
-            # An empty report means the integration job produced nothing.
-            # This is an anomaly, and it shoul be reported.
-            anomaly = "Aucun résultat d'intégration reçu."
-            text_lines.append(f"⚠️ {anomaly}")
-            html_items.append(f"<li>⚠️ <strong>{anomaly}</strong></li>")
-
-        formatted_body = (
-            f"<h4>{title}</h4><p>Rapport généré le {now}.</p><ul>{''.join(html_items)}</ul>"
+        html_details = "".join(f"<li>{html.escape(detail, quote=False)}</li>" for detail in details)
+        item = (
+            f"<li>{icon} <strong>{html.escape(org, quote=False)}</strong> : {status_text}"
+            + (f" - {html.escape(counts, quote=False)}" if counts else "")
+            + (f"<ul>{html_details}</ul>" if html_details else "")
+            + "</li>"
         )
-        return "\n".join(text_lines), formatted_body
+        return text_lines, item
 
     # Wording of the synchronization counters, as the team reads them in Tchap.
     # `closed` only appears for organizations that close what left their source.
@@ -216,13 +247,18 @@ class TchapNotifier:
             )
             details.append(f"⚠️ lot retenu (plafond dépassé) : {rendered} - à revoir manuellement")
 
-        integrated = result.get("integrated")
-        if isinstance(integrated, dict) and integrated:
-            regulations = integrated.get("regulations", 0)
-            measures = integrated.get("measures", 0)
-            rows = integrated.get("rows")
-            head = f"{rows} lignes source qui donnent " if isinstance(rows, int) else ""
-            details.append(f"au total {head}{regulations} arrêtés et {measures} mesures intégrés")
+        # One line per dataset (permanent, temporaire), or the organization's total for
+        # results from before datasets were reported apart. Raw row counts mean
+        # something different in every organization, so they are left out.
+        datasets = result.get("datasets")
+        if isinstance(datasets, list) and datasets:
+            details += [cls._format_dataset(d) for d in datasets if isinstance(d, dict)]
+        else:
+            integrated = result.get("integrated")
+            if isinstance(integrated, dict) and integrated:
+                regulations = integrated.get("regulations", 0)
+                measures = integrated.get("measures", 0)
+                details.append(f"{regulations} arrêtés, {measures} mesures")
 
         source = result.get("source")
         if isinstance(source, dict) and source:
@@ -230,6 +266,20 @@ class TchapNotifier:
             details.append(f"Volumétries source : {rendered}")
 
         return details
+
+    @staticmethod
+    def _format_dataset(dataset: dict) -> str:
+        """Regulations, measures, and the share of the dataset's restrictions retained."""
+        line = f"{dataset.get('regulations', 0)} arrêtés, {dataset.get('measures', 0)} mesures"
+        label = dataset.get("label")
+        if isinstance(label, str) and label:
+            line = f"{label} : {line}"
+        restrictions = dataset.get("restrictions")
+        retained = dataset.get("retained")
+        if isinstance(restrictions, int) and restrictions > 0 and isinstance(retained, int):
+            rate = f"{100 * retained / restrictions:.1f}".replace(".", ",")
+            line += f", {rate} % du jeu retenu"
+        return line
 
     @staticmethod
     def _clean(value: str | None) -> str | None:

@@ -50,6 +50,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     def compute_clean_data(self, raw_data):
         return (
             raw_data.pipe(unnest_measures)
+            # One row per sign a record lists: the unit of the retention rate.
+            .pipe(self.count_dataset_restrictions)
             .pipe(filter_unrelevant)
             .pipe(compute_measure_fields)
             .pipe(compute_location_fields)

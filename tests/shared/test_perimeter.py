@@ -74,8 +74,29 @@ def test_build_unions_the_communes_and_simplifies_with_dialog_s_tolerance():
     commune = Perimeter.build("insee", "c", [west, east.difference(notch)])
     epci = Perimeter.build("epci", "e", [west, east.difference(notch)])
     probe = line((4.9995, 45.5), (4.9995, 45.5001))  # inside the notch
-    assert commune.intersects(probe) is False
-    assert epci.intersects(probe) is True
+    inside_the_notch = json.loads(probe)
+    from shapely.geometry import shape
+
+    assert not commune.geometry.intersects(shape(inside_the_notch))
+    assert epci.geometry.intersects(shape(inside_the_notch))
+    assert epci.exact is not None and not epci.exact.intersects(shape(inside_the_notch))
+
+
+def test_an_emprise_in_the_simplification_s_slack_is_dropped():
+    # DiaLog's simplified geometry covers the notch, the exact contour does not: the
+    # emprise lies on the neighbour's territory, and the API refused two such segments
+    # on 2026-09-18 (Craponne). Both geometries must be touched.
+    west = box(4.0, 45.0, 4.5, 46.0)
+    east = box(4.5, 45.0, 5.0, 46.0)
+    notch = box(4.999, 45.4, 5.0, 45.6)
+    epci = Perimeter.build("epci", "e", [west, east.difference(notch)])
+    in_the_notch = line((4.9995, 45.5), (4.9995, 45.5001))
+    well_inside = line((4.2, 45.5), (4.2, 45.5001))
+
+    assert epci.intersects(in_the_notch) is False
+    assert epci.intersects(well_inside) is True
+    df = pl.DataFrame({"geometry": [in_the_notch, well_inside, None]})
+    assert discard_outside_perimeter(df, epci).height == 2
 
 
 def test_dialog_s_tolerances_are_the_ones_read_in_its_code():

@@ -5,6 +5,7 @@ import pandera.polars as pa
 
 class NantesCirculationChantierRawDataSchema(pa.DataFrameModel):
     objectid: int
+    gid: int
     contrainte_auto: str | None = pa.Field(nullable=True)
     date_debut: int | None = pa.Field(nullable=True)
     date_fin: int | None = pa.Field(nullable=True)

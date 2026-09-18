@@ -38,6 +38,15 @@ vertex, which the union engine decides — PostGIS there, GEOS here. Rotating th
 vertex over 320 positions, 5 variants reproduce the API's 271 refusals exactly and the
 worst misses 20. Same source, same recipe, unspecified detail: an exact match needs the
 geometry DiaLog stores, not a rebuild.
+
+Resolution (2026-09-18): an emprise must also touch the **exact** union of the contours,
+before simplification. Where the two simplifications disagree, the emprise lies in the
+slack the simplification adds along the boundary, outside the communes themselves — a
+road on the neighbour's territory. On the first staging run, 13 of the 18 071 Lyon
+emprises retained lay in that slack; the API refused 2 of them (Rue du Stade and Avenue
+Pierre Dumond, Craponne) and each took a whole regulation down, 1 165 emprises in all.
+The 11 others were accepted: requiring the exact contour costs them, 0.06 % of the corpus,
+and needs no blocklist.
 """
 
 from __future__ import annotations
@@ -78,7 +87,10 @@ class Perimeter:
 
     code_type: str
     code: str
+    # The geometry DiaLog stores, rebuilt: unioned then simplified.
     geometry: BaseGeometry
+    # The union before simplification. An emprise must touch both (see the module doc).
+    exact: BaseGeometry | None = None
 
     @classmethod
     def fetch(cls, code_type: str, code: str, *, url: str = GEO_API_URL) -> "Perimeter":
@@ -102,11 +114,10 @@ class Perimeter:
     @classmethod
     def build(cls, code_type: str, code: str, contours: list[BaseGeometry]) -> "Perimeter":
         """Union then simplify, with DiaLog's tolerance for this code type."""
-        geometry = unary_union(contours)
+        exact = unary_union(contours)
         tolerance = SIMPLIFICATION_BY_CODE_TYPE[code_type]
-        if tolerance:
-            geometry = geometry.simplify(tolerance, preserve_topology=True)
-        return cls(code_type=code_type, code=code, geometry=geometry)
+        geometry = exact.simplify(tolerance, preserve_topology=True) if tolerance else exact
+        return cls(code_type=code_type, code=code, geometry=geometry, exact=exact)
 
     def intersects(self, geojson: str | None) -> bool | None:
         """DiaLog's test for one emprise: `ST_Intersects(sent geometry, organisation geometry)`.
@@ -120,7 +131,9 @@ class Perimeter:
             geometry = shape(json.loads(geojson))
         except Exception:  # noqa: BLE001 — anything shapely or json refuses to read
             return None
-        return self.geometry.intersects(geometry)
+        if not self.geometry.intersects(geometry):
+            return False
+        return self.exact is None or self.exact.intersects(geometry)
 
 
 def discard_outside_perimeter(
@@ -129,17 +142,21 @@ def discard_outside_perimeter(
     """Drop the rows whose geometry DiaLog would refuse for this organisation.
 
     Rows without a readable geometry are kept: this filter only reproduces the competence
-    check, and the source's own geometry rules deal with the rest.
+    check, and the source's own geometry rules deal with the rest. A row must touch the
+    simplified geometry DiaLog stores and the exact union of the contours: see the module
+    doc for why both.
     """
     prepared = prep(perimeter.geometry)
+    exact = prep(perimeter.exact) if perimeter.exact is not None else None
 
     def keep(geojson: str | None) -> bool:
         if geojson is None:
             return True
         try:
-            return prepared.intersects(shape(json.loads(geojson)))
+            geometry = shape(json.loads(geojson))
         except Exception:  # noqa: BLE001 — anything shapely or json refuses to read
             return True
+        return prepared.intersects(geometry) and (exact is None or exact.intersects(geometry))
 
     inside = df.get_column(geometry_column).map_elements(
         keep, return_dtype=pl.Boolean, skip_nulls=False
@@ -148,6 +165,7 @@ def discard_outside_perimeter(
     if n_dropped:
         logger.info(
             f"Discarding {n_dropped} rows outside the {perimeter.code_type} {perimeter.code} "
-            "perimeter (DiaLog would refuse them: no intersection with the organisation's geometry)"
+            "perimeter (DiaLog would refuse them, or they lie in the slack its simplification "
+            "adds along the boundary)"
         )
     return df.filter(inside)

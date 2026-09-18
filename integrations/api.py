@@ -73,18 +73,30 @@ class DialogApi:
         return json.loads(resp.content)
 
     def add(self, regulation: PostApiRegulationsAddBody) -> bool:
-        """POST a regulation; True when the API answered 201."""
+        """POST a regulation; True when the API answered 201, or when it exists anyway.
+
+        A 5xx or a transport error says nothing about what the back end did: on
+        2026-09-18 the staging's router answered 504 after 60 s on 18 Aveyron POSTs, and
+        every one of them had been committed. Such an answer is followed by a GET, and
+        the regulation counts as created when it is there. A 4xx is a refusal: no GET.
+        """
+        identifier = str(regulation.identifier)
         try:
             resp = add_regulation(client=self.client, body=regulation)
         except Exception as e:
-            logger.error(f"Failed to create: {regulation.identifier} - {e}")
-            return False
+            logger.error(f"Failed to create: {identifier} - {e}")
+            return self._created_anyway(identifier)
         if resp.status_code != 201:
-            logger.error(
-                f"Failed to create: {regulation.identifier} - got status {resp.status_code}"
-            )
+            logger.error(f"Failed to create: {identifier} - got status {resp.status_code}")
             logger.error(json.loads(resp.content))
+            return resp.status_code >= 500 and self._created_anyway(identifier)
+        return True
+
+    def _created_anyway(self, identifier: str) -> bool:
+        """Whether a POST whose answer was lost went through."""
+        if self.get(identifier) is None:
             return False
+        logger.warning(f"{identifier} exists despite the failed answer: counted as created")
         return True
 
     def update(self, regulation: PostApiRegulationsAddBody) -> bool:

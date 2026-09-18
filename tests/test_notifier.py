@@ -218,8 +218,10 @@ def test_the_corpus_size_is_shown_under_the_organization(notifier):
         }
     )
 
-    assert "au total 374 lignes source qui donnent 197 arrêtés et 197 mesures intégrés" in body
-    assert "197 arrêtés et 197 mesures intégrés" in formatted_body
+    # Raw row counts mean something different in every organization: not shown.
+    assert "197 arrêtés, 197 mesures" in body
+    assert "374" not in body
+    assert "197 arrêtés, 197 mesures" in formatted_body
 
 
 def test_the_corpus_size_without_a_row_count(notifier):
@@ -232,7 +234,78 @@ def test_the_corpus_size_without_a_row_count(notifier):
         }
     )
 
-    assert "au total 1577 arrêtés et 3085 mesures intégrés" in body
+    assert "1577 arrêtés, 3085 mesures" in body
+
+
+def test_each_dataset_has_its_own_line_with_the_share_retained(notifier):
+    body, _ = notifier.format_message(
+        {
+            "result_dp_sarthe": (
+                '{"success":true,"created":0,"updated":0,"deleted":0,'
+                '"integrated":{"regulations":877,"measures":877,"rows":878},'
+                '"datasets":['
+                '{"label":"permanent","sources":["limitations_vitesse","restrictions_gabarits"],'
+                '"regulations":867,"measures":867,"restrictions":868,"retained":867},'
+                '{"label":"temporaire","sources":["chantiers_routiers"],'
+                '"regulations":10,"measures":10,"restrictions":12,"retained":10}]}'
+            )
+        }
+    )
+
+    assert "permanent : 867 arrêtés, 867 mesures, 99,9 % du jeu retenu" in body
+    assert "temporaire : 10 arrêtés, 10 mesures, 83,3 % du jeu retenu" in body
+    # The organization's total gives way to its datasets.
+    assert "877 arrêtés" not in body
+
+
+def test_a_dataset_without_a_count_has_no_rate(notifier):
+    body, _ = notifier.format_message(
+        {
+            "result_co_paris": (
+                '{"success":true,"datasets":[{"label":"eudonet","sources":["eudonet"],'
+                '"regulations":32,"measures":51,"restrictions":null,"retained":51}]}'
+            )
+        }
+    )
+
+    assert "eudonet : 32 arrêtés, 51 mesures\n" in body + "\n"
+    assert "%" not in body
+
+
+STAGING = "dialog-staging-pr2096.osc-fr1.scalingo.io"
+
+
+def test_production_comes_first_and_stagings_below(notifier):
+    body, formatted_body = notifier.format_message(
+        {
+            "result_co_lyon": f'{{"success":true,"target":"{STAGING}"}}',
+            "result_co_brest": '{"success":true,"target":"dialog.beta.gouv.fr"}',
+            "result_dp_sarthe": '{"success":true}',
+            "result_co_rennes": f'{{"success":false,"target":"{STAGING}"}}',
+        }
+    )
+
+    assert body.index("Production") < body.index("co_brest") < body.index("dp_sarthe")
+    assert body.index("dp_sarthe") < body.index(f"Staging — {STAGING}")
+    assert body.index("Staging") < body.index("co_lyon") < body.index("co_rennes")
+    # A single staging host is named once, in the heading.
+    assert "co_lyon [" not in body
+    assert "<strong>Production</strong>" in formatted_body
+    assert formatted_body.index("Production") < formatted_body.index("Staging")
+
+
+def test_several_staging_hosts_are_named_per_organization(notifier):
+    body, _ = notifier.format_message(
+        {
+            "result_co_lyon": '{"success":true,"target":"staging-a.example.org"}',
+            "result_co_rennes": '{"success":true,"target":"staging-b.example.org"}',
+        }
+    )
+
+    assert "Production" not in body
+    assert "Staging — staging-a.example.org, staging-b.example.org" in body
+    assert "co_lyon [staging-a.example.org]" in body
+    assert "co_rennes [staging-b.example.org]" in body
 
 
 def test_closures_are_counted_and_refusals_are_not(notifier):
@@ -268,10 +341,14 @@ def test_a_run_against_production_is_not_flagged(notifier):
     assert "[" not in body
 
 
-def test_a_run_against_another_host_is_flagged_next_to_the_organization(notifier):
+def test_a_run_against_another_host_is_filed_under_its_staging(notifier):
     body, formatted_body = notifier.format_message(
         {"result_co_paris": '{"success":true,"target":"dialog-staging-pr2096.osc-fr1.scalingo.io"}'}
     )
 
-    assert "✅ co_paris [dialog-staging-pr2096.osc-fr1.scalingo.io] : Importé avec succès" in body
-    assert "<strong>co_paris [dialog-staging-pr2096.osc-fr1.scalingo.io]</strong>" in formatted_body
+    assert (
+        "Staging — dialog-staging-pr2096.osc-fr1.scalingo.io\n✅ co_paris : Importé avec succès"
+        in body
+    )
+    assert "Production" not in body
+    assert "<strong>Staging — dialog-staging-pr2096.osc-fr1.scalingo.io</strong>" in formatted_body

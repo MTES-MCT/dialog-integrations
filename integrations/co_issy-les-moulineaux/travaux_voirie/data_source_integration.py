@@ -75,7 +75,10 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def compute_clean_data(self, raw_data):
         return (
-            raw_data.pipe(compute_measure_fields)
+            raw_data.pipe(explode_measures)
+            # One row per measure a work site lists: the unit of the retention rate.
+            .pipe(self.count_dataset_restrictions)
+            .pipe(compute_measure_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
             .pipe(compute_regulation_fields)
@@ -83,14 +86,17 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         )
 
 
-def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
+def explode_measures(df: pl.DataFrame) -> pl.DataFrame:
+    """One row per measure a work site lists. A site listing none states no restriction."""
     no_measure = df.select(pl.col("mesure_titre").is_null().sum()).item()
     if no_measure:
         logger.warning(f"Dropping {no_measure} rows without any mesure_titre")
     df = df.filter(pl.col("mesure_titre").is_not_null())
 
-    df = df.explode(["mesure_titre", "mesures"])
+    return df.explode(["mesure_titre", "mesures"])
 
+
+def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     df = df.with_columns(
         [
             pl.col("mesure_titre")

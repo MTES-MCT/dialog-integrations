@@ -137,6 +137,10 @@ class IntegrationOutcome:
     # regulations and measures that are in DiaLog after the run — what was produced,
     # minus what could not be created (held, refused, or failed).
     raw_rows: int | None = None
+    # One entry per dataset ("permanent", "temporaire"): the regulations and measures
+    # in DiaLog after the run, and the restrictions the dataset states versus those the
+    # pipeline retained, whose ratio is the share of the dataset retained.
+    datasets: list[dict] = field(default_factory=list)
     regulations: int = 0
     measures: int = 0
     report: str = ""
@@ -165,6 +169,8 @@ class IntegrationOutcome:
         result["integrated"] = {"regulations": self.regulations, "measures": self.measures}
         if self.raw_rows is not None:
             result["integrated"]["rows"] = self.raw_rows
+        if self.datasets:
+            result["datasets"] = self.datasets
         return result
 
 

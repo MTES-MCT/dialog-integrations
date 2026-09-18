@@ -99,6 +99,29 @@ class BaseDataSourceIntegration:
     def organization(self) -> str:
         return self.organization_settings.organization
 
+    # What the dataset states and what the pipeline keeps, in the source's own unit: a
+    # row, a segment, or one restriction of a segment that carries several. Their ratio
+    # is the share of the dataset retained, shown in the Tchap report. Defaults: the
+    # rows fetched, and the rows `compute_clean_data` returns. A source overrides them
+    # when a row is not one restriction: it splits rows into restrictions, or merges
+    # rows into measures.
+    dataset_restrictions: int | None = None
+    retained_restrictions: int | None = None
+
+    def count_dataset_restrictions(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Pipe it where every row is one restriction the dataset states: right after
+        the step that splits a row into its restrictions, before any filter."""
+        self.dataset_restrictions = df.height
+        logger.info(f"{df.height} restrictions stated by the dataset")
+        return df
+
+    def count_retained_restrictions(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Pipe it after the last filter and before rows are merged into measures, so
+        the count stays in the unit of `count_dataset_restrictions`."""
+        self.retained_restrictions = df.height
+        logger.info(f"{df.height} restrictions retained by the pipeline")
+        return df
+
     def compute_data_regulations(self) -> pl.DataFrame:
         """
         Fetch, validate, and clean data from a single data source.

@@ -52,20 +52,31 @@ def integrate(
     """Sync data for a specific organization to Dialog API."""
     dialog_integration = BaseIntegration.from_organization(organization.name, env=env)
     logger.info(f"Integrating measures for organization: {organization.name} (env: {env})")
-    outcome = dialog_integration.integrate_regulations(
-        limit_to=identifiers,
-        update_existing=update_existing,
-        dry_run=dry_run,
-        force_deletions=force_deletions,
-    )
+    # The host actually written to, so the Tchap report can file the run under its
+    # target. Scheme and trailing slash are dropped; a URL without scheme is kept as is.
+    base_url = dialog_integration.organization_settings.base_url or ""
+    target = urlparse(base_url).hostname or base_url.strip("/")
+
+    try:
+        outcome = dialog_integration.integrate_regulations(
+            limit_to=identifiers,
+            update_existing=update_existing,
+            dry_run=dry_run,
+            force_deletions=force_deletions,
+        )
+    except Exception:
+        if not json_output:
+            raise
+        # A crashed run still reports its target: without it the Tchap report would
+        # file a staging failure under production.
+        logger.exception(f"Integration failed for {organization.name}")
+        typer.echo(json.dumps({"success": False, "target": target}, ensure_ascii=False))
+        raise typer.Exit(code=1)
 
     # Logs go to stderr, so `dialog integrate ... --json > result.json` stays clean.
     if json_output:
         result = outcome.to_result()
-        # The host actually written to, so the Tchap report can flag a non-production run.
-        # Scheme and trailing slash are dropped; a URL without scheme is kept as is.
-        base_url = dialog_integration.organization_settings.base_url or ""
-        result["target"] = urlparse(base_url).hostname or base_url.strip("/")
+        result["target"] = target
         typer.echo(json.dumps(result, ensure_ascii=False))
     elif dry_run:
         typer.echo(outcome.report)

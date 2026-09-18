@@ -40,6 +40,26 @@ def test_a_raising_call_is_false_not_an_exception(api, monkeypatch):
     assert api.add(regulation()) is False
 
 
+def test_a_5xx_answer_is_checked_with_a_get(api, monkeypatch):
+    # The staging's router answers 504 after 60 s while the back end commits (2026-09-18).
+    monkeypatch.setattr(api_module, "add_regulation", lambda client, body: response(504))
+    monkeypatch.setattr(api, "get", lambda identifier: {"identifier": identifier})
+    assert api.add(regulation()) is True
+
+    monkeypatch.setattr(api, "get", lambda identifier: None)
+    assert api.add(regulation()) is False
+
+
+def test_a_4xx_answer_is_a_refusal_without_a_get(api, monkeypatch):
+    monkeypatch.setattr(api_module, "add_regulation", lambda client, body: response(400))
+
+    def forbidden(identifier):
+        raise AssertionError("a refusal must not be second-guessed")
+
+    monkeypatch.setattr(api, "get", forbidden)
+    assert api.add(regulation()) is False
+
+
 def test_delete_is_true_only_on_204(api, monkeypatch):
     monkeypatch.setattr(api_module, "delete_regulation", lambda identifier, client: response(204))
     assert api.delete("X-1") is True
