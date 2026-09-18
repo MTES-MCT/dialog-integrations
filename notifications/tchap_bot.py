@@ -34,9 +34,7 @@ class TchapBot:
         access_token: str | None = None,
         room_id: str | None = None,
     ):
-        homeserver_url = self._clean(
-            homeserver_url or os.getenv("TCHAP_HOMESERVER_URL")
-        )
+        homeserver_url = self._clean(homeserver_url or os.getenv("TCHAP_HOMESERVER_URL"))
         self.homeserver_url = homeserver_url.rstrip("/") if homeserver_url else None
         self.access_token = self._clean(access_token or os.getenv("TCHAP_ACCESS_TOKEN"))
         self.room_id = self._clean(room_id or os.getenv("TCHAP_ROOM_ID"))
@@ -73,9 +71,7 @@ class TchapBot:
         )
         payload: dict[str, str] = {"msgtype": "m.text", "body": body}
         if formatted_body is not None:
-            payload.update(
-                format="org.matrix.custom.html", formatted_body=formatted_body
-            )
+            payload.update(format="org.matrix.custom.html", formatted_body=formatted_body)
         try:
             response = requests.put(
                 url,
