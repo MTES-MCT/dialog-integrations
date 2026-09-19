@@ -32,6 +32,7 @@ from integrations.sync.closure import (
     closing_instant,
     save_payload_from_read,
 )
+from integrations.sync.dating import date_creation, date_update, has_undated_period, run_day
 from integrations.sync.reconciliation import IntegrationOutcome, UpdateMode, reconcile
 from integrations.sync.report import SourceFunnel, render_report
 from integrations.sync.state import Digest, SnapshotStore, compute_regulation_digest
@@ -535,10 +536,13 @@ class BaseIntegration:
         """Create every regulation; return (created, refused by the pipeline itself)."""
         created: list[str] = []
         refused: list[str] = []
+        day = run_day()
         for index, regulation in enumerate(regulations):
             identifier = str(regulation.identifier)
             logger.info(f"Creating regulation {index + 1}/{len(regulations)}: {identifier}")
             logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
+            # An undated permanent period starts the day it is published (R-39).
+            date_creation(regulation, day)
             outcome = self._create_regulation(regulation)
             if outcome == "created":
                 created.append(identifier)
@@ -570,15 +574,31 @@ class BaseIntegration:
 
         `PUT /api/regulations` replaces the regulation as a whole and supersedes the
         former DELETE-then-POST, which lost the regulation when the POST failed (D-06).
+        A regulation with an undated period is read back first, so that the date DiaLog
+        holds survives the replacement (`sync/dating.py`).
         A regulation carrying zones cannot go through PUT — the API answers 500 on any
         regulation holding a zone, and the zone must be converted to sections again
         anyway — so it is deleted and recreated through the zone flow.
         """
         updated: list[str] = []
+        day = run_day()
         for index, regulation in enumerate(regulations):
             identifier = str(regulation.identifier)
             logger.info(f"Updating regulation {index + 1}/{len(regulations)}: {identifier}")
             logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
+
+            # An undated permanent period keeps the date DiaLog already holds: a PUT
+            # replaces the regulation whole, so the date has to be read back first.
+            # Without that read the update would restart the regulation today — it is
+            # left for tomorrow instead.
+            if has_undated_period(regulation):
+                read = self.api.get(identifier)
+                if read is None:
+                    logger.error(
+                        f"Cannot update {identifier}: its current dates could not be read back"
+                    )
+                    continue
+                date_update(regulation, read, day)
 
             if self.resolve_zones_to_sections and has_zone(regulation):
                 if self.api.delete(identifier) and self._create_regulation(regulation) == "created":

@@ -29,7 +29,9 @@ from api.dia_log_client.models import PostApiRegulationsAddBody
 
 STATE_DIR_ENV = "DIALOG_STATE_DIR"
 DEFAULT_STATE_DIR = "state"
-SNAPSHOT_VERSION = 1
+# 2 since 2026-09-19: an undated permanent period is digested as null, not as the day of
+# the run. A version-1 snapshot carries run days and would flag every such regulation.
+SNAPSHOT_VERSION = 2
 
 # Regulation fields whose change must trigger an update.
 DIGESTED_REGULATION_FIELDS = ("title", "category", "subject", "otherCategoryText")
@@ -79,6 +81,15 @@ class SnapshotStore:
         regulations = payload.get("regulations") if isinstance(payload, dict) else None
         if not isinstance(regulations, dict):
             logger.warning(f"Malformed snapshot {self.path}, treated as missing")
+            return None
+        version = payload.get("version")
+        if version != SNAPSHOT_VERSION:
+            # Digests of another version are not comparable to today's: every regulation
+            # would look changed. One day without update detection instead.
+            logger.warning(
+                f"Snapshot {self.path} has version {version}, this pipeline writes "
+                f"{SNAPSHOT_VERSION}: treated as missing and rebuilt today"
+            )
             return None
 
         logger.info(f"Loaded {len(regulations)} digest(s) from {self.path}")

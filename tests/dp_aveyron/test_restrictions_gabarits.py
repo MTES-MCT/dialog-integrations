@@ -5,9 +5,7 @@ these tests pin the two ways rows become one: by the number the producer cites, 
 otherwise by the measure itself, departmentally.
 """
 
-import datetime
 from urllib.parse import quote
-from zoneinfo import ZoneInfo
 
 import polars as pl
 
@@ -37,12 +35,6 @@ def signs(**overrides):
         # test overrides.
         measure_group_key().alias("measure_group_key"),
     )
-
-
-def today_in_paris() -> str:
-    return datetime.datetime.combine(
-        datetime.date.today(), datetime.time(), tzinfo=ZoneInfo("Europe/Paris")
-    ).isoformat()
 
 
 # --- Identifiers -------------------------------------------------------------------
@@ -207,16 +199,21 @@ def test_a_grouped_fallback_is_dated_from_the_run_not_from_one_of_its_members():
 
     result = compute_period_fields(df)
 
-    assert result["period_start_date"].unique().to_list() == [today_in_paris()]
+    assert result["period_start_date"].unique().to_list() == [None]
 
 
-def test_an_undated_numbered_arrete_falls_back_to_the_run():
-    """Signed, signposted and in force; only the day it was signed is missing."""
+def test_an_undated_numbered_arrete_stays_undated():
+    """Signed, signposted and in force; only the day it was signed is missing.
+
+    Left null rather than dated the day of the run: `integrations/sync/dating.py`
+    dates it when DiaLog is written, so the comparison never sees a moving date.
+    """
     df = compute_regulation_fields(signs(date_darre=[None]))
 
     result = compute_period_fields(df)
 
-    assert result["period_start_date"].to_list() == [today_in_paris()]
+    assert result["period_start_date"].to_list() == [None]
+    assert result["period_is_permanent"].to_list() == [True]
 
 
 def test_the_two_digit_year_the_producer_sometimes_writes_is_read_as_this_century():

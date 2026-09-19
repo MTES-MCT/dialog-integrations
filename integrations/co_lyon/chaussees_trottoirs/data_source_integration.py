@@ -30,7 +30,6 @@ measure each — 597 carry a real order number, 104 are metropolitan-wide fallba
 regulations above the ceiling are split.
 """
 
-import datetime
 import json
 
 import polars as pl
@@ -57,7 +56,6 @@ from integrations.co_lyon.chaussees_trottoirs.regulation_key import (
 )
 from integrations.co_lyon.chaussees_trottoirs.schema import LyonChausseesTrottoirsRawDataSchema
 from integrations.co_lyon.grand_lyon import fetch_layer
-from integrations.shared.local_time import start_of_local_day
 from integrations.shared.perimeter import Perimeter, discard_outside_perimeter
 
 WFS_LAYER = "pvo_patrimoine_voirie.pvochausseetrottoir"
@@ -518,21 +516,21 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Permanent period starting on the day of the integration.
+    """Permanent period, left undated.
 
     The source carries no commencement date for most rows, and the one hiding in the
     free text is the date of a calmed-traffic zone, not of the measure. R-39: we never
     presume a past date. An invented date is *false* — it claims an order applied when
-    nothing says it did — where today's date is merely imprecise, and reads for what it
-    is: in force when we published it.
+    nothing says it did.
 
-    The day goes through `start_of_local_day` rather than a hand-written `Z` suffix:
-    DiaLog reads the offset it is given, so `T00:00:00Z` would place the start two hours
-    before French midnight — on the previous day, all summer.
+    The start date used to be the day of the run, which made every order look modified
+    each morning: the date is part of what the synchronization compares. It is now left
+    null and resolved when DiaLog is written (`integrations/sync/dating.py`): the day of
+    the run on creation, "in force when we published it"; the date DiaLog already holds
+    on update.
     """
-    df = df.with_columns(pl.lit(datetime.date.today()).alias("_start_date"))
     return df.with_columns(
-        start_of_local_day(df, "_start_date").alias("period_start_date"),
+        pl.lit(None, dtype=pl.String).alias("period_start_date"),
         pl.lit(None).alias("period_end_date"),
         pl.lit("everyDay").alias("period_recurrence_type"),
         pl.lit(True).alias("period_is_permanent"),

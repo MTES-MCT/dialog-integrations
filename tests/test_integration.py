@@ -452,3 +452,138 @@ def test_a_dry_run_reports_closures_without_reading_anything(monkeypatch, tmp_pa
     assert outcome.planned == {"create": 0, "update": 0, "delete": 0, "close": 1}
     assert "à clore : 1" in outcome.report
     assert f"  - {PREFIX}gone" in outcome.report
+
+
+# --- Dating: an undated permanent period is dated when DiaLog is written (R-39) --------
+
+from tests.sync.test_dating import _read, _read_measure  # noqa: E402
+
+
+def _undated_rows(identifiers) -> pl.DataFrame:
+    """Permanent rows the source could not date, in the pivot's column names."""
+    return measure_rows(identifiers).with_columns(
+        pl.lit(None, dtype=pl.String).alias("period_start_date"),
+        pl.lit(None, dtype=pl.String).alias("period_end_date"),
+        pl.lit(True).alias("period_is_permanent"),
+    )
+
+
+class _DatingApi(_ReadingApi):
+    """The reading API plus the bodies of every POST."""
+
+    def __init__(self, reads: dict[str, dict], **kwargs):
+        super().__init__(reads, **kwargs)
+        self.post_bodies: list[dict] = []
+
+    def add(self, regulation):
+        self.post_bodies.append(regulation.to_dict())
+        return super().add(regulation)
+
+
+def _today() -> str:
+    return datetime.combine(
+        datetime.now(tz=ZoneInfo("Europe/Paris")).date(),
+        datetime.min.time(),
+        ZoneInfo("Europe/Paris"),
+    ).isoformat()
+
+
+def test_a_created_regulation_starts_the_day_it_is_published(monkeypatch, tmp_path):
+    api = _DatingApi({})
+    integration = _build_integration(
+        monkeypatch, tmp_path, _undated_rows([f"{PREFIX}a"]), [], api=api, identifier_prefix=PREFIX
+    )
+
+    integration.integrate_regulations()
+
+    period = api.post_bodies[0]["measures"][0]["periods"][0]
+    assert period["startDate"] == period["startTime"] == _today()
+    assert api.read == []
+
+
+def test_an_updated_regulation_keeps_the_date_dialog_holds(monkeypatch, tmp_path):
+    api = _DatingApi({f"{PREFIX}a": _read(_read_measure(max_speed=50))})
+    integration = _build_integration(
+        monkeypatch,
+        tmp_path,
+        _undated_rows([f"{PREFIX}a"]),
+        [f"{PREFIX}a"],
+        api=api,
+        identifier_prefix=PREFIX,
+        update_changed=True,
+    )
+    # Yesterday's send, with the speed the source has since changed.
+    old = {f"{PREFIX}a": compute_regulation_digest(build_regulation(f"{PREFIX}a", max_speed=50))}
+    old[f"{PREFIX}a"]["measures"][0]["periods"][0]["startDate"] = None
+    SnapshotStore("co_test", "fake", base_dir=tmp_path).save(old)
+
+    outcome = integration.integrate_regulations()
+
+    assert outcome.updated == 1 and api.read == [f"{PREFIX}a"]
+    period = api.put_bodies[0]["measures"][0]["periods"][0]
+    assert period["startDate"] == period["startTime"] == "2026-09-18T00:00:00+02:00"
+    # The snapshot keeps the null: tomorrow's comparison never sees a date.
+    assert _snapshot(tmp_path)[f"{PREFIX}a"]["measures"][0]["periods"][0]["startDate"] is None
+
+
+def test_the_run_day_is_not_a_change(monkeypatch, tmp_path):
+    api = _DatingApi({})
+    integration = _build_integration(
+        monkeypatch,
+        tmp_path,
+        _undated_rows([f"{PREFIX}a"]),
+        [],
+        api=api,
+        identifier_prefix=PREFIX,
+        update_changed=True,
+    )
+    integration.integrate_regulations()
+    assert api.posted == [f"{PREFIX}a"]
+
+    # The next run: same source, DiaLog now holds the regulation.
+    monkeypatch.setattr(integration, "fetch_regulation_ids", lambda: [f"{PREFIX}a"])
+    outcome = integration.integrate_regulations()
+
+    assert outcome.planned == {"create": 0, "update": 0, "delete": 0}
+    assert api.put == [] and api.read == []
+
+
+def test_an_update_whose_dates_cannot_be_read_back_waits_for_tomorrow(monkeypatch, tmp_path):
+    api = _DatingApi({})  # GET answers None: DiaLog could not be read.
+    integration = _build_integration(
+        monkeypatch,
+        tmp_path,
+        _undated_rows([f"{PREFIX}a"]),
+        [f"{PREFIX}a"],
+        api=api,
+        identifier_prefix=PREFIX,
+        update_changed=True,
+    )
+    old = {f"{PREFIX}a": compute_regulation_digest(build_regulation(f"{PREFIX}a", max_speed=50))}
+    SnapshotStore("co_test", "fake", base_dir=tmp_path).save(old)
+
+    outcome = integration.integrate_regulations()
+
+    # Sending it would have restarted the regulation today.
+    assert api.put == [] and outcome.updated == 0 and outcome.errors == 1
+    # Previous fingerprint kept: detected again, identically, tomorrow.
+    assert _snapshot(tmp_path) == old
+
+
+def test_a_dated_regulation_is_updated_without_reading_anything(monkeypatch, tmp_path):
+    api = _DatingApi({})
+    integration = _build_integration(
+        monkeypatch,
+        tmp_path,
+        measure_rows([f"{PREFIX}a"], max_speed=30),
+        [f"{PREFIX}a"],
+        api=api,
+        identifier_prefix=PREFIX,
+        update_changed=True,
+    )
+    old = {f"{PREFIX}a": compute_regulation_digest(build_regulation(f"{PREFIX}a", max_speed=50))}
+    SnapshotStore("co_test", "fake", base_dir=tmp_path).save(old)
+
+    outcome = integration.integrate_regulations()
+
+    assert outcome.updated == 1 and api.put == [f"{PREFIX}a"] and api.read == []

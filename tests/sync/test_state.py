@@ -111,3 +111,17 @@ def test_the_state_directory_can_be_moved_with_an_environment_variable(monkeypat
 
     assert state_dir() == tmp_path / "elsewhere"
     assert SnapshotStore("co_test", "source").path.parent == tmp_path / "elsewhere" / "co_test"
+
+
+def test_a_snapshot_of_another_version_is_treated_as_missing(tmp_path):
+    # Version 1 digested the run day as the start of an undated permanent period; its
+    # digests would flag every such regulation. One day without updates instead.
+    store = SnapshotStore("co_test", "fake", base_dir=tmp_path)
+    store.save({"A-1": compute_regulation_digest(build_regulation("A-1"))})
+    with gzip.open(store.path, "rt", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    payload["version"] = 1
+    with gzip.open(store.path, "wt", encoding="utf-8") as handle:
+        json.dump(payload, handle)
+
+    assert store.load() is None

@@ -372,24 +372,16 @@ def test_an_unknown_side_falls_back_to_both_ways():
     assert result["location_direction"].to_list() == [DirectionEnum.BOTH.value]
 
 
-def test_the_period_starts_on_the_day_of_the_run_in_french_local_time():
-    """R-39: the source carries no date, so we date the run and never a past day.
+def test_the_period_is_permanent_and_undated():
+    """R-39: the source carries no date, so none is presumed.
 
-    The offset matters as much as the day: DiaLog reads the offset it is given, and the
-    naive `2024-08-12T00:00:00` this used to send was read as UTC — two hours off, on a
-    date that was only the file's last refresh.
+    The start used to be the day of the run; that made every limit look modified each
+    morning, the date being part of what the synchronization compares. It is now left
+    null and dated by `integrations/sync/dating.py` when DiaLog is written.
     """
-    import datetime
-    from zoneinfo import ZoneInfo
-
-    expected = datetime.datetime.combine(
-        datetime.date.today(), datetime.time(), tzinfo=ZoneInfo("Europe/Paris")
-    ).isoformat()
-    assert expected.endswith(("+01:00", "+02:00"))
-
     result = compute_period_fields(stretches())
 
-    assert result["period_start_date"].to_list() == [expected]
+    assert result["period_start_date"].to_list() == [None]
     assert result["period_end_date"].to_list() == [None]
     assert result["period_is_permanent"].to_list() == [True]
 

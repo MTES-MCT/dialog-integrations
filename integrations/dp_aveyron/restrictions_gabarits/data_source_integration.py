@@ -1,7 +1,6 @@
 """Data source integration for Aveyron : prescriptions-routieres-du-departement"""
 
 import io
-from datetime import date
 
 import polars as pl
 import requests
@@ -171,8 +170,8 @@ def compute_measure_fields(df: pl.DataFrame):
 def compute_period_fields(df: pl.DataFrame):
     """
     Compute all period fields for SavePeriodDTO.
-    - period_start_date: the day the arrete was signed, for a numbered arrete; the day of
-      the run for a grouped fallback, and for anything undated
+    - period_start_date: the day the arrete was signed, for a numbered arrete; null for a
+      grouped fallback and for anything undated — dated when DiaLog is written
     - period_end_date: None
     - period_recurrence_type: everyDay
     - period_is_permanent: True
@@ -190,11 +189,14 @@ def compute_period_fields(df: pl.DataFrame):
     - a *grouped fallback* gathers stretches from different acts — 33 rows over 18 signs,
       one of which spans three dates from 2003 to 2019. No member's date describes the
       group, and picking one would assert a commencement date for the other N-1 that
-      nothing supports. R-39: the run's own day, which claims only "this applies now".
+      nothing supports. R-39: no date at all.
 
-    Rows with no readable date fall to the run's day either way. They describe a
-    restriction that is signed, signposted and in force; only the day it was signed is
-    missing, and 29 of the 33 fallback rows are in that case already.
+    Rows with no readable date are left undated either way. They describe a restriction
+    that is signed, signposted and in force; only the day it was signed is missing, and
+    29 of the 33 fallback rows are in that case already. The null is resolved when
+    DiaLog is written (`integrations/sync/dating.py`): the day of the run on creation,
+    which claims only "this applies now"; the date DiaLog already holds on update.
+    Dating them the day of the run here made them look modified each morning.
     """
     parsed = (
         pl.when(pl.col("date_darre").str.len_chars() <= 8)
@@ -210,11 +212,11 @@ def compute_period_fields(df: pl.DataFrame):
     n_dateless = df.select(signed.is_null().sum()).item()
     if n_dateless > 0:
         logger.info(
-            f"Dating {n_dateless}/{df.height} rows from today: no readable date_darre, or a "
+            f"Leaving {n_dateless}/{df.height} rows undated: no readable date_darre, or a "
             "grouped fallback whose members come from different acts"
         )
 
-    df = df.with_columns(signed.fill_null(date.today()).alias("_start_date"))
+    df = df.with_columns(signed.alias("_start_date"))
     return df.with_columns(
         [
             start_of_local_day(df, "_start_date").alias("period_start_date"),

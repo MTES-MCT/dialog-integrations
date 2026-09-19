@@ -250,20 +250,14 @@ def test_a_segment_without_geometry_is_dropped(clean_data):
     assert clean_data["location_geometry"].null_count() == 0
 
 
-def test_every_period_starts_today_and_never_ends(clean_data):
+def test_every_period_is_permanent_and_undated(clean_data):
     """R-39: we never presume a commencement date the source does not carry.
 
-    The start is French midnight carrying the offset of that day — the one shape DiaLog
-    reads without shifting it (`integrations/local_time.py`).
+    The start is left null, not set to the day of the run: the date is part of what the
+    synchronization compares, and a run day made every order look modified each
+    morning. `integrations/sync/dating.py` dates it when DiaLog is written.
     """
-    import datetime
-    from zoneinfo import ZoneInfo
-
-    today = datetime.datetime.combine(
-        datetime.date.today(), datetime.time(), tzinfo=ZoneInfo("Europe/Paris")
-    ).isoformat()
-    assert today.endswith(("+01:00", "+02:00"))
-    assert set(clean_data["period_start_date"]) == {today}
+    assert clean_data["period_start_date"].null_count() == clean_data.height
     assert set(clean_data["period_is_permanent"]) == {True}
     assert clean_data["period_end_date"].null_count() == clean_data.height
 

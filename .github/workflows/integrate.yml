@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Two organizations at a time: at midnight the staging jobs all fetched their
+      # identifiers within the same second, and the review-sized instance answered one
+      # of them 500 (co_rennes, 2026-09-19). The run is not time-critical.
+      max-parallel: 2
       # `target` names the DiaLog instance the organization writes to. The GitHub
       # environment holding its secrets is the organization for `prod` (`co_brest`),
       # suffixed otherwise (`co_paris-staging`). Promoting an organization means
