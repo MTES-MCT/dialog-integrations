@@ -68,13 +68,13 @@ jobs:
           DIALOG_BASE_URL: ${{ secrets.DIALOG_BASE_URL }}
           DIALOG_CLIENT_ID: ${{ secrets.DIALOG_CLIENT_ID }}
           DIALOG_CLIENT_SECRET: ${{ secrets.DIALOG_CLIENT_SECRET }}
-        # Write a JSON result to the step output named after this org.
-        # `--json` prints the run counters on stdout; the logs stay on stderr.
+        # `--json` prints the run counters on stdout (the logs stay on stderr); they go
+        # to the step output named after this org.
         run: |
           org="${{ matrix.organization }}"
           # --summary: the run's counters, funnel, alerts and errors. Written to a file
-          # rather than to this job's summary: the notify job gathers the seven of them
-          # into one document, in matrix order (hence the job index in the name).
+          # rather than to this job's summary: the notify job gathers them all into
+          # one document, in matrix order (hence the job index in the name).
           summary="$(printf 'summary-%02d-%s.md' "${{ strategy.job-index }}" "$org")"
           if uv run dialog integrate "$org" --json --summary "$summary" > result.json; then
             result="$(tr -d '\n' < result.json)"

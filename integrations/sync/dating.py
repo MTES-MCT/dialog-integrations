@@ -3,8 +3,8 @@
 A permanent regulation whose source records no commencement date leaves `startDate`
 null all the way through the pivot, the payload, the digest and the snapshot: "in
 force, since a day nobody recorded". Null on both sides of the comparison, the date can
-never register as a change — which is what made every permanent regulation of Lyon and
-Aveyron look modified each morning while it carried the day of the run.
+never register as a change — dated with the day of the run, every such regulation
+looked modified each morning.
 
 The null is resolved only when DiaLog is written:
 

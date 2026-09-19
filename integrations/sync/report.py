@@ -1,7 +1,7 @@
 """Render the synchronization report — in French, it is read by the team.
 
 Two things live here: a field-by-field diff between two digests
-(`integrations/state.py`), and the report printed by `--dry-run` and logged before
+(`sync/state.py`), and the report printed by `--dry-run` and logged before
 every real run.
 """
 

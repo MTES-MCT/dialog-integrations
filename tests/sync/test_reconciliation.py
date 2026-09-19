@@ -1,4 +1,4 @@
-"""Tests for the three batches, the prefix guard rail and the caps."""
+"""Tests for the batches, the prefix guard rail and the caps."""
 
 import pytest
 

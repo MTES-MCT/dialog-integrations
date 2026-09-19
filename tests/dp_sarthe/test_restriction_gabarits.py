@@ -68,15 +68,12 @@ def test_compute_measure_fields():
 
     result = compute_measure_fields(df)
 
-    # Check both fields are created
     assert "measure_type_" in result.columns
     assert "measure_max_speed" in result.columns
     assert result.height == 3
 
-    # Check all measures are NOENTRY
     assert all(mt == MeasureTypeEnum.NOENTRY.value for mt in result["measure_type_"].to_list())
 
-    # Check all max_speed are null
     assert all(speed is None for speed in result["measure_max_speed"].to_list())
 
 
@@ -94,17 +91,14 @@ def test_compute_period_fields():
 
     result = compute_period_fields(df)
 
-    # Check all period fields exist
     assert "period_start_date" in result.columns
     assert "period_end_date" in result.columns
-    # start_time / end_time are mirrored from the dates in create_save_period_dto,
-    # so the pivot no longer carries them.
+    # start_time / end_time are derived in payloads.build_period, not carried by the pivot.
     assert "period_start_time" not in result.columns
     assert "period_end_time" not in result.columns
     assert "period_recurrence_type" in result.columns
     assert "period_is_permanent" in result.columns
 
-    # Check values
     assert result["period_start_date"][0] == "2024-07-11T00:00:00+02:00"
     assert result["period_start_date"][1] == "2024-11-29T00:00:00+01:00"
     assert result["period_start_date"][2] == "2025-01-23T00:00:00+01:00"
@@ -122,7 +116,6 @@ def test_compute_period_fields_filters_null_date_creation():
 
     result = compute_period_fields(df)
 
-    # Should keep only valid dates
     assert result.height == 2
     assert result["period_start_date"].to_list() == [
         "2024-07-11T00:00:00+02:00",
@@ -149,20 +142,16 @@ def test_compute_location_fields():
 
     result = compute_location_fields(df)
 
-    # Check all location fields exist
     assert "location_road_type" in result.columns
     assert "location_label" in result.columns
     assert "location_geometry" in result.columns
 
-    # Check road_type is always RAWGEOJSON enum value
     assert result["location_road_type"][0] == RoadTypeEnum.RAWGEOJSON.value
     assert result["location_road_type"][1] == RoadTypeEnum.RAWGEOJSON.value
 
-    # Check label is from localisation_curviligne
     assert result["location_label"][0] == "72_D0010 : Du 1+521 au 4+977 côté : Non latéralisé"
     assert result["location_label"][1] == "72_D0015 : Du 0+0 au 1+635 côté : Non latéralisé"
 
-    # Check geometry is passed through from geo_shape
     assert (
         result["location_geometry"][0]
         == '{"type": "LineString", "coordinates": [[0.0, 0.0], [1.0, 1.0]]}'
@@ -196,18 +185,15 @@ def test_compute_vehicle_fields_with_tonnage():
 
     result = compute_vehicle_fields(df)
 
-    # Check vehicle fields
     assert "vehicle_all_vehicles" in result.columns
     assert "vehicle_heavyweight_max_weight" in result.columns
     assert "vehicle_max_height" in result.columns
     assert "vehicle_max_width" in result.columns
 
-    # Check tonnage is converted from tons to kg (multiply by 1000)
     assert result["vehicle_heavyweight_max_weight"][0] == 7.5  # 7.5 tons
     assert result["vehicle_heavyweight_max_weight"][1] == 3.5  # 3.5 tons
     assert result["vehicle_heavyweight_max_weight"][2] == 10.0  # 10.0 tons
 
-    # Check all_vehicles is False
     assert all(not v for v in result["vehicle_all_vehicles"].to_list())
 
 
@@ -223,15 +209,12 @@ def test_compute_vehicle_fields_with_height():
 
     result = compute_vehicle_fields(df)
 
-    # Check height values
     assert result["vehicle_max_height"][0] == 3.9
     assert result["vehicle_max_height"][1] == 3.7
 
-    # Check tonnage is kept in tons
     assert result["vehicle_heavyweight_max_weight"][0] == 5.0
     assert result["vehicle_heavyweight_max_weight"][1] == 3.5
 
-    # Check width is None
     assert result["vehicle_max_width"][0] is None
 
 
@@ -247,15 +230,12 @@ def test_compute_vehicle_fields_with_width():
 
     result = compute_vehicle_fields(df)
 
-    # Check width values
     assert result["vehicle_max_width"][0] == 2.5
     assert result["vehicle_max_width"][1] == 2.7
 
-    # Check tonnage is kept in tons
     assert result["vehicle_heavyweight_max_weight"][0] == 5.0
     assert result["vehicle_heavyweight_max_weight"][1] == 3.5
 
-    # Check height is None
     assert result["vehicle_max_height"][0] is None
 
 
@@ -271,25 +251,19 @@ def test_compute_vehicle_fields_with_restricted_types():
 
     result = compute_vehicle_fields(df)
 
-    # All rows should be kept (no filtering)
     assert result.height == 4
 
-    # Check that restricted_types is set correctly
     assert "vehicle_restricted_types" in result.columns
 
-    # Convert to list for easier testing
     restricted_types = result["vehicle_restricted_types"].to_list()
     weights = result["vehicle_heavyweight_max_weight"].to_list()
 
-    # Rows with tonnage > 0 should have "heavyGoodsVehicle"
     assert restricted_types[0] == ["heavyGoodsVehicle"]
     assert restricted_types[2] == ["heavyGoodsVehicle"]
 
-    # Rows with tonnage == 0 should have "dimensions"
     assert restricted_types[1] == ["dimensions"]
     assert restricted_types[3] == ["dimensions"]
 
-    # Check heavyweight_max_weight is set only for tonnage > 0
     assert weights[0] == 7.5
     assert weights[1] is None
     assert weights[2] == 3.5
@@ -308,14 +282,12 @@ def test_compute_regulation_fields(data_source):
 
     result = data_source.compute_regulation_fields(df)
 
-    # Check all regulation fields exist
     assert "regulation_identifier" in result.columns
     assert "regulation_category" in result.columns
     assert "regulation_subject" in result.columns
     assert "regulation_title" in result.columns
     assert "regulation_other_category_text" in result.columns
 
-    # Check values
     assert result.height == 3
     assert result["regulation_identifier"].to_list() == ["1", "280", "8"]
     assert result["regulation_title"][0] == "1 - Interdiction 7,5t - La Flèche"
@@ -336,7 +308,6 @@ def test_compute_regulation_fields_drops_duplicates(data_source):
 
     result = data_source.compute_regulation_fields(df)
 
-    # Should drop the duplicates (both rows with objectid=1)
     assert result.height == 1
     assert result["regulation_identifier"][0] == "2"
     assert result["regulation_title"][0] == "2 - Nature B - Site B"

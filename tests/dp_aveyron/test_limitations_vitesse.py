@@ -120,12 +120,7 @@ def test_the_fallback_key_ignores_the_road_and_the_commune():
 
 
 def test_identifier_is_url_path_safe():
-    """Identifiers travel in the path of DELETE and publish.
-
-    Everything must already be URL-safe, so no slash, space or accent survives. Since
-    R-28 took the stretch out of the fallback key, the `+` of the PR notation no longer
-    reaches an identifier either.
-    """
+    """Identifiers travel in the path of DELETE and publish: no slash, space or accent."""
     df = stretches(
         num_arrete=["143/2025 Conques", None],
         agglo=[None, None],
@@ -147,10 +142,8 @@ def test_identifier_is_url_path_safe():
 def test_identifier_stays_within_the_api_cap():
     """Both forms fit. The producer reference is the only half that can grow.
 
-    The longest on the 2026-09-07 draw is `AV-LV-A21R0188-A21R0232`, 23 characters
-    of the 60 allowed; the grouped fallback is `AV-LV-V110` at 10. Nothing here
-    truncates — an over-long reference is reported as an error, because a silently
-    shortened identifier would orphan the arrete at the next run.
+    Nothing here truncates — an over-long reference is reported as an error, because a
+    silently shortened identifier would orphan the arrete at the next run.
     """
     df = stretches(
         num_arrete=["A21R0188 - A21R0232", None],
@@ -403,7 +396,7 @@ def refusable(**overrides):
 
 
 def test_a_refused_stretch_is_dropped_before_it_sinks_its_regulation():
-    """The API validates a regulation as a whole: 7 stretches sank 92 emprises."""
+    """The API validates a regulation as a whole: one refused stretch sinks it."""
     assert "D911-de-6+636-a-15+52" in REFUSED_SEGMENTS
 
     assert discard_refused_segments(refusable()).height == 0

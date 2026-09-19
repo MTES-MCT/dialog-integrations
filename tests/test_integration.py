@@ -1,4 +1,4 @@
-"""Integration tests for all organizations - tests full pipeline with all data sources."""
+"""End-to-end pipeline tests, API mocked, and the synchronization orchestration."""
 
 import json
 from types import SimpleNamespace
@@ -16,11 +16,9 @@ from integrations.base_integration import BaseIntegration
     ],
 )
 def test_full_pipeline_integration(organization, monkeypatch):
-    """Test the full pipeline with actual CSV data for all organizations, mocking only API calls."""
-    # Create integration instance
+    """The full pipeline on the frozen CSV fixtures (`tests/{org}/{source}.csv`)."""
     integration = BaseIntegration.from_organization(organization)
 
-    # Get data sources and mock their fetch_raw_data to load actual CSV data
     for data_source_integration in integration.data_sources:
 
         def mock_fetch_raw_data(_, name=data_source_integration.name):
@@ -28,15 +26,13 @@ def test_full_pipeline_integration(organization, monkeypatch):
 
         monkeypatch.setattr(data_source_integration, "fetch_raw_data", mock_fetch_raw_data)
 
-    # Mock API-related methods
     monkeypatch.setattr(integration, "_integrate_regulations_add", lambda regs: ([], []))
     monkeypatch.setattr(integration, "fetch_regulation_ids", lambda: [])
 
-    # Run the full pipeline
     integration.integrate_regulations()
 
 
-# --- Synchronization: the three operations, the guard rails and --dry-run -----------
+# --- Synchronization: the operations, the guard rails and --dry-run ----------------
 
 from integrations.base_data_source_integration import BaseDataSourceIntegration  # noqa: E402
 from integrations.sync.reconciliation import IdentifierOutsidePrefixError  # noqa: E402

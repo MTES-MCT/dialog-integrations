@@ -66,13 +66,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    measure_type_ :
-        contrainte_auto = Interdite -> NOENTRY
-        contrainte_auto = Alternée -> ALTERNATEROAD
-
-    Excludes : les mesures de type "chausséee rétrécies"
-    """
+    """`contrainte_auto`: Interdite -> noEntry, Alternée -> alternateRoad. Anything else
+    (narrowed roadway, "Perturbée"…) is dropped."""
 
     df = df.with_columns(
         [
@@ -93,13 +88,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all period fields for SavePeriodDTO.
-    - period_start_date: date_debut, epoch ms -> Paris
-    - period_end_date: date_fin, epoch ms -> Paris
-    - period_recurrence_type: everyDay
-    - period_is_permanent: False
-    """
+    """Temporary period; date_debut and date_fin are epoch milliseconds."""
 
     return df.with_columns(
         [
@@ -112,13 +101,7 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all location fields for SaveLocationDTO.
-    - location_road_type: always RoadTypeEnum.RAWGEOJSON
-    - location_label: voie + commune
-    - location_geometry: from geometry field (WKT) transformed to GeoJSON (WGS84)
-    Filter out rows where geometry is null.
-    """
+    """rawGeoJSON from the WKT `geometry` (already EPSG:4326, `outSR` of the query)."""
 
     pdf = df.to_pandas()
     gdf = gpd.GeoDataFrame(pdf, geometry=gpd.GeoSeries.from_wkt(pdf["geometry"]), crs="EPSG:4326")
@@ -129,22 +112,11 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
         [
             pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
             (pl.col("voie") + pl.lit(" – ") + pl.col("commune")).alias("location_label"),
-            # location_geometry already in df
         ]
     )
 
 
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all regulation fields for PostApiRegulationsAddBody.
-    - regulation_identifier: from gid field
-    - regulation_category: TEMPORARYREGULATION
-    - regulation_subject: ROADMAINTENANCE
-    - regulation_title: "{DESCRIPTIF} – {LIBRU}"
-    - regulation_other_category_text: "Circulation"
-    - regulation_document_url: from LIEN_URL if available
-    """
-
     return df.with_columns(
         [
             (pl.lit("44/") + pl.col("gid").cast(pl.Utf8) + pl.lit("/TRAVAUX")).alias(
@@ -165,8 +137,4 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_vehicle_fields(df: pl.DataFrame):
-    """
-    Compute all vehicle fields for SaveVehicleSetDTO.
-    - vehicle_all_vehicles: true
-    """
     return df.with_columns([pl.lit(True).alias("vehicle_all_vehicles")])

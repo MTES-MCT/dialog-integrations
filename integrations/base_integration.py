@@ -41,8 +41,6 @@ from settings import OrganizationSettings
 
 
 class BaseIntegration:
-    """Base integration class that orchestrates data sources and API interactions."""
-
     client: Client
     api: DialogApi
     status: PostApiRegulationsAddBodyStatus = PostApiRegulationsAddBodyStatus.DRAFT
@@ -57,8 +55,7 @@ class BaseIntegration:
     max_sections_per_length: float = MAX_SECTIONS_PER_LENGTH
 
     # --- Synchronization, opt-in per organization ---------------------------------
-    # These defaults reproduce the historical behavior: purely additive, create what is
-    # missing, never update, never delete. An organization opts in by overriding them.
+    # Defaults are purely additive: create what is missing, never update, never delete.
     #
     # `identifier_prefix` bounds every destructive operation to the regulations this
     # pipeline owns; without it deletion is refused, not merely disabled.
@@ -99,7 +96,6 @@ class BaseIntegration:
         )
         client = build_client(organization_settings)
 
-        # Import the Integration class from the organization's module
         integration_module = f"integrations.{organization_settings.organization}.integration"
         spec = importlib_util.find_spec(integration_module)
         if spec is None:
@@ -133,8 +129,8 @@ class BaseIntegration:
         """
         outcome = IntegrationOutcome(organization=self.organization, dry_run=dry_run)
 
-        # A failure here used to fall back to "this organization holds nothing", which
-        # re-created the whole corpus as duplicates. It now stops the run.
+        # Must raise on failure: falling back to "this organization holds nothing"
+        # would re-create the whole corpus as duplicates.
         remote_identifiers = self.fetch_regulation_ids()
 
         update_mode = self._update_mode(update_existing)
@@ -150,7 +146,6 @@ class BaseIntegration:
             source = data_source(self.organization_settings, self.client)
             clean_data, raw_rows = self._compute_clean_data(source)
 
-            # Only process whitelisted identifiers
             if limit_to and len(limit_to) > 0:
                 logger.info(f"Limiting processing to following ids : {limit_to}")
                 clean_data = clean_data.filter(pl.col("regulation_identifier").is_in(limit_to))
@@ -572,13 +567,13 @@ class BaseIntegration:
     ) -> list[str]:
         """Replace every regulation; return the identifiers actually updated.
 
-        `PUT /api/regulations` replaces the regulation as a whole and supersedes the
-        former DELETE-then-POST, which lost the regulation when the POST failed (D-06).
+        `PUT /api/regulations` replaces the regulation as a whole; DELETE-then-POST
+        would lose it when the POST fails (D-06).
         A regulation with an undated period is read back first, so that the date DiaLog
         holds survives the replacement (`sync/dating.py`).
-        A regulation carrying zones cannot go through PUT — the API answers 500 on any
-        regulation holding a zone, and the zone must be converted to sections again
-        anyway — so it is deleted and recreated through the zone flow.
+        A regulation carrying zones cannot go through PUT — the API answers 500 on it
+        (S-14), and the zone must be converted to sections again anyway — so it is
+        deleted and recreated through the zone flow.
         """
         updated: list[str] = []
         day = run_day()
@@ -672,7 +667,10 @@ class BaseIntegration:
             )
         return deleted
 
-    # --- payloads: kept as methods so an organization can override one ------------
+    # --- payloads -------------------------------------------------------------------
+    # `create_regulations` and `create_measure` are the override points. The three
+    # `create_save_*_dto` below are called by nobody: `payloads.build_measure` calls
+    # `payloads.build_period` & co. directly, so overriding them has no effect.
 
     def create_regulations(
         self,

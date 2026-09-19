@@ -41,7 +41,7 @@ def test_a_raising_call_is_false_not_an_exception(api, monkeypatch):
 
 
 def test_a_5xx_answer_is_checked_with_a_get(api, monkeypatch):
-    # The staging's router answers 504 after 60 s while the back end commits (2026-09-18).
+    # The staging's router answers 504 after 60 s while the back end commits (D-20).
     monkeypatch.setattr(api_module, "add_regulation", lambda client, body: response(504))
     monkeypatch.setattr(api, "get", lambda identifier: {"identifier": identifier})
     assert api.add(regulation()) is True

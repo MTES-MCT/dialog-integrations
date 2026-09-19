@@ -60,10 +60,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def compute_measure_fields(df: pl.DataFrame):
-    """
-    measure_type_ : depends on type
-    Excludes : les mesures de type "chausséee rétrécies"
-    """
+    """Only "Interdit dans les 2 sens" is published (noEntry). "Sens unique" is dropped:
+    the layer gives no direction to publish it with (R-32)."""
 
     df = df.with_columns(
         [
@@ -82,15 +80,7 @@ def compute_measure_fields(df: pl.DataFrame):
 
 
 def compute_period_fields(df: pl.DataFrame):
-    """
-    Compute all period fields for SavePeriodDTO.
-    - period_start_date: from 2022-01-13 (creation of the file)
-    - period_end_date: None
-    - period_start_time: None
-    - period_end_time: None
-    - period_recurrence_type: everyDay
-    - period_is_permanent: True
-    """
+    """Permanent period starting on 2022-01-13, the creation date of the file."""
 
     return df.with_columns(
         [
@@ -103,12 +93,7 @@ def compute_period_fields(df: pl.DataFrame):
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all location fields for SaveLocationDTO.
-    - location_road_type: always RoadTypeEnum.RAWGEOJSON
-    - location_label: from localisation_curviligne
-    - location_geometry: from geo_shape
-    """
+    """rawGeoJSON from the WKB `geo_shape`, labelled "nom_voie - code_insee - nom_commune"."""
 
     return df.with_columns(
         [
@@ -130,17 +115,6 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all regulation fields for PostApiRegulationsAddBody.
-    - regulation_identifier: from id
-    - regulation_category: PERMANENTREGULATION
-    - regulation_subject: OTHER
-    - regulation_title: objectid + nature + site
-    - regulation_other_category_text: "Circulation"
-
-    Filters out rows with duplicate objectid.
-    """
-
     return df.with_columns(
         [
             (pl.lit("35/") + pl.col("id").cast(pl.Utf8) + pl.lit("/CIRCULATION")).alias(
@@ -160,8 +134,4 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_vehicle_fields(df: pl.DataFrame):
-    """
-    Compute all vehicle fields for SaveVehicleSetDTO.
-    - vehicle_all_vehicles: true
-    """
     return df.with_columns([pl.lit(True).alias("vehicle_all_vehicles")])

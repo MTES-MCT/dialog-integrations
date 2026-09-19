@@ -16,10 +16,10 @@ network layer for want of a per-source one: a stretch that leaves it is closed, 
 a batch of more than 50 updates or closures is held for review.
 
 `PUBLISHED` is deliberate: a draft is not visible on staging, and this source is
-being shown to the team there. It also means that adding `co_lyon` to the matrix in
-`.github/workflows/integrate.yml` publishes ~185 regulations to production on the
-next nightly run, with no volume ceiling and no dry run. Three questions are open
-and none of them belongs to this file — settle them before adding that line:
+being shown to the team there. It also means that flipping `co_lyon` to `target: prod`
+in `.github/workflows/integrate.yml` publishes every regulation to production on the
+next nightly run, with no ceiling on creations. Three questions are open and none of
+them belongs to this file — settle them before flipping it:
 
 - the footprints are polygons, not centrelines. They are sent as DiaLog `zone`s, so
   DiaLog itself turns each polygon into the street segments it covers. Roughly a
@@ -47,23 +47,17 @@ from .chaussees_trottoirs.data_source_integration import (
 
 
 class Integration(BaseIntegration):
-    """Main integration class for the Métropole de Lyon."""
-
     status = PostApiRegulationsAddBodyStatus.PUBLISHED
 
     # The footprints are polygons: DiaLog clips every street it intersects, down to
     # slivers of a few metres on neighbouring streets. Read the computed sections back
-    # and republish only the ones ≥ 5 m (four calls per regulation, see
-    # `BaseIntegration._add_zone_regulation_as_sections`).
+    # and republish only the ones ≥ 5 m (four calls per regulation, `zone_flow.py`).
     resolve_zones_to_sections = True
 
-    # Synchronization: the layer is a snapshot of live work sites, so a site that ends
-    # or is withdrawn leaves it, and one that is extended changes its end date. A site
-    # that left the layer is closed (end date brought back to yesterday), not deleted:
-    # the history of work sites is kept. Every write outside today's production stays
+    # Synchronization policy: see the module docstring. Updates and closures stay
     # inside the `MGL-` prefix (`MGL-CHP-`, `MGL-CT-`): the organization also holds
-    # ~800 regulations from another channel (`LYON_…`) that are not ours. The caps hold
-    # a batch whole for review; a real day moves a handful of sites.
+    # ~800 regulations from another channel (`LYON_…`) that are not ours. The caps
+    # hold a batch whole for review; a real day moves a handful of sites.
     identifier_prefix = "MGL-"
     update_changed = True
     close_missing = True

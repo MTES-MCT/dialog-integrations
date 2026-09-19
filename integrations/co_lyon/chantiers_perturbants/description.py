@@ -8,10 +8,9 @@ all. Publishing a row whose description we only half read means publishing a str
 restriction than the producer states (R-78).
 
 So the reading is all-or-nothing: hours and a resident exemption are extracted, and
-whatever remains once they are removed must be nothing but connectors. Measured on the
-2026-09-16 draw, the longest legitimate residue is `entreet` (7 characters without
-spaces) and the shortest illegitimate one is `SensNord/Sud` (12); the threshold sits in
-between.
+whatever remains once they are removed must be nothing but connectors. The threshold
+sits between the longest legitimate residue measured, `entreet` (7 characters without
+spaces), and the shortest illegitimate one, `SensNord/Sud` (12) — see R-78.
 """
 
 import re

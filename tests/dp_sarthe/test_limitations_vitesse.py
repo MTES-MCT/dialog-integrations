@@ -13,9 +13,8 @@ from integrations.dp_sarthe.limitations_vitesse.schema import SartheRawDataSchem
 @pytest.fixture
 def raw_data():
     """Load test data from limitations_vitesse.csv."""
-    # CSV has index column, read and drop it
     df = pl.read_csv("tests/dp_sarthe/limitations_vitesse.csv")
-    # Drop the index column (first column which has no name or is numeric)
+    # The fixture CSV carries a leading index column.
     if df.columns[0] in ["", "column_1"] or df.columns[0].isdigit():
         df = df.drop(df.columns[0])
     return df
@@ -106,17 +105,14 @@ def test_compute_start_date_creates_all_period_fields():
 
     result = compute_start_date(df)
 
-    # Check all period fields exist
     assert "period_start_date" in result.columns
     assert "period_end_date" in result.columns
-    # start_time / end_time are mirrored from the dates in create_save_period_dto,
-    # so the pivot no longer carries them.
+    # start_time / end_time are derived in payloads.build_period, not carried by the pivot.
     assert "period_start_time" not in result.columns
     assert "period_end_time" not in result.columns
     assert "period_recurrence_type" in result.columns
     assert "period_is_permanent" in result.columns
 
-    # Check values
     assert result["period_recurrence_type"][0] == "everyDay"
     assert result["period_is_permanent"][0] is True
     assert result["period_end_date"][0] is None
@@ -143,22 +139,18 @@ def test_compute_location_fields():
 
     result = compute_location_fields(df)
 
-    # Check all location fields exist
     assert "location_road_type" in result.columns
     assert "location_label" in result.columns
     assert "location_geometry" in result.columns
 
-    # Check road_type is always RAWGEOJSON enum value
     assert result["location_road_type"][0] == RoadTypeEnum.RAWGEOJSON.value
     assert result["location_road_type"][1] == RoadTypeEnum.RAWGEOJSON.value
     assert result["location_road_type"][2] == RoadTypeEnum.RAWGEOJSON.value
 
-    # Check label uses loc_txt when present, otherwise title
     assert result["location_label"][0] == "Route de Paris"
     assert result["location_label"][1] == "Title 2"
     assert result["location_label"][2] == "Title 3"
 
-    # Check geometry is passed through from geo_shape
     assert result["location_geometry"][0] == '{"type": "Point", "coordinates": [0, 0]}'
 
 
@@ -195,7 +187,6 @@ def test_compute_regulation_fields(data_source):
 
     result = data_source.compute_regulation_fields(df)
 
-    # Check all regulation fields exist
     assert "regulation_identifier" in result.columns
     assert "regulation_category" in result.columns
     assert "regulation_subject" in result.columns
@@ -203,11 +194,9 @@ def test_compute_regulation_fields(data_source):
     assert "regulation_other_category_text" in result.columns
     assert "id" in result.columns
 
-    # Check values
     assert result.height == 2
     assert result["regulation_title"].to_list() == ["Speed limit 50", "Speed limit 30"]
     assert result["regulation_other_category_text"][0] == "Limitation de vitesse"
-    # Check that id was created from hash
     assert all(len(id_val) == 32 for id_val in result["id"].to_list())  # MD5 hash is 32 chars
 
 
@@ -224,7 +213,6 @@ def test_compute_regulation_fields_drops_duplicates(data_source):
 
     result = data_source.compute_regulation_fields(df)
 
-    # Should drop the duplicates (both rows with same hash)
     assert result.height == 1
     assert result["regulation_title"][0] == "Speed limit 30"
 
@@ -244,15 +232,12 @@ def test_compute_measure_fields():
 
     result = compute_measure_fields(df)
 
-    # Check both fields are created
     assert "measure_max_speed" in result.columns
     assert "measure_type_" in result.columns
     assert result.height == 3
 
-    # Check measure_max_speed values
     assert result["measure_max_speed"].to_list() == [50, 30, 90]
 
-    # Check all measures are SPEEDLIMITATION
     assert all(
         mt == MeasureTypeEnum.SPEEDLIMITATION.value for mt in result["measure_type_"].to_list()
     )
@@ -272,7 +257,6 @@ def test_compute_measure_fields_filters_invalid_vitesse():
 
     result = compute_measure_fields(df)
 
-    # Should keep only valid values (50 and 130)
     assert result.height == 2
     assert result["measure_max_speed"].to_list() == [50, 130]
 
@@ -291,6 +275,5 @@ def test_compute_measure_fields_casts_vitesse_to_int():
 
     result = compute_measure_fields(df)
 
-    # Should cast to int
     assert result["measure_max_speed"].dtype == pl.Int64
     assert result["measure_max_speed"].to_list() == [50, 30, 90]

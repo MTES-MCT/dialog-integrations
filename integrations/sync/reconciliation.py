@@ -1,4 +1,4 @@
-"""Decide what to create, update and delete on a given run.
+"""Decide what to create, update, close and delete on a given run.
 
 Four operations, three sources of truth (`ai/docs/synchronisation.md`):
 
@@ -7,10 +7,10 @@ Four operations, three sources of truth (`ai/docs/synchronisation.md`):
 | create    | `GET /api/organization/identifiers` — identifier missing from DiaLog      |
 | delete    | same endpoint — present in DiaLog, **inside our prefix**, absent today    |
 | close     | same as delete, but the regulation stays and its end date is brought back |
-| update    | the snapshot of what we sent last time (`integrations/state.py`)          |
+| update    | the snapshot of what we sent last time (`sync/state.py`)                  |
 
 An organization chooses what happens to a regulation that left its source: nothing
-(the default), deletion, or closure (`integrations/closure.py`) — never both. A closed
+(the default), deletion, or closure (`sync/closure.py`) — never both. A closed
 regulation that has already ended, according to the snapshot, is left alone.
 
 Two guard rails:
@@ -123,9 +123,8 @@ class IntegrationOutcome:
     deleted: int = 0
     # None for organizations that do not close what left their source.
     closed: int | None = None
-    # Regulations the API refused, one by one. They do not fail the run: the historical
-    # behavior is to log them and carry on, and the CI marks a run failed only when the
-    # command itself exits non-zero.
+    # Regulations the API refused, one by one. They do not fail the run (D-05): the CI
+    # marks a run failed only when the command itself exits non-zero.
     errors: int = 0
     # Regulations the pipeline itself refused (a zone covering parallel roads): not an
     # API failure, retried every day until the source changes.

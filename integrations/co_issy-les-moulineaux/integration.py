@@ -7,8 +7,6 @@ from .travaux_voirie.data_source_integration import (
 
 
 class Integration(BaseIntegration):
-    """Main integration class for Issy-les-Moulineaux."""
-
     status = PostApiRegulationsAddBodyStatus.PUBLISHED
 
     data_sources = [TravauxVoirie]

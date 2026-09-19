@@ -9,10 +9,8 @@ from settings import OrganizationSettings
 
 
 class RegulationMeasure(TypedDict):
-    """
-    Unified type for all measure and regulation data.
-    Contains all fields needed to create regulations and measures.
-    """
+    """The pivot: one row of a source's clean data. A column not declared here is
+    dropped silently by `select_regulation_measure_fields` (D-08)."""
 
     # Period fields (prefixed with period_)
     period_start_date: str | None
@@ -71,17 +69,15 @@ class RegulationMeasure(TypedDict):
 
 
 class BaseDataSourceIntegration:
-    """
-    Base class for data source integrations.
-    Each data source should extend this class and implement the abstract methods.
-    """
+    """One data source. Subclasses set `name` and `raw_data_schema`, and implement
+    `fetch_raw_data` and `compute_clean_data`."""
 
-    name: str | None = None  # Subclasses must set this
-    raw_data_schema: type[pa.DataFrameModel] | None = None  # Subclasses must set this
+    name: str | None = None
+    raw_data_schema: type[pa.DataFrameModel] | None = None
 
     # Opt-in: collapse the rows sharing a `measure_group_key` into a single measure
-    # carrying every one of their locations. Off by default so that the sources already
-    # in production keep emitting one measure per row.
+    # carrying every one of their locations (R-28). Off by default: the sources already
+    # in production emit one measure per row (D-18).
     group_locations_by_measure: bool = False
 
     # Opt-in: hard ceiling on the number of locations a single POST may carry. Above it
@@ -123,56 +119,39 @@ class BaseDataSourceIntegration:
         return df
 
     def compute_data_regulations(self) -> pl.DataFrame:
-        """
-        Fetch, validate, and clean data from a single data source.
-        Returns a DataFrame with RegulationMeasure fields.
-        Override this method in subclasses for custom data processing.
-        """
+        """Fetch, validate, clean, then keep the `RegulationMeasure` columns."""
         raw_data = self.fetch_raw_data()
         logger.info(f"Fetched {raw_data.shape[0]} raw records")
         validated_data = self.validate_raw_data(raw_data)
         clean_data = validated_data.pipe(self.compute_clean_data)
         logger.info(f"After cleaning, got {clean_data.shape[0]} records")
 
-        # Select only RegulationMeasure fields
         clean_data = self.select_regulation_measure_fields(clean_data)
         return clean_data
 
     def fetch_raw_data(self) -> pl.DataFrame:
-        """
-        Fetch raw data from the source system.
-        Returns as typed polars dataframe.
-        """
         raise NotImplementedError("Subclasses must implement fetch_raw_data method")
 
     def preprocess_raw_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
-        """
-        Apply minimal preprocessing transformations before validation.
-        Default implementation returns data unchanged.
-        Override in subclasses for integration-specific preprocessing (e.g., boolean casting).
-        """
+        """Minimal casts before validation (e.g. booleans); identity by default."""
         return raw_data
 
     def validate_raw_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
-        """
-        Validate raw data schema and keep only columns we need.
-        Applies minimal transformations via preprocess_raw_data, then validates.
+        """Keep only the schema's columns, preprocess, then validate with Pandera.
+
+        A schema column missing from the source fails the whole integration.
         """
         if self.raw_data_schema is None:
             raise NotImplementedError("Subclasses must set raw_data_schema class attribute")
 
         logger.info(f"Validating raw data schema with {raw_data.shape[0]} rows")
 
-        # Select only the columns we need
         columns_to_keep = list(self.raw_data_schema.to_schema().columns.keys())
         logger.info(f"Keeping {len(columns_to_keep)} columns: {columns_to_keep}")
         logger.info(f"Discarding columns: {set(raw_data.columns) - set(columns_to_keep)}")
         df = raw_data.select(columns_to_keep)
 
-        # Apply integration-specific preprocessing (e.g., boolean casting)
         df = self.preprocess_raw_data(df)
-
-        # Validate with pandera schema
         validated_df = self.raw_data_schema.validate(df)
 
         logger.info(
@@ -183,21 +162,12 @@ class BaseDataSourceIntegration:
         return validated_df
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
-        """
-        Clean and transform the raw data into the desired format.
-        Returns as typed polars dataframe.
-        """
         raise NotImplementedError("Subclasses must implement compute_clean_data method")
 
     def select_regulation_measure_fields(self, df: pl.DataFrame) -> pl.DataFrame:
-        """
-        Select only the fields defined in RegulationMeasure from the dataframe.
-        This ensures we only keep the necessary columns for creating regulations.
-        """
-        # Get field names from RegulationMeasure TypedDict
+        """Keep the `RegulationMeasure` columns present in `df`. Any other column,
+        a misspelt one included, is dropped without warning (D-08)."""
         required_fields = list(get_type_hints(RegulationMeasure).keys())
-
-        # Filter to only include fields that exist in the dataframe
         available_fields = [field for field in required_fields if field in df.columns]
 
         return df.select(available_fields)

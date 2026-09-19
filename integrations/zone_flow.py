@@ -16,7 +16,7 @@ calls:
    `rawGeoJSON` of its sections at least `min_length_m` long.
 
 Four and not three: `PUT /api/regulations` answers 500 on any regulation holding a zone
-(staging, 2026-09-16), while it works on the others.
+(S-14), while it works on the others.
 
 A zone whose sections add up to more than `max_sections_per_length` times the polygon's
 length covers several parallel roads; nothing says which one is closed, so the

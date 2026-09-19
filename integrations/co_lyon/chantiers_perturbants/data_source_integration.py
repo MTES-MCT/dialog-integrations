@@ -11,9 +11,7 @@ lifecycle is well behaved:
 - of 182 sites that vanished over 21 days, **182 had an end date already in the
   past**. The producer never withdraws a site before its declared end, so a
   regulation published here expires on its own, on the right day;
-- only 2 of 194 common identifiers were extended over 16 days. Without an update
-  pass, an extension means the restriction is switched off too early — the safe
-  direction of the error.
+- only 2 of 194 common identifiers were extended over 16 days.
 
 Known gaps, all measured and all deliberate:
 
@@ -22,13 +20,15 @@ Known gaps, all measured and all deliberate:
 - `validite` is "A vérifier" on 100 % of rows and `avancement` is "Chantier en cours"
   on 100 % of them, including sites that start in the future — neither can be used
   to filter;
-- `Circulation réduite` (a narrowed carriageway, 118 rows on 02/09) has no equivalent
-  among DiaLog's five measure types and is dropped under R-32 bis, as is
-  `Circulation sens unique` under R-32 for want of a direction column;
+- `Circulation réduite` (a narrowed carriageway) has no equivalent among DiaLog's
+  five measure types and is dropped under R-32 bis, as is `Circulation sens unique`
+  under R-32 for want of a direction column;
 - `descripchantierinternet` is free text that nuances the restriction — hours, "sauf
   riverains", but also a direction, a weekend reopening, 15-minute closures. Only the
   first two can be expressed, so a row is published only when its description is read
-  in full (R-78, `description.py`): 16 of 216 mappable rows dropped on 2026-09-16.
+  in full (R-78, `description.py`).
+
+Volumes dropped per motive: `ai/docs/vers-l-equipe.md`.
 """
 
 import json
@@ -308,8 +308,7 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     since every site is its own regulation.
 
     `zone` takes a single GeoJSON Polygon. Every footprint drawn so far has exactly one
-    part (318/318 on the 2026-09-07 draw); a multi-part footprint becomes one zone per
-    part, all on the same measure.
+    part; a multi-part footprint becomes one zone per part, all on the same measure.
     """
     n_missing = df.select(pl.col("geometry").is_null().sum()).item()
     if n_missing:

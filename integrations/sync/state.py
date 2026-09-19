@@ -29,8 +29,8 @@ from api.dia_log_client.models import PostApiRegulationsAddBody
 
 STATE_DIR_ENV = "DIALOG_STATE_DIR"
 DEFAULT_STATE_DIR = "state"
-# 2 since 2026-09-19: an undated permanent period is digested as null, not as the day of
-# the run. A version-1 snapshot carries run days and would flag every such regulation.
+# 2: an undated permanent period is digested as null, not as the day of the run. A
+# version-1 snapshot carries run days and would flag every such regulation.
 SNAPSHOT_VERSION = 2
 
 # Regulation fields whose change must trigger an update.

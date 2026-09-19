@@ -69,7 +69,7 @@ def test_the_producer_placeholders_count_as_no_arrete_at_all():
 
 
 def test_the_same_sign_on_different_roads_makes_one_departmental_regulation():
-    """18 real measures instead of one fabricated act per section of road."""
+    """One regulation per measure, not one fabricated act per section of road."""
     result = compute_regulation_fields(
         signs(
             numero_dar=[None] * 3,

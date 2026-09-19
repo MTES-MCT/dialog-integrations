@@ -39,11 +39,12 @@ ORDER_NUMBER_PATTERN = re.compile(
     # first one and hand the row to the generic calmed-traffic order.
     #
     # A dash closes it only when what follows opens a new regulatory layer — "ZCA", "ZTL"
-    # or a vintage year. 2 377 segments stack several orders in one field, separated by a
-    # full stop, a dash or a line break, and the producer writes them **newest first**:
-    # 3 481 rows in descending vintage order against 21 the other way (2026-09-09 draw).
-    # So the first citation is the order in force, and the dash has to close the number
-    # for the first one to win. Qualified, because a number can hold a dash of its own:
+    # or a vintage year. Segments stack several orders in one field, separated by a full
+    # stop, a dash or a line break, and the producer writes them **newest first** (counts
+    # and the 21 exceptions: `ai/docs/vers-l-equipe.md`, « Arrêtés cités mais jamais
+    # publiés »). So the first citation is the order in force, and the dash has to close
+    # the number for the first one to win. Qualified, because a number can hold a dash of
+    # its own:
     # "Arrêté n°VOI-2023 - 120" (6 rows) and "Arrêté n°PV 2023 - 478" (3 rows) are single
     # numbers, and a bare dash would truncate them into a different regulation.
     #

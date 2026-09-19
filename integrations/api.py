@@ -75,10 +75,10 @@ class DialogApi:
     def add(self, regulation: PostApiRegulationsAddBody) -> bool:
         """POST a regulation; True when the API answered 201, or when it exists anyway.
 
-        A 5xx or a transport error says nothing about what the back end did: on
-        2026-09-18 the staging's router answered 504 after 60 s on 18 Aveyron POSTs, and
-        every one of them had been committed. Such an answer is followed by a GET, and
-        the regulation counts as created when it is there. A 4xx is a refusal: no GET.
+        A 5xx or a transport error says nothing about what the back end did: the router
+        can answer 504 while the back end commits (D-20). Such an answer is followed by a
+        GET, and the regulation counts as created when it is there. A 4xx is a refusal:
+        no GET.
         """
         identifier = str(regulation.identifier)
         try:
@@ -102,7 +102,7 @@ class DialogApi:
     def update(self, regulation: PostApiRegulationsAddBody) -> bool:
         """PUT a regulation — a full replacement; True when the API answered 2xx.
 
-        Not for a regulation holding a zone: the API answers 500 on those (2026-09-16).
+        Not for a regulation holding a zone: the API answers 500 on those (S-14).
         """
         body = PutApiRegulationsUpdateBody.from_dict(regulation.to_dict())
         try:
@@ -140,8 +140,8 @@ class DialogApi:
     def publish(self, identifier: str) -> bool:
         """Publish a draft; True unless the call raised.
 
-        A documented non-200 status (404, 400) is not reported as a failure here: that
-        is the historical behaviour of `publish_regulations`, kept as is.
+        A documented non-200 status (404, 400) is not reported as a failure here, as
+        `publish_regulations` always did.
         """
         try:
             publish_regulation(identifier=identifier, client=self.client)

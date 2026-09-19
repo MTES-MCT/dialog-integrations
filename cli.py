@@ -14,7 +14,6 @@ from settings import Organization
 app = typer.Typer(help="Dialog CLI")
 
 
-# Shared CLI parameter
 def comma_list(raw: str) -> list[str]:
     return raw.split(",")
 

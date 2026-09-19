@@ -1,8 +1,8 @@
-"""Tests de l'intégration Issy-les-Moulineaux (travaux de voirie).
+"""Tests for the Issy-les-Moulineaux integration (travaux de voirie).
 
-Le jeu de données reproduit les types réellement renvoyés par l'API Opendatasoft
-(`mesure_titre` / `mesures` multivalués, dates en chaînes, `geolocalisation` en
-struct lon/lat), qui sont la source des régressions passées.
+The fixture reproduces the types the Opendatasoft API actually returns (multivalued
+`mesure_titre` / `mesures`, dates as strings, `geolocalisation` as a lon/lat struct):
+past regressions came from them.
 """
 
 import importlib.util
@@ -19,7 +19,7 @@ MODULE = "integrations.co_issy-les-moulineaux.travaux_voirie.data_source_integra
 
 
 def _load_module():
-    """Le nom de paquet contient un tiret : import classique impossible."""
+    """The package name holds a hyphen: a plain import is impossible."""
     spec = importlib.util.find_spec(MODULE)
     module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
     sys.modules[spec.name] = module  # type: ignore[union-attr]
@@ -28,8 +28,8 @@ def _load_module():
 
 
 RAW_RECORDS = [
-    # Un arrêté sur deux rues. Chaque rue porte plusieurs mesures : une publiable
-    # (stationnement), une comprise mais réservée aux tronçons, une sans équivalent.
+    # One arrete over two streets. Each street carries several measures: one publishable
+    # (parking), one understood but reserved to segments, one with no equivalent.
     {
         "reference": "ACP/2026/001",
         "type_travaux": "Arrêté provisoire de restriction de la circulation",
@@ -63,7 +63,7 @@ RAW_RECORDS = [
         "geolocalisation": {"lon": 2.25, "lat": 48.82},
         "url": None,
     },
-    # Sans géolocalisation : doit être écarté.
+    # No geolocation: must be dropped.
     {
         "reference": "ACP/2026/002",
         "type_travaux": "Arrêté provisoire de restriction de la circulation",
@@ -77,8 +77,8 @@ RAW_RECORDS = [
         "geolocalisation": {"lon": None, "lat": None},
         "url": None,
     },
-    # Sans date de fin : doit être écarté, sans quoi la mesure resterait active
-    # indéfiniment. Publiable par ailleurs (stationnement + point).
+    # No end date: must be dropped, or the measure would stay active forever.
+    # Publishable otherwise (parking + point).
     {
         "reference": "ACP/2026/004",
         "type_travaux": "Arrêté provisoire de restriction de la circulation",
@@ -92,7 +92,7 @@ RAW_RECORDS = [
         "geolocalisation": {"lon": 2.27, "lat": 48.84},
         "url": None,
     },
-    # Sans mesure : doit être écarté.
+    # No measure: must be dropped.
     {
         "reference": "ACP/2026/003",
         "type_travaux": "Arrêté provisoire de restriction de la circulation",
@@ -118,7 +118,7 @@ def clean_data():
 
 
 def test_une_ligne_par_mesure_publiable(clean_data):
-    """Les libellés multivalués sont éclatés ; une ligne par mesure effectivement publiée."""
+    """Multivalued labels are exploded: one row per measure actually published."""
     assert clean_data.shape[0] == 2
     assert clean_data["measure_type_"].to_list() == [
         MeasureTypeEnum.PARKINGPROHIBITED.value,
@@ -127,11 +127,10 @@ def test_une_ligne_par_mesure_publiable(clean_data):
 
 
 def test_types_reserves_aux_troncons_ecartes(clean_data):
-    """La source ne donne qu'un point : seul le stationnement interdit est publié.
+    """The source gives a point only: parking prohibition is the only type published.
 
-    « Limitation vitesse » et « Barrage de voie » sont pourtant présents dans le jeu
-    de données et bien compris par MEASURE_TYPE_BY_LABEL — ils sont écartés parce
-    qu'une vitesse ou une fermeture portent sur un segment, pas sur un point.
+    "Limitation vitesse" and "Barrage de voie" are understood by MEASURE_TYPE_BY_LABEL
+    but dropped: a speed limit or a closure applies to a segment, not a point.
     """
     module = _load_module()
     assert module.PUBLISHED_MEASURE_TYPES == [MeasureTypeEnum.PARKINGPROHIBITED.value]
@@ -142,26 +141,26 @@ def test_types_reserves_aux_troncons_ecartes(clean_data):
 
 
 def test_mesure_sans_date_de_fin_ecartee(clean_data):
-    """Une mesure sans terme resterait active indéfiniment : rien ne la clôt ensuite.
+    """A measure with no end would stay active forever: nothing closes it afterwards.
 
-    L'arrêté est par ailleurs publiable (stationnement + point) : seul l'absence
-    de `date_fin` doit l'écarter.
+    The arrete is otherwise publishable (parking + point): only the missing `date_fin`
+    drops it.
     """
     assert "ACP/2026/004" not in set(clean_data["regulation_identifier"])
     assert None not in set(clean_data["period_end_date"])
 
 
 def test_measure_type_survit_au_pivot(clean_data):
-    """Garde-fou : RegulationMeasure supprime silencieusement toute colonne inconnue."""
+    """Guard: RegulationMeasure silently drops any column it does not declare."""
     assert "measure_type_" in clean_data.columns
     assert "measure_max_speed" in clean_data.columns
 
 
 def test_aucune_vitesse_portee_par_une_mesure_de_stationnement(clean_data):
-    """La vitesse lue dans le texte ne doit pas suivre une mesure d'un autre type.
+    """A speed read from the text must not follow a measure of another type.
 
-    Avant correctif, le texte des mesures d'un arrêté était concaténé : une mesure
-    de stationnement repartait avec les 30 km/h de la limitation voisine.
+    Regression: the measures' texts used to be concatenated per arrete, and a parking
+    measure left with the 30 km/h of the neighbouring limitation.
     """
     assert clean_data["measure_max_speed"].to_list() == [None, None]
 
@@ -178,7 +177,7 @@ def test_geometrie_point_en_lon_lat(clean_data):
     [(20, False), (255, False), (256, True), (323, True)],
 )
 def test_titre_tronque_a_la_limite_de_l_api(longueur, doit_etre_tronquee):
-    """`title` est plafonné à 255 caractères côté API, sans que le client ne le vérifie."""
+    """The API caps `title` at 255 characters and the client does not check it."""
     module = _load_module()
     description = "a" * longueur
 
@@ -214,7 +213,7 @@ def test_regroupement_en_un_arrete_multi_mesures(clean_data):
     assert regulation.identifier == "ACP/2026/001"
     measures = list(regulation.measures or [])
     assert len(measures) == 2
-    # Les deux rues de l'arrêté sont conservées, une par mesure.
+    # Both streets of the arrete are kept, one per measure.
     labels = {
         measure.locations[0].raw_geo_json.label  # type: ignore[union-attr]
         for measure in measures

@@ -6,12 +6,9 @@ effective `geometry`. Two things make that result say more than the producer did
 
 - **slivers**: any street whose centreline enters the polygon by a couple of metres
   yields a piece of a couple of metres, and a `noEntry` on that piece closes the
-  neighbouring street for a satnav. On the Lyon work sites published on 2026-09-15,
-  284 of 1 031 pieces were shorter than 5 m — 2 % of the linear, half of the regulations;
+  neighbouring street for a satnav;
 - **parallel roads**: a polygon wide enough to hold the street it is about *and* the
-  ones running alongside closes them all. Boulevard des Droits de l'Homme
-  (Vaulx-en-Velin, 2026-09-16): 1.1 km of polygon, 4.4 km of sections — both
-  carriageways, the service road and rue Auguste Brunel, for a gas main.
+  ones running alongside closes them all.
 
 Nothing in the API lets us filter what the zone computes, so the integration reads the
 computed geometry back and:
@@ -22,15 +19,14 @@ computed geometry back and:
 2. refuses the regulation altogether when a zone's sections add up to more than
    `MAX_SECTIONS_PER_LENGTH` times the polygon's length (half its perimeter): the
    polygon then covers several roads side by side, and nothing tells which one the
-   restriction is about. Measured on the 208 Lyon sites: median 0.93, a dual
-   carriageway or a square tops out at 1.95, then route de Genas at 2.3 and 2.6 (two
-   carriageways, the busway platform, the interchange ramps) and the boulevard at 3.8.
-   The threshold sits in the gap between 1.95 and 2.3; crossing streets and junctions
-   never bring the ratio near it.
+   restriction is about. The threshold sits between an ordinary dual carriageway
+   (up to ~1.95 on Lyon's work sites) and the first parallel-road cases (2.3);
+   crossing streets and junctions never bring the ratio near it.
 
-Everything is computed from the polygon and the geometry DiaLog returned: no further
-call, no street naming — the two were tried on 2026-09-16 and flagged crossings and
-dead ends as often as real overlaps.
+Measurements behind both thresholds: `ai/docs/vers-l-equipe.md` (S-15, and the
+"routes parallèles" row). Everything is computed from the polygon and the geometry
+DiaLog returned: no further call, no street naming — naming was tried and flagged
+crossings and dead ends as often as real overlaps.
 """
 
 import json

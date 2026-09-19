@@ -8,8 +8,6 @@ from .travaux_voirie.data_source_integration import DataSourceIntegration as Tra
 
 
 class Integration(BaseIntegration):
-    """Main integration class for Rennes - coordinates multiple data sources."""
-
     status = PostApiRegulationsAddBodyStatus.PUBLISHED
 
     data_sources = [TravauxVoirie, CirculationInterdite]

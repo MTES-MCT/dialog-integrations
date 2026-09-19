@@ -8,8 +8,6 @@ from .restrictions_gabarits.data_source_integration import (
 
 
 class Integration(BaseIntegration):
-    """Main integration class for Aveyron - coordinates multiple data sources."""
-
     status = PostApiRegulationsAddBodyStatus.PUBLISHED
 
     # Every identifier we create starts with `AV-` (`AV-GB-`, `AV-LV-`): what the

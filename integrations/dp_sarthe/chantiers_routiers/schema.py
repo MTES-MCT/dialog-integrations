@@ -3,7 +3,7 @@ import polars as pl
 
 
 class SartheChantiersRoutiersSchema(pa.DataFrameModel):
-    """Schema for raw data from Sarthe API - Chantiers Routiers - only columns we actually use."""
+    """Raw Sarthe chantiers routiers: only the columns we use."""
 
     objectid: int
     longueur: int | None = pa.Field(nullable=True)

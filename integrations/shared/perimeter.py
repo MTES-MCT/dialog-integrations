@@ -2,10 +2,10 @@
 
 DiaLog refuses an emprise when its geometry does not intersect the geometry of the
 organisation posting it (« L'organisation ne semble pas avoir les compétences pour
-intervenir sur ce linéaire de route »). That check is reproducible, because the back end
-builds the organisation's geometry from public data and a fixed recipe
-(`OrganizationAdministrativeBoundariesGeometry`, `OrganizationRepository` in the DiaLog
-repository, read on 2026-09-15):
+intervenir sur ce linéaire de route »), and the refusal takes the whole regulation down
+(R-77). The check is reproducible, because the back end builds the organisation's
+geometry from public data and a fixed recipe (`OrganizationAdministrativeBoundariesGeometry`,
+`OrganizationRepository` in the DiaLog repository):
 
 1. the communes' contours come from `https://geo.api.gouv.fr/communes?...&fields=contour`,
    selected by the organisation's administrative code — one commune (INSEE), a
@@ -14,39 +14,25 @@ repository, read on 2026-09-15):
    tolerance that depends on the code type, in degrees: 0 for a commune, 0.002 for an
    EPCI, 0.001 for a département, 0.003 for a région;
 3. the test is a plain `ST_Intersects` in EPSG:4326 between the geometry **as sent** and
-   that stored geometry — no buffer, no length fraction, one test per emprise. An emprise
-   touching the territory is accepted; one entirely outside is refused, and it takes the
-   whole regulation down with it.
+   that stored geometry — no buffer, no length fraction, one test per emprise.
 
 Rebuilding the same geometry here and dropping what does not intersect it removes those
 refusals before they cost a POST, without a hand-maintained blocklist. The simplification
 matters: at 0.002° (~160-220 m) the stored contour cuts corners, so a segment can be a few
 hundred metres outside the real boundary and still be accepted, or a few metres inside
-and refused. Using the same tolerance reproduces the API's answer on 37 569 Lyon
-segments to one segment (measured on the 2026-09-07 probe).
+and refused. The recipe is DiaLog's, not ours: if the back end changes its tolerance or
+its source, this file must follow.
 
-The recipe is DiaLog's, not ours: if the back end changes its tolerance or its source,
-this file must follow.
+The rebuild is not exact: Douglas-Peucker on a closed ring depends on the ring's start
+vertex, which the union engine decides — PostGIS there, GEOS here. Only the geometry
+DiaLog stores would match exactly. Hence the second test: an emprise must also touch the
+**exact** union of the contours, before simplification. Where the two simplifications
+disagree, the emprise lies in the slack the simplification adds along the boundary,
+outside the communes themselves — a road on the neighbour's territory. This drops a few
+emprises the API would have accepted, and needs no blocklist.
 
-Known residual (2026-09-15): one Lyon segment (T8121, Rue du Stade, Craponne) is still
-refused by the API while it lies more than 20 m inside the perimeter rebuilt here — the
-geometry stored by DiaLog differs locally (contour vintage, or PostGIS vs GEOS
-simplification). Shrinking the perimeter does not catch it and drops accepted segments
-instead; the exact stored geometry is only visible in DiaLog's back-office map.
-Root cause (measured): Douglas-Peucker on a closed ring depends on the ring's start
-vertex, which the union engine decides — PostGIS there, GEOS here. Rotating the start
-vertex over 320 positions, 5 variants reproduce the API's 271 refusals exactly and the
-worst misses 20. Same source, same recipe, unspecified detail: an exact match needs the
-geometry DiaLog stores, not a rebuild.
-
-Resolution (2026-09-18): an emprise must also touch the **exact** union of the contours,
-before simplification. Where the two simplifications disagree, the emprise lies in the
-slack the simplification adds along the boundary, outside the communes themselves — a
-road on the neighbour's territory. On the first staging run, 13 of the 18 071 Lyon
-emprises retained lay in that slack; the API refused 2 of them (Rue du Stade and Avenue
-Pierre Dumond, Craponne) and each took a whole regulation down, 1 165 emprises in all.
-The 11 others were accepted: requiring the exact contour costs them, 0.06 % of the corpus,
-and needs no blocklist.
+Measurements (Lyon, residual segments, cost of the exact-contour test): R-77 in
+`ai/docs/regles-metier.md`, and `ai/docs/vers-l-equipe.md`.
 """
 
 from __future__ import annotations

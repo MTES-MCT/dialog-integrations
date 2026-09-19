@@ -33,7 +33,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "restrictions_gabarits"
 
     # R-28: one arrete carries one measure per distinct sign-and-value, and that measure
-    # carries every stretch it applies to. Largest group observed: 13 emprises.
+    # carries every stretch it applies to.
     group_locations_by_measure = True
 
     def fetch_raw_data(self):
@@ -63,9 +63,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def unnest_measures(df: pl.DataFrame):
-    """
-    We unnest all records based on the "panneau" column, and format it accordingly
-    """
+    """One row per sign: `panneau` reads `B13_3.5t; B11_2.2m²`, split into type and value."""
     return (
         df.with_columns(pl.col("panneau").str.split(";").alias("panneau"))
         .explode("panneau")
@@ -101,9 +99,7 @@ PANNEAUX = {
 
 
 def filter_unrelevant(df: pl.DataFrame):
-    """
-    Keep only rows that are relevant to DiaLog
-    """
+    """Keep the signs listed in PANNEAUX."""
     return df.filter(pl.col("panneau_type").is_in(PANNEAUX.keys()))
 
 
@@ -168,35 +164,26 @@ def compute_measure_fields(df: pl.DataFrame):
 
 
 def compute_period_fields(df: pl.DataFrame):
-    """
-    Compute all period fields for SavePeriodDTO.
-    - period_start_date: the day the arrete was signed, for a numbered arrete; null for a
-      grouped fallback and for anything undated — dated when DiaLog is written
-    - period_end_date: None
-    - period_recurrence_type: everyDay
-    - period_is_permanent: True
+    """Permanent, every day, no end; the start is the day the arrete was signed, or null.
 
     The producer writes dd/mm/yyyy, with a few dd/mm/yy. Inferring the format lets polars
     read "12/01/18" as year 18, so both formats are stated explicitly.
 
-    **A measure carries one period, and since R-28 it also carries N emprises**, so the
-    date has to be uniform over the group. The two cases do not deserve the same rule:
+    **A measure carries one period and N emprises (R-28)**, so the date has to be uniform
+    over the group:
 
     - a *numbered* arrete has one signature date, and the group takes the earliest of its
-      rows. On the 2026-09-07 draw, 78 of its 80 (arrete, sign) groups already hold a
-      single date; the two that hold two are producer noise, and the earliest is the day
-      from which the measure has demonstrably applied;
-    - a *grouped fallback* gathers stretches from different acts — 33 rows over 18 signs,
-      one of which spans three dates from 2003 to 2019. No member's date describes the
-      group, and picking one would assert a commencement date for the other N-1 that
+      rows: when the producer writes two, the earliest is the day from which the measure
+      has demonstrably applied;
+    - a *grouped fallback* gathers stretches from different acts (one spans 2003 to 2019).
+      Picking one member's date would assert a commencement date for the other N-1 that
       nothing supports. R-39: no date at all.
 
-    Rows with no readable date are left undated either way. They describe a restriction
-    that is signed, signposted and in force; only the day it was signed is missing, and
-    29 of the 33 fallback rows are in that case already. The null is resolved when
-    DiaLog is written (`integrations/sync/dating.py`): the day of the run on creation,
-    which claims only "this applies now"; the date DiaLog already holds on update.
-    Dating them the day of the run here made them look modified each morning.
+    Rows with no readable date are left undated either way: signed, signposted and in
+    force, only the day of signature is missing. `integrations/sync/dating.py` resolves
+    the null when DiaLog is written: the day of the run on creation ("this applies now"),
+    the date DiaLog already holds on update. Dating them the day of the run here would
+    make them look modified each morning.
     """
     parsed = (
         pl.when(pl.col("date_darre").str.len_chars() <= 8)
@@ -228,21 +215,9 @@ def compute_period_fields(df: pl.DataFrame):
 
 
 def compute_location_fields(df: pl.DataFrame):
-    """
-    Compute all location fields for SaveLocationDTO.
-    - location_administrator: "Aveyron"
-    - location_road_type: RoadTypeEnum.DEPARTMENTALROAD
-    - location_road_number: from route, e.g. 12_D98 -> D98
-    - location_from_department_code: 12
-    - location_from_point_number: from prd
-    - location_from_abscissa: from abd
-    - location_from_side: "U"
-    - location_to_department_code: 12
-    - location_to_point_number: from prf
-    - location_to_abscissa: from abf
-    - location_to_side: "U"
-    - location_direction: "BOTH"
-    #NOT TRANSMITTTED- location_geometry: from geo_shape
+    """Departmental-road location: `route` 12_D98 -> D98, PR from prd/abd to prf/abf.
+
+    `geo_shape` is not sent: DiaLog geocodes the stretch from its milestones.
     """
 
     return df.with_columns(
@@ -285,29 +260,20 @@ def normalize_reference(reference: pl.Expr) -> pl.Expr:
 
 
 def compute_regulation_fields(df: pl.DataFrame):
-    """
-    Compute all regulation fields for PostApiRegulationsAddBody.
-    - regulation_identifier, following R-28 (R-20 level 3, written out here per R-23):
+    """Identifier, title and category of the permanent regulation (R-28; R-20 level 3,
+    written out here per R-23).
 
         AV-GB-{numero_dar}   when the producer gives an arrete number — every stretch
                              citing it becomes an emprise of that arrete
         AV-GB-{B13-3-5}      otherwise, one departmental arrete per sign-and-value,
                              carrying N emprises
 
-      A quarter of the rows carry no number, or write "0 arrete" to say there is none.
-      Identifying those by the stretch itself fabricated one administrative act per
-      section of road — 32 of them on the 2026-09-07 draw, for 18 real measures. An
-      arrete is a legal act; inventing one per stretch is a falsehood that travels to
-      the satnavs that rebroadcast us.
-
-      Both forms stay under the 60-character cap, and neither carries the road or the
-      commune: grouping geographically would move the identifier the first time the
-      producer redraws a trace, orphaning the arrete and duplicating it.
-    - regulation_category: PERMANENTREGULATION
-    - regulation_subject: OTHER
-    - regulation_title: the prescriptions of the group for a numbered arrete, the measure
-      and the department for a grouped fallback
-    - regulation_other_category_text: "Restriction de gabarit"
+    Some rows carry no number, or write "0 arrete" to say there is none. Identifying
+    those by the stretch itself fabricates one legal act per section of road, a falsehood
+    that travels to the satnavs that rebroadcast us. Both forms stay under the
+    60-character cap, and neither carries the road or the commune: grouping
+    geographically would move the identifier the first time the producer redraws a
+    trace, orphaning the arrete and duplicating it.
 
     Nothing is dropped here. One arrete can carry several panneaux, so the title lists
     every prescription of the group: the API keeps the title of the first row only, and a
@@ -382,21 +348,7 @@ def compute_regulation_fields(df: pl.DataFrame):
 
 
 def compute_vehicle_fields(df: pl.DataFrame):
-    """
-    Compute all vehicle fields for SaveVehicleSetDTO.
-    - vehicle_all_vehicles: always false, every measure targets a category of vehicle
-    - vehicle_restricted_types :
-        heavyGoodsVehicle if B13
-        hazardousMaterials if B18c
-        other if B9i
-        other and dimensions if B9f
-        dimensions otherwise
-    - vehicle_heavyweight_max_weight if B13
-    - vehicle_max_height if B12
-    - vehicle_max_width if B11
-    - vehicle_max_length if B10a or B9f
-    - vehicle_other_restricted_type_text : "Bus" if B9f, "Caravanes" if B9i
-    """
+    """Every measure targets a category of vehicle, named by its sign (see PANNEAUX)."""
     return df.with_columns(
         [
             pl.lit(False).alias("vehicle_all_vehicles"),

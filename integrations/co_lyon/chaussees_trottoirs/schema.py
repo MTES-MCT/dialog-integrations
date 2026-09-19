@@ -14,8 +14,8 @@ class LyonChausseesTrottoirsRawDataSchema(pa.DataFrameModel):
 
     # Segment identity. `codetroncon` is unique across the layer and comes from the road
     # reference system rather than from the export, which makes it a better candidate
-    # than a `gid`. It is not stable for good: the producer confirmed on 2026-09-07 that
-    # segments get split and merged, ~20 a month (R-22, measured at ~0,04 % per month).
+    # than a `gid`. It is not stable for good: segments get split and merged, ~20 a month,
+    # as the producer confirmed (R-22).
     codetroncon: str
     codefuv: str | None = pa.Field(nullable=True)
 
@@ -24,20 +24,20 @@ class LyonChausseesTrottoirsRawDataSchema(pa.DataFrameModel):
     commune1: str | None = pa.Field(nullable=True)
     insee1: str | None = pa.Field(nullable=True)
 
-    # Qui administre la voie. Sert à écarter les aires piétonnes de domaine privé, qui ne
-    # sont pas de la voirie ouverte à la circulation. Ne dit rien du refus de l'API : c'est
-    # mesuré, la domanialité ne le prédit pas.
+    # Who manages the road. Used to drop pedestrian areas on a private domain, which are
+    # not roads open to traffic. Says nothing about the API's refusals: measured, it does
+    # not predict them.
     domanialite: str | None = pa.Field(nullable=True)
 
-    # Zone à trafic limité : accès interdit sauf desserte locale. Vrai sur 338 tronçons
-    # de la Presqu'île (Lyon 1er et 2e), et c'est une mesure à soi, pas une vitesse.
+    # Zone à trafic limité: no entry except local access. True on 338 segments of the
+    # Presqu'île (Lyon 1er and 2e); a measure of its own, not a speed.
     ztl: bool | None = pa.Field(nullable=True)
 
-    # What the producer itself calls the calmed-traffic zone: "Zone 30" (15 206 rows,
-    # all at 30 km/h), "Zone de rencontre" (1 632, all at 20) and "Aire Piétonne" (472,
-    # all at 5). The agreement with `limitationvitesse` is exact wherever the column is
-    # filled, which is what makes it trustworthy — but it is filled on 12 % of the 5 km/h
-    # rows only. See `discard_unlabelled_pedestrian_areas`.
+    # What the producer itself calls the calmed-traffic zone: "Zone 30", "Zone de
+    # rencontre", "Aire Piétonne". The agreement with `limitationvitesse` is exact wherever
+    # the column is filled, which is what makes it trustworthy — but it is filled on 12 %
+    # of the 5 km/h rows only (counts: `ai/docs/vers-l-equipe.md`). See
+    # `discard_unlabelled_pedestrian_areas`.
     reglementationzca: str | None = pa.Field(nullable=True)
 
     # The measures themselves.

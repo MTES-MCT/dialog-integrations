@@ -51,7 +51,6 @@ def test_preprocess_casts_booleans(data_source, raw_data):
     assert preprocessed["VELO"].dtype == pl.Boolean
     assert preprocessed["CYCLO"].dtype == pl.Boolean
     assert all(v in [True, False] for v in preprocessed["VELO"].to_list())
-    # Check that empty NOARR rows are filtered out
     assert all(noarr != "" for noarr in preprocessed["NOARR"].to_list())
 
 
@@ -97,17 +96,14 @@ def test_compute_period_fields():
 
     result = compute_period_fields(df)
 
-    # Check all period fields exist
     assert "period_start_date" in result.columns
     assert "period_end_date" in result.columns
-    # start_time / end_time are mirrored from the dates in create_save_period_dto,
-    # so the pivot no longer carries them.
+    # start_time / end_time are derived in payloads.build_period, not carried by the pivot.
     assert "period_start_time" not in result.columns
     assert "period_end_time" not in result.columns
     assert "period_recurrence_type" in result.columns
     assert "period_is_permanent" in result.columns
 
-    # Check values
     assert result["period_start_date"][0] == "2023-06-15T00:00:00+02:00"
     assert result["period_start_date"][1] == "2024-01-01T00:00:00+01:00"
     assert result["period_recurrence_type"][0] == "everyDay"
@@ -155,20 +151,16 @@ def test_compute_location_fields():
 
     result = compute_location_fields(df)
 
-    # Check all location fields exist
     assert "location_road_type" in result.columns
     assert "location_label" in result.columns
     assert "location_geometry" in result.columns
 
-    # Check road_type is always RAWGEOJSON enum value
     assert result["location_road_type"][0] == RoadTypeEnum.RAWGEOJSON.value
     assert result["location_road_type"][1] == RoadTypeEnum.RAWGEOJSON.value
 
-    # Check label is constructed from LIBCO and LIBRU
     assert result["location_label"][0] == "Commune A – Rue 1"
     assert result["location_label"][1] == "Commune B – Rue 2"
 
-    # Check geometry is transformed to GeoJSON (should contain "type" and "coordinates")
     import json
 
     geom0 = json.loads(result["location_geometry"][0])
@@ -213,7 +205,6 @@ def test_compute_regulation_fields(data_source):
 
     result = compute_regulation_fields(df)
 
-    # Check all regulation fields exist
     assert "regulation_identifier" in result.columns
     assert "regulation_category" in result.columns
     assert "regulation_subject" in result.columns
@@ -221,13 +212,11 @@ def test_compute_regulation_fields(data_source):
     assert "regulation_other_category_text" in result.columns
     assert "regulation_document_url" in result.columns
 
-    # Check values - all rows with same NOARR should have same regulation_title (from first row)
     assert result["regulation_identifier"].to_list() == ["REG001-0", "REG001-0", "REG002-0"]
     assert result["regulation_title"][0] == "Limitation Vitesse – Rue A"
     assert result["regulation_title"][1] == "Limitation Vitesse – Rue A"  # Same as first row
     assert result["regulation_title"][2] == "Stationnement interdit – Rue C"
     assert result["regulation_other_category_text"][0] == "Circulation"
-    # Without URL, should be None
     assert result["regulation_document_url"][0] is None
 
 
@@ -249,12 +238,9 @@ def test_compute_regulation_fields_with_url(data_source):
 
     result = compute_regulation_fields(df)
 
-    # Check that URL is in regulation_document_url
     assert result["regulation_document_url"][0] == "https://example.com/arrete1.pdf"
     assert result["regulation_document_url"][1] == "https://example.com/arrete1.pdf"
-    # Without URL, should be None
     assert result["regulation_document_url"][2] is None
-    # other_category_text should always be "Circulation"
     assert result["regulation_other_category_text"][0] == "Circulation"
     assert result["regulation_other_category_text"][2] == "Circulation"
 
@@ -282,7 +268,6 @@ def test_compute_measure_fields():
     assert result["measure_type_"][0] == MeasureTypeEnum.SPEEDLIMITATION.value
     assert result["measure_type_"][1] == MeasureTypeEnum.PARKINGPROHIBITED.value
     assert result["measure_type_"][2] == MeasureTypeEnum.NOENTRY.value
-    # Check measure_max_speed: only set for SPEEDLIMITATION
     assert result["measure_max_speed"][0] == 50
     assert result["measure_max_speed"][1] is None
     assert result["measure_max_speed"][2] is None
@@ -304,7 +289,6 @@ def test_compute_measure_fields_filters_invalid_descriptif():
 
     result = compute_measure_fields(df)
 
-    # Should filter out the invalid description
     assert result.height == 2
     assert result["DESCRIPTIF"].to_list() == ["Limitation Vitesse", "Stationnement interdit"]
 
@@ -329,7 +313,6 @@ def test_compute_measure_fields_filters_sens_unique():
 
     result = compute_measure_fields(df)
 
-    # Should filter out "Sens interdit / Sens unique" with SENS=1
     assert result.height == 2
     assert result["DESCRIPTIF"].to_list() == ["Sens interdit / Sens unique", "Limitation Vitesse"]
     assert result["SENS"].to_list() == [2, 1]
@@ -351,6 +334,5 @@ def test_compute_measure_fields_filters_invalid_speed():
 
     result = compute_measure_fields(df)
 
-    # Should filter out invalid speed limitations
     assert result.height == 1
     assert result["measure_max_speed"][0] == 50

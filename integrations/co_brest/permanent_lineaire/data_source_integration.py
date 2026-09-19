@@ -70,32 +70,26 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_path = Path(tmpdir) / "data.zip"
 
-            # download
             r = requests.get(URL)
             r.raise_for_status()
             zip_path.write_bytes(r.content)
             logger.info(f"Downloaded zip file to {zip_path}")
 
-            # unzip
             with zipfile.ZipFile(zip_path) as z:
                 z.extractall(tmpdir)
 
-            # find .shp
             shp_path = next(Path(tmpdir).rglob("*.shp"))
             shp_path = Path(tmpdir) / FILENAME
 
-            # read
             logger.info(f"Reading file {shp_path}")
             gdf = gpd.read_file(shp_path)
 
-        # geometry -> WKT pour Polars
+        # Polars cannot hold shapely geometries: carry them as WKT (EPSG:2154).
         gdf["geometry"] = gdf.geometry.to_wkt()
         return pl.from_pandas(gdf)
 
     def preprocess_raw_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
-        """
-        Apply Brest-specific preprocessing: cast boolean columns.
-        """
+        """Cast the OUI/NON columns to booleans and drop rows with an empty NOARR."""
         return raw_data.with_columns(
             [
                 self.cast_boolean_column("CYCLO"),
@@ -125,22 +119,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
+    """One regulation per NOARR, which can carry several measures.
+
+    Title ("{DESCRIPTIF} – {LIBRU}") and LIEN_URL come from the first row of the NOARR.
     """
-    Compute all regulation fields for PostApiRegulationsAddBody.
-    For Brest, each NOARR (regulation ID) can have multiple measures.
-    Regulation title is built from first row's DESCRIPTIF and LIBRU.
-    - regulation_identifier: from NOARR field
-    - regulation_category: PERMANENTREGULATION
-    - regulation_subject: OTHER
-    - regulation_title: "{DESCRIPTIF} – {LIBRU}"
-    - regulation_other_category_text: "Circulation"
-    - regulation_document_url: from LIEN_URL if available
-    """
-    # For each NOARR, we need the first row's DESCRIPTIF, LIBRU, and LIEN_URL
-    # Add a row number per NOARR group to identify first row
     df = df.with_columns(pl.col("NOARR").cum_count().over("NOARR").alias("_row_num_in_regulation"))
 
-    # Get the first row's title and URL for each regulation
     first_row_data = df.filter(pl.col("_row_num_in_regulation") == 1).select(
         [
             pl.col("NOARR"),
@@ -149,10 +133,8 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
         ]
     )
 
-    # Join back to get title and URL for all rows
     df = df.join(first_row_data, on="NOARR", how="left")
 
-    # Add regulation fields
     df = df.with_columns(
         [
             (pl.col("NOARR") + pl.lit("-0")).alias("regulation_identifier"),
@@ -169,28 +151,17 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
     logger.warning(f"Dropping {num_null_titles} rows with null regulation_title")
     df = df.filter(pl.col("regulation_title").is_not_null())
 
-    # Drop helper columns
     return df
 
 
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all period fields for SavePeriodDTO.
-    - period_start_date: from DT_MAT field
-    - period_end_date: None
-    - period_recurrence_type: EVERYDAY
-    - period_is_permanent: True
-    Filter out rows where DT_MAT is null.
-    """
-    # Count rows with null DT_MAT before filtering
+    """Permanent period starting on DT_MAT; rows without it are dropped."""
     n_null_dt_mat = df.select(pl.col("DT_MAT").is_null().sum()).item()
     if n_null_dt_mat > 0:
         logger.warning(f"Dropping {n_null_dt_mat} rows with null DT_MAT (no start date available)")
 
-    # Filter out rows where DT_MAT is null
     df = df.filter(pl.col("DT_MAT").is_not_null())
 
-    # Compute all period fields
     return df.with_columns(
         [
             start_of_local_day(df, "DT_MAT").alias("period_start_date"),
@@ -202,73 +173,44 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all location fields for SaveLocationDTO.
-    - location_road_type: always RoadTypeEnum.RAWGEOJSON for Brest
-    - location_label: from LIBCO and LIBRU fields
-    - location_geometry: from geometry field (WKT) transformed to GeoJSON (WGS84)
-    Filter out rows where geometry is null.
-    """
-    # Count rows with null geometry before filtering
+    """rawGeoJSON reprojected from Lambert 93 (EPSG:2154) to EPSG:4326; rows without
+    geometry are dropped."""
     n_null_geometry = df.select(pl.col("geometry").is_null().sum()).item()
     if n_null_geometry > 0:
         logger.warning(f"Dropping {n_null_geometry} rows with null geometry")
 
-    # Filter out rows where geometry is null
     df = df.filter(pl.col("geometry").is_not_null())
 
-    # Transform geometries using geopandas (thread-safe approach)
-    # Convert to pandas to work with geopandas
     pdf = df.to_pandas()
-
-    # Create GeoDataFrame from WKT
     gdf = gpd.GeoDataFrame(pdf, geometry=gpd.GeoSeries.from_wkt(pdf["geometry"]), crs="EPSG:2154")
-
-    # Reproject to WGS84
     gdf = gdf.to_crs("EPSG:4326")
-
-    # Convert geometry to GeoJSON string
     pdf["location_geometry"] = gdf.geometry.apply(lambda geom: json.dumps(mapping(geom)))
-
-    # Convert back to Polars
     df = pl.from_pandas(pdf)
 
     return df.with_columns(
         [
-            # Road type (always RAWGEOJSON as enum string value)
             pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
-            # Label from LIBCO and LIBRU
             (pl.col("LIBCO") + pl.lit(" – ") + pl.col("LIBRU")).alias("location_label"),
-            # location_geometry already computed above
         ]
     )
 
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute measure_type_ and measure_max_speed fields.
+    """Measure type from DESCRIPTIF (DESCRIPTION_CONFIG), speed from VITEMAX.
 
-    - measure_type_: from DESCRIPTIF using DESCRIPTION_CONFIG
-    - measure_max_speed: from VITEMAX for SPEEDLIMITATION (must be not null and > 0), None otherwise
-
-    Filters out:
-    - Rows with DESCRIPTIF not in DESCRIPTION_CONFIG
-    - "Sens interdit / Sens unique" with SENS=1
-    - SPEEDLIMITATION rows with invalid VITEMAX
+    Drops: DESCRIPTIF outside DESCRIPTION_CONFIG; "Sens interdit / Sens unique" with
+    SENS=1 (direction handling, R-32); speed limitations without a positive VITEMAX.
     """
-    # Create mapping dict from DESCRIPTIF to measure type enum value
     type_mapping = {
         descriptif: config.measure_type.value for descriptif, config in DESCRIPTION_CONFIG.items()
     }
 
-    # Filter and compute measure_type_
     df = (
         df.filter(pl.col("DESCRIPTIF").is_in(DESCRIPTION_CONFIG.keys()))
         .filter(~(pl.col("DESCRIPTIF").eq("Sens interdit / Sens unique") & pl.col("SENS").eq(1)))
         .with_columns(pl.col("DESCRIPTIF").replace(type_mapping).alias("measure_type_"))
     )
 
-    # Filter out invalid speed limitations
     invalid_speed = (pl.col("measure_type_") == MTE.SPEEDLIMITATION.value) & (
         (pl.col("VITEMAX").is_null()) | (pl.col("VITEMAX") <= 0)
     )
@@ -278,7 +220,6 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     df = df.filter(~invalid_speed)
 
-    # Compute max_speed: use VITEMAX for SPEEDLIMITATION, None otherwise
     return df.with_columns(
         pl.when(pl.col("measure_type_") == MTE.SPEEDLIMITATION.value)
         .then(pl.col("VITEMAX"))
@@ -288,22 +229,13 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all vehicle fields for SaveVehicleSetDTO.
-    - vehicle_heavyweight_max_weight: from POIDS (0 or null → None)
-    - vehicle_max_height: from HAUTEUR (0 or null → None)
-    - vehicle_max_width: from LARGEUR (0 or null → None)
-    - vehicle_exempted_types: from DESCRIPTION_CONFIG and CYCLO/VELO columns
-    - vehicle_restricted_types: ["heavyGoodsVehicle"] if weight limit
-    - vehicle_other_exempted_type_text: based on exempted_types
-    - vehicle_all_vehicles: True if no restrictions
-    """
-    # Create exempted_types mapping from DESCRIPTION_CONFIG
+    """Dimensions from POIDS / HAUTEUR / LARGEUR (0 means none); exemptions from
+    DESCRIPTION_CONFIG, else from the CYCLO (-> other) and VELO (-> bicycle) flags;
+    heavyGoodsVehicle whenever a weight limit is set, all vehicles otherwise."""
     exempted_types_mapping = {
         descriptif: config.exempted_types for descriptif, config in DESCRIPTION_CONFIG.items()
     }
 
-    # Convert dimensions: set 0 or None to None
     df = df.with_columns(
         [
             pl.when((pl.col("POIDS").is_null()) | (pl.col("POIDS") == 0))
@@ -321,14 +253,12 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
         ]
     )
 
-    # Get exempted_types from config (as JSON string for now, we'll parse it)
     df = df.with_columns(
         pl.col("DESCRIPTIF")
         .map_elements(lambda x: exempted_types_mapping.get(x), return_dtype=pl.List(pl.Utf8))
         .alias("_config_exempted_types")
     )
 
-    # Build exempted_types: use config if available, otherwise build from CYCLO/VELO
     def build_exempted_types(config_types, cyclo, velo):
         if config_types is not None:
             return config_types
@@ -350,7 +280,6 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
         .alias("vehicle_exempted_types")
     )
 
-    # Compute other_exempted_type_text based on exempted_types
     def compute_other_text(exempted_types):
         if exempted_types is None or len(exempted_types) == 0:
             return None
@@ -364,7 +293,6 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
         .alias("vehicle_other_exempted_type_text")
     )
 
-    # Set restricted_types to ["heavyGoodsVehicle"] if weight limit
     df = df.with_columns(
         pl.when(pl.col("vehicle_heavyweight_max_weight").is_not_null())
         .then(pl.lit(["heavyGoodsVehicle"]))
@@ -372,7 +300,6 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
         .alias("vehicle_restricted_types")
     )
 
-    # Compute all_vehicles: False if there are restrictions, True otherwise
     df = df.with_columns(
         pl.when(pl.col("vehicle_restricted_types").is_not_null())
         .then(False)
@@ -380,5 +307,4 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
         .alias("vehicle_all_vehicles")
     )
 
-    # Drop helper column
     return df.drop("_config_exempted_types")

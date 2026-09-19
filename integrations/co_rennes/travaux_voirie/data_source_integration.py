@@ -61,10 +61,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def compute_measure_fields(df: pl.DataFrame):
-    """
-    measure_type_ : depends on type
-    Excludes : les mesures de type "chausséee rétrécies"
-    """
+    """Measure type from `type`; anything else (narrowed roadway, turn ban…) is dropped."""
 
     df = df.with_columns(
         [
@@ -87,13 +84,7 @@ def compute_measure_fields(df: pl.DataFrame):
 
 
 def compute_period_fields(df: pl.DataFrame):
-    """
-    Compute all period fields for SavePeriodDTO.
-    - period_start_date: date_deb at 00:00:00 Paris
-    - period_end_date: date_fin at 23:59:59 Paris
-    - period_recurrence_type: everyDay
-    - period_is_permanent: False
-    """
+    """Temporary period from date_deb 00:00:00 to date_fin 23:59:59, Paris time."""
 
     return df.with_columns(
         [
@@ -106,12 +97,7 @@ def compute_period_fields(df: pl.DataFrame):
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all location fields for SaveLocationDTO.
-    - location_road_type: always RoadTypeEnum.RAWGEOJSON
-    - location_label: from localisation_curviligne
-    - location_geometry: from geo_shape
-    """
+    """rawGeoJSON from the WKB `geo_shape`, labelled "localisation - commune"."""
 
     return df.with_columns(
         [
@@ -127,17 +113,6 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all regulation fields for PostApiRegulationsAddBody.
-    - regulation_identifier: from id
-    - regulation_category: TEMPORARYREGULATION
-    - regulation_subject: OTHER
-    - regulation_title: objectid + nature + site
-    - regulation_other_category_text: "Circulation"
-
-    Filters out rows with duplicate objectid.
-    """
-
     return df.with_columns(
         [
             (pl.lit("35/") + pl.col("id").cast(pl.Utf8) + pl.lit("/TRAVAUX")).alias(
@@ -158,8 +133,4 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_vehicle_fields(df: pl.DataFrame):
-    """
-    Compute all vehicle fields for SaveVehicleSetDTO.
-    - vehicle_all_vehicles: true
-    """
     return df.with_columns([pl.lit(True).alias("vehicle_all_vehicles")])

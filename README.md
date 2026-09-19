@@ -1,6 +1,6 @@
 # DiaLog Integrations
 
-Environnement d'exploration et d'intégration de la donnée publique des arrêtés prefectoraux disponible en open-data pour intégration dans la base [DiaLog](https://dialog.beta.gouv.fr/)
+Environnement d'exploration et d'intégration des arrêtés de circulation que les collectivités et les départements publient en open data, pour intégration dans la base [DiaLog](https://dialog.beta.gouv.fr/)
 
 ## Technologies
 
@@ -66,54 +66,15 @@ dialog --help
 
 ## CLI Usage
 
-`dialog --help`
+`dialog --help` et `dialog <commande> --help` donnent les options à jour.
 
-```text
-Usage: dialog [OPTIONS] COMMAND [ARGS]...
+* `dialog integrate ORGANISATION` : `--env` (`dev` par défaut, ou `prod`), `--identifiers` (liste séparée par des virgules), `--update-existing`, `--dry-run`, `--force-deletions`, `--json`, `--summary FICHIER` ;
+* `dialog publish ORGANISATION` : publie tous les arrêtés de l'organisation ;
+* `dialog notify --results JSON [--dry-run]` : poste le rapport de la nuit dans Tchap.
 
- Dialog CLI
-
-╭─ Options ───────────────────────────────────────────────────────────────────────────────╮
-│ --install-completion          Install completion for the current shell.                 │
-│ --show-completion             Show completion for the current shell, to copy it or      │
-│                               customize the installation.                               │
-│ --help                        Show this message and exit.                               │
-╰─────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ──────────────────────────────────────────────────────────────────────────────╮
-│ integrate  Sync data for a specific organization to Dialog API.                         │
-│ publish    Publish all measures                                                         │
-╰─────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-`dialog integrate --help`
-
-```text
-Usage: dialog integrate [OPTIONS]
-                         ORGANIZATION:{dp_aveyron|co_brest|...}
- 
- Sync data for a specific organization to Dialog API.
-
-╭─ Arguments ─────────────────────────────────────────────────────────────────────────────╮
-│ *    organization      ORGANIZATION:{dp_aveyron|co_bre  [required]                      │
-│                        st|dp_sarthe|co_dijon}                                           │
-╰─────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ───────────────────────────────────────────────────────────────────────────────╮
-│ --identifiers                                COMMA_LIST  List of ids to restrict to.    │
-│ --update-existing    --no-update-existing                Update existing regulations    │
-│ --env                                        TEXT        Environment: dev or prod       │
-│                                                          [default: dev]                 │
-│ --dry-run                                                Compute everything, write      │
-│                                                          nothing, print the report.     │
-│ --force-deletions                                        Release a deletion or closure  │
-│                                                          batch held by its cap.         │
-│ --json                                                   Print the run result as JSON   │
-│                                                          on stdout (for CI).            │
-│ --help                                                   Show this message and exit.    │
-╰─────────────────────────────────────────────────────────────────────────────────────────╯
-```
+L'organisation est le nom d'un dossier de `integrations/`.
 
 Exemples :
-* `dialog integrate dp_aveyron --env=prod --update-existing --identifiers "25067/RESTRICTION-GABARIT"`
 * `dialog integrate co_brest --env=dev`
 * `dialog integrate dp_sarthe --env=prod --update-existing --identifiers=1,280,8,459,478,17`
 * `dialog integrate co_lyon --env=dev --dry-run` (voir « Synchronisation » ci-dessous)
@@ -176,7 +137,7 @@ uv run dialog integrate co_lyon --env=prod --force-deletions   # relâcher les s
 uv run dialog integrate co_lyon --env=dev --dry-run
 ```
 
-Calcule tout — extraction, transformation, lots — et **n'écrit rien**, ni dans DiaLog ni dans l'instantané. Seule requête réseau vers DiaLog : le `GET /api/organization/identifiers`, en lecture. Le rapport donne l'entonnoir (lignes brutes, lignes nettoyées, arrêtés, mesures), les trois lots avec leurs plafonds, les identifiants concernés, un diff champ par champ pour chaque mise à jour, et les lots retenus. Le même rapport est journalisé avant écriture en exécution réelle.
+Calcule tout — extraction, transformation, lots — et **n'écrit rien**, ni dans DiaLog ni dans l'instantané. Seule requête réseau vers DiaLog : le `GET /api/organization/identifiers`, en lecture. Le rapport donne l'entonnoir (lignes brutes, lignes nettoyées, arrêtés, mesures), les lots avec leurs plafonds, les identifiants concernés, un diff champ par champ pour chaque mise à jour, et les lots retenus. Le même rapport est journalisé avant écriture en exécution réelle.
 
 `--json` imprime le résultat de l'exécution sur la sortie standard (`{"success": true, "created": n, "updated": n, "deleted": n, "closed": n, "refused": n, "held": {…}, "source": {…}}` — `refused` compte les arrêtés que la pipeline elle-même a refusés (zone couvrant plusieurs routes parallèles), réessayés chaque nuit) ; les journaux restent sur la sortie d'erreur, donc `uv run dialog integrate co_lyon --json > result.json` produit un fichier propre. C'est ce que consomme la CI.
 
@@ -210,7 +171,7 @@ Ordre de priorité en dev, du plus faible au plus fort :
 ## Organisation des dossiers
 
 * `api` : dossier non-versionné contenant le sdk généré pour l'api
-* `integrations` : Chaque intégration est dans un dossier portant le nom de l'organisation. Ex `co_brest` ou `dp_sarthes` (ce sera le nom à spécifier dans la CLI pour l'intégration)
+* `integrations` : Chaque intégration est dans un dossier portant le nom de l'organisation. Ex `co_brest` ou `dp_sarthe` (ce sera le nom à spécifier dans la CLI pour l'intégration)
 
 ```text
 co_maville
@@ -220,7 +181,7 @@ co_maville
 │   ├── __init__.py
 │   ├── schema.py
 │   └── data_source_integration.py
-├── limitations_vitesstes
+├── limitations_vitesse
 │   ├── __init__.py
 │   ├── schema.py
 │   └── data_source_integration.py

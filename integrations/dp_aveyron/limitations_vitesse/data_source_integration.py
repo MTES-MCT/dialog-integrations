@@ -21,13 +21,11 @@ from integrations.dp_aveyron.limitations_vitesse.schema import (
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/limitations-de-vitesse-du-departement-aveyron/exports/parquet"
 
 
-# Ceiling on the locations of one POST. Lyon cuts at 1 000, measured on rawGeoJSON
-# stretches of a few dozen metres. A departmental-road location is different: DiaLog
-# geocodes it from its milestones, and a stretch here runs for kilometres, so the
-# server-side timeout comes far sooner. Only the grouped fallbacks (`AV-LV-V50`,
-# `AV-LV-V90`…) reach it. Measured on the staging on 2026-09-18 with 100: the POSTs that
-# answered took 11 to 39 s, and 18 of the 24 grouped chunks hit the router's 60 s timeout
-# (the back end still committed them, see `DialogApi.add`). 50 keeps a POST well under.
+# Ceiling on the locations of one POST, far below Lyon's 1 000 (rawGeoJSON stretches of a
+# few dozen metres): DiaLog geocodes a departmental-road location from its milestones, a
+# stretch here runs for kilometres, and the router cuts at 60 s. Only the grouped fallbacks
+# (`AV-LV-V50`, `AV-LV-V90`…) reach it. 100 timed out on the staging (D-20); 50 keeps a
+# POST well under.
 MAX_LOCATIONS_PER_REGULATION = 50
 
 
@@ -38,9 +36,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "limitation_vitesse"
 
     # R-28: one arrete carries one measure per distinct signature, and that measure
-    # carries every stretch it applies to — not one measure per stretch. An arrete
-    # groups at most 160 stretches; the grouped fallbacks of the default limits (R-70)
-    # carry thousands and are the reason for the ceiling.
+    # carries every stretch it applies to — not one measure per stretch. The grouped
+    # fallbacks of the default limits (R-70) carry thousands, hence the ceiling.
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
 
@@ -78,7 +75,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             # Production ignores `direction` (D-19): a limit signposted one way would be
             # broadcast both ways. Remove this line once the bug is fixed.
             .pipe(discard_directional_stretches)
-            # Après les emprises : la liste noire les désigne par leurs points de repère.
+            # After the locations: the blocklist names stretches by their milestones.
             .pipe(discard_refused_segments)
             # Before `compute_regulation_fields` merges the duplicated stretches: the
             # rows fetched count them too, so both sides of the rate do.
@@ -89,26 +86,20 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         )
 
 
-# Stretches the API refuses to geolocate — 7 of the 1 020 we post, measured on the preprod
-# on 2026-09-07 by `ai/tools/probe_refused_segments.py` (102 probes, not versioned). The
-# API answers « La géolocalisation de la route entre ces points de repère a échoué » : its
-# resolver cannot place these PRs on the departmental road reference system.
+# Stretches the API refuses to geolocate: « La géolocalisation de la route entre ces points
+# de repère a échoué », its resolver cannot place these PRs on the departmental road
+# reference system. Found by probing (`ai/tools/probe_refused_segments.py`, not versioned).
+# The API validates a regulation as a whole, so one refused stretch sinks the regulation
+# and every other emprise it carries.
 #
-# Keyed on the stretch itself, because this source carries **no line identifier at all**.
-# That is weaker than Lyon's `codetroncon`: if the producer re-cuts a PR, an entry here
-# stops matching — it will not block anything, but it will not protect either.
+# Keyed on the stretch itself, because this source carries **no line identifier at all**:
+# if the producer re-cuts a PR, an entry stops matching — it will not block anything, but
+# it will not protect either.
 #
 # **Do not replace this list with a rule.** The obvious one was tested and fails: three of
-# the seven read PR 0+0 → 999+0, which looks like a sentinel, but four do not (D888, D911,
-# on plausible PRs) and 17 stretches carrying PR 999 are accepted. Nor are whole roads at
-# fault — D888 has 71 emprises of which 2 are refused, D911 44 of which 2.
-#
-# What it costs to get this wrong: the API validates a regulation as a whole, so these 7
-# emprises alone sank 4 regulations and 92 emprises on 2026-09-07 — `AV-LV-V50`
-# lost 63 of them by itself.
-#
-# Re-probed on the staging on 2026-09-18 (2 676 emprises, batches of 40, 124 calls): four
-# more stretches, which had sunk 3 grouped chunks of 100 emprises on the first CI run.
+# the first seven read PR 0+0 → 999+0, which looks like a sentinel, but four do not (D888,
+# D911, on plausible PRs) and 17 stretches carrying PR 999 are accepted. Nor are whole
+# roads at fault — D888 has 71 emprises of which 2 are refused, D911 44 of which 2.
 REFUSED_SEGMENTS: frozenset[str] = frozenset(
     {
         # 2026-09-07
@@ -172,8 +163,7 @@ def compute_split_order(df: pl.DataFrame) -> pl.DataFrame:
 def segment_key() -> pl.Expr:
     """`D920-de-39+719-a-39+880` — a stretch named by its road and its milestones.
 
-    The same shape the identifier of a numberless stretch used before R-28, kept because
-    it is the only thing that designates a row in a source that ships no key of its own.
+    The only thing that designates a row in a source that ships no key of its own.
     """
     return (
         pl.col("location_road_number")
@@ -237,25 +227,15 @@ def compute_measure_fields(df: pl.DataFrame):
 
 
 def compute_period_fields(df: pl.DataFrame):
-    """
-    Compute all period fields for SavePeriodDTO.
-    - period_start_date: null — dated when DiaLog is written
-    - period_end_date: None
-    - period_recurrence_type: everyDay
-    - period_is_permanent: True
+    """Permanent, every day, no end — and no start date: `period_start_date` is null.
 
     The source carries no date column at all — neither the signature of the arrete nor
-    the day the limit took effect. It used to be dated 2024-08-12, the day the file was
-    last refreshed, which is neither of those: it stated that every limit in the
-    department commenced on a day nothing says it did. R-39 — we never presume a past
-    date. Then it was the day of the run, which made every limit look modified each
-    morning, the date being part of what the synchronization compares.
-
-    The start date is now left null, on the same footing as the dateless rows of
-    `restrictions_gabarits`, and resolved by `integrations/sync/dating.py` when DiaLog
-    is written: the day of the run on creation — the regulation being permanent and
-    open-ended, it only claims "this applies now" — and the date DiaLog already holds
-    on update.
+    the day the limit took effect. R-39: no past date is presumed (the file's refresh
+    date would claim every limit commenced that day). Nor the day of the run: the date
+    is part of what the synchronization compares, so every limit would look modified
+    each morning. `integrations/sync/dating.py` resolves the null when DiaLog is
+    written: the day of the run on creation ("this applies now"), the date DiaLog
+    already holds on update.
     """
     return df.with_columns(
         [
@@ -285,10 +265,8 @@ def compute_direction() -> pl.Expr:
 
     `cote` is the side of the roadway the sign stands on, so it names the traffic it
     faces: `droite` is the right-hand side going towards increasing PR, which is the
-    A_TO_B of the location we send. Checked two ways on 2026-08-31: the `droite` geometry
-    lies to the right of A_TO_B on 2681 of 2684 stretches (median offset 10.2 m), and the
-    D920 at PR 39+719, limited to 90 on `droite` and 50 on `gauche`, does carry its 50
-    from B to A on the ground.
+    A_TO_B of the location we send — checked on 2026-08-31 against the geometries and on
+    the ground at the D920, PR 39+719.
 
     A stretch signposted on both sides applies both ways. `centre` and a missing side fall
     back to BOTH, which overstates the restriction rather than pointing it the wrong way.
@@ -307,21 +285,9 @@ def compute_direction() -> pl.Expr:
 
 
 def compute_location_fields(df: pl.DataFrame):
-    """
-    Compute all location fields for SaveLocationDTO.
-    - location_administrator: "Aveyron"
-    - location_road_type: RoadTypeEnum.DEPARTMENTALROAD
-    - location_road_number: from route, e.g. 12_D98 -> D98
-    - location_from_department_code: 12
-    - location_from_point_number: from prd
-    - location_from_abscissa: from abd
-    - location_from_side: "U"
-    - location_to_department_code: 12
-    - location_to_point_number: from prf
-    - location_to_abscissa: from abf
-    - location_to_side: "U"
-    - location_direction: from cote, see compute_direction
-    #NOT TRANSMITTTED- location_geometry: from geo_shape
+    """Departmental-road location: `route` 12_D98 -> D98, PR from prd/abd to prf/abf.
+
+    `geo_shape` is not sent: DiaLog geocodes the stretch from its milestones.
     """
 
     return df.with_columns(
@@ -362,37 +328,23 @@ def normalize_reference(reference: pl.Expr) -> pl.Expr:
 
 
 def compute_regulation_fields(df: pl.DataFrame):
-    """
-    Compute all regulation fields for PostApiRegulationsAddBody.
-    - regulation_identifier, following R-28:
+    """Identifier, title and category of the permanent regulation (R-28).
 
         AV-LV-{num_arrete}   when the producer gives an arrete number — every stretch
                              citing it becomes an emprise of that arrete
         AV-LV-{V70}          otherwise, one departmental arrete per distinct speed,
                              carrying N emprises
 
-      A source row is not an arrete. Identifying a numberless stretch by the stretch
-      itself fabricated one administrative act per section of road: 348 of them on the
-      2026-09-07 draw, for four real measures (30, 50, 70 and 110 km/h). An arrete is a
-      legal act, and inventing one per stretch is a falsehood that travels all the way
-      to the satnavs that rebroadcast us.
+    A source row is not an arrete: identifying a numberless stretch by the stretch itself
+    fabricates one legal act per section of road, a falsehood that travels to the satnavs
+    that rebroadcast us. Nor does the fallback key carry the road, the commune or the
+    stretch: the first time the producer redraws a trace the identifier would move and the
+    arrete be duplicated. Both forms stay under the API's 60-character cap.
 
-      What the fallback key deliberately is *not*: the road, the commune or the stretch.
-      Grouping geographically would attach a stretch to a neighbour by heuristic, and
-      the first time the producer redraws a trace the identifier moves and the arrete is
-      duplicated. Both forms stay under the API's 60-character cap.
-    - regulation_category: PERMANENTREGULATION
-    - regulation_subject: OTHER
-    - regulation_title: arrete number + roads + section count, or the speed and the
-      department for a grouped fallback
-    - regulation_other_category_text: "Limitation de vitesse"
+    Rows with no arrete number are kept, default limits included (R-70): a 50 km/h in an
+    agglomeration or a 90 outside one is a restriction a satnav needs.
 
-    Rows with no arrete number are kept, default limits included (R-70, decided by the
-    team on 2026-09-14): a 50 km/h in an agglomeration or a 90 outside one is a
-    restriction a satnav needs, whether or not a local act is cited. They gather under
-    one grouped fallback per speed (`AV-LV-V50`, `AV-LV-V90`…), see the identifier below.
-
-    Everything is then deduplicated on SEGMENT_KEY. A stretch limited to the same
+    Everything is then deduplicated on SEGMENT_KEY (R-75). A stretch limited to the same
     speed in both directions is one measure, not two; a stretch limited differently each
     way stays two measures under one regulation.
     """
@@ -474,8 +426,4 @@ def compute_regulation_fields(df: pl.DataFrame):
 
 
 def compute_vehicle_fields(df: pl.DataFrame):
-    """
-    Compute all vehicle fields for SaveVehicleSetDTO.
-    - vehicle_all_vehicles: true
-    """
     return df.with_columns([pl.lit(True).alias("vehicle_all_vehicles")])

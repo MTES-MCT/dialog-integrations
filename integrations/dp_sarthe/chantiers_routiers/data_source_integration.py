@@ -20,7 +20,7 @@ LOCAL_FILE = "explorations/dp_sarthe/data/227200029_chantiers_routiers.parquet"
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
-    """Data source for Prescription Routière du Département"""
+    """Data source for Sarthe chantiers routiers (road works)."""
 
     raw_data_schema = SartheChantiersRoutiersSchema
     name = "chantiers_routiers"
@@ -104,24 +104,7 @@ def compute_period_fields(df: pl.DataFrame):
 
 
 def compute_location_fields(df: pl.DataFrame):
-    r"""
-    Compute all location fields for SaveLocationDTO.
-    Parse the following Regexp
-        (RD) (\d+) : Du (\d+)\+(\d+) au (\d+)\+(\d+)
-
-    - location_administrator: "Sarthe"
-    - location_road_type: RoadTypeEnum.DEPARTMENTALROAD
-    - location_road_number: pattern[1]+pattern[2]
-    - location_from_department_code: 72
-    - location_from_point_number: pattern[3]
-    - location_from_abscissa: pattern[4]
-    - location_from_side: "U"
-    - location_to_department_code: 72
-    - location_to_point_number: pattern[5]
-    - location_to_abscissa: pattern[6]
-    - location_to_side: "U"
-    - location_direction: "BOTH"
-    """
+    """Departmental-road location parsed from `loc_txt`, e.g. "RD 0074 : Du 3+150 au 4+0" -> D74."""
     pattern = r"(RD) (\d+) : Du (\d+)\+(\d+) au (\d+)\+(\d+)"
 
     return df.with_columns(
@@ -145,15 +128,6 @@ def compute_location_fields(df: pl.DataFrame):
 
 
 def compute_regulation_fields(df: pl.DataFrame):
-    """
-    Compute all regulation fields for PostApiRegulationsAddBody.
-    - regulation_identifier: from objectid (filter duplicates)
-    - regulation_category: PERMANENTREGULATION
-    - regulation_subject: OTHER
-    - regulation_title: objectid + nature + site
-
-    Filters out rows with duplicate objectid.
-    """
     return df.with_columns(
         [
             (pl.lit("72-chantiers-routiers-") + pl.col("objectid").cast(pl.Utf8)).alias(
@@ -171,8 +145,4 @@ def compute_regulation_fields(df: pl.DataFrame):
 
 
 def compute_vehicle_fields(df: pl.DataFrame):
-    """
-    Compute all vehicle fields for SaveVehicleSetDTO.
-    - vehicle_all_vehicles: true
-    """
     return df.with_columns([pl.lit(True).alias("vehicle_all_vehicles")])

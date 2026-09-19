@@ -29,12 +29,10 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "limitations_vitesse"
 
     def fetch_raw_data(self) -> pl.DataFrame:
-        # download
         logger.info(f"Downloading data from {URL}")
         r = requests.get(URL)
         r.raise_for_status()
 
-        # read CSV into Polars
         return pl.read_csv(
             io.BytesIO(r.content), separator=";", encoding="utf8", ignore_errors=True
         )
@@ -50,21 +48,10 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         )
 
     def compute_regulation_fields(self, df: pl.DataFrame) -> pl.DataFrame:
-        """
-        Compute all regulation fields for PostApiRegulationsAddBody.
-        - regulation_identifier: from id field (built from hash of loc_txt,
-        measure_max_speed, longueur)
-        - regulation_category: PERMANENTREGULATION
-        - regulation_subject: OTHER
-        - regulation_title: from title field
-        - regulation_other_category_text: "Limitation de vitesse"
+        """Identify each row by md5(loc_txt | speed | longueur); rows sharing a hash are
+        all dropped (D-07)."""
 
-        Also builds the id field and drops duplicates.
-        """
-
-        # Build id from deterministic hash
         def deterministic_hash(s: str) -> str:
-            """Create deterministic MD5 hash."""
             return hashlib.md5(s.encode()).hexdigest()
 
         df = df.with_columns(
@@ -80,7 +67,6 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .alias("id")
         )
 
-        # Find and drop duplicated hashes
         dup_ids = df.group_by("id").len().filter(pl.col("len") > 1).select("id")
 
         if dup_ids.height > 0:
@@ -92,7 +78,6 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
         df = df.join(dup_ids, on="id", how="anti")
 
-        # Compute regulation fields
         return df.with_columns(
             [
                 pl.col("id").alias("regulation_identifier"),
@@ -107,18 +92,9 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute measure_max_speed and measure_type_ fields.
-
-    - measure_max_speed: from VITESSE (cast to int, must be > 0 and <= 130)
-    - measure_type_: always SPEEDLIMITATION for Sarthe
-
-    Filters out rows with invalid VITESSE.
-    """
-    # Cast VITESSE to int
+    """Speed limitation from VITESSE; rows outside ]0, 130] are dropped."""
     df = df.with_columns(pl.col("VITESSE").cast(pl.Int64))
 
-    # Filter out invalid speed values
     invalid = pl.col("VITESSE").is_null() | (pl.col("VITESSE") <= 0) | (pl.col("VITESSE") > 130)
     n_removed = df.select(invalid.sum()).item()
 
@@ -127,16 +103,13 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     df = df.filter(~invalid)
 
-    # Rename VITESSE to measure_max_speed and add measure_type_
     return df.rename({"VITESSE": "measure_max_speed"}).with_columns(
         pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value).alias("measure_type_")
     )
 
 
 def compute_title(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Create title from infobulle field, use "Inconnu" if empty or null.
-    """
+    """Title from `infobulle`, "Inconnu" when empty."""
     return df.with_columns(
         pl.when(pl.col("infobulle").is_null() | (pl.col("infobulle") == ""))
         .then(pl.lit("Inconnu"))
@@ -146,14 +119,7 @@ def compute_title(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_start_date(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all period fields for SavePeriodDTO.
-    - period_start_date: annee (Jan 1st) or date_modif as fallback, at 00:00:00 Paris
-    - period_end_date: None
-    - period_recurrence_type: everyDay
-    - period_is_permanent: True
-    """
-    # Log how many rows are using fallback date
+    """Permanent period starting on Jan 1st of `annee`, or on `date_modif` when missing."""
     n_missing_annee = df.select(pl.col("annee").is_null().sum()).item()
     if n_missing_annee > 0:
         logger.info(f"Using date_modif as fallback for {n_missing_annee} rows with missing annee")
@@ -177,43 +143,29 @@ def compute_start_date(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all location fields for SaveLocationDTO.
-    - location_road_type: always RoadTypeEnum.RAWGEOJSON for Sarthe
-    - location_label: from loc_txt field, fallback to title
-    - location_geometry: from geo_shape field (already in GeoJSON format)
-    Filter out rows where geo_shape is null.
-    """
-    # Count rows with null geo_shape before filtering
+    """rawGeoJSON from `geo_shape` (already GeoJSON); rows without geometry are dropped."""
     n_null_geometry = df.select(pl.col("geo_shape").is_null().sum()).item()
     if n_null_geometry > 0:
         logger.warning(
             f"Dropping {n_null_geometry} rows with null geo_shape (no geometry available)"
         )
 
-    # Filter out rows where geo_shape is null
     df = df.filter(pl.col("geo_shape").is_not_null())
 
     return df.with_columns(
         [
-            # Road type (always RAWGEOJSON as enum string value)
             pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
-            # Label from loc_txt or title
             pl.when(pl.col("loc_txt").is_not_null() & (pl.col("loc_txt") != ""))
             .then(pl.col("loc_txt"))
             .otherwise(pl.col("title"))
             .alias("location_label"),
-            # Geometry from geo_shape
             pl.col("geo_shape").alias("location_geometry"),
         ]
     )
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute all vehicle fields for SaveVehicleSetDTO.
-    For Sarthe, all measures apply to all vehicles with no restrictions.
-    """
+    """Every limit applies to all vehicles."""
     return df.with_columns(
         [
             pl.lit(True).alias("vehicle_all_vehicles"),

@@ -2,7 +2,7 @@ import pandera.polars as pa
 
 
 class SartheRawDataSchema(pa.DataFrameModel):
-    """Schema for raw data from Sarthe API - only columns we actually use."""
+    """Raw Sarthe limitations de vitesse: only the columns we use."""
 
     infobulle: str | None = pa.Field(nullable=True)
     VITESSE: float | None = pa.Field(nullable=True)  # Will be cast to int during validation

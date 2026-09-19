@@ -44,7 +44,6 @@ class Settings(BaseSettings):
             else:
                 logger.debug(f"Environment file not found: {env_file}")
 
-        # report if env.prod (or other equivalent) have been created but can't be used
         ignored_shared_file = Path(f".env.{env}")
         if env != "dev" and ignored_shared_file.exists():
             logger.warning(
@@ -55,8 +54,8 @@ class Settings(BaseSettings):
             logger.warning(f"No environment file found for {organization} ({env})")
             logger.warning("Using environment variables from CI/CD.")
 
-        # use _env_file instead of mutating self.model_config, which is shared at class
-        # level (ensures the env file doesn't leak into subsequent objects)
+        # `_env_file`, not `self.model_config`: the config is shared at class level and
+        # would leak one organization's file into the next.
         super().__init__(_env_file=env_files or None, **data)
 
 

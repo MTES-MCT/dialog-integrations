@@ -80,10 +80,9 @@ def test_order_number_absorbs_the_observed_spellings(text, expected):
 @pytest.mark.parametrize(
     "text,expected",
     [
-        # The field stacks the regulatory layers of a segment, newest first — 3 481 rows
-        # in descending vintage order against 21 the other way. The first citation is the
-        # order in force, whatever separates it from the next one: a full stop, a dash or
-        # a line break.
+        # The field stacks the regulatory layers of a segment, newest first. The first
+        # citation is the order in force, whatever separates it from the next one: a full
+        # stop, a dash or a line break.
         (
             "ZCA : 2022 - Arrêté N°2024RP44520. ZCA : 2019 - Arrêté N°2019RP36023 le 25/07/19",
             "2024RP44520",
@@ -181,7 +180,7 @@ def test_a_project_annotation_detaches_the_order_but_keeps_the_measure(clean_dat
 
 
 def test_the_default_urban_speed_is_published_as_one_metropolitan_regulation(clean_data):
-    """50 km/h is nobody's decision, but a satnav needs it (R-70, since 2026-09-17).
+    """A satnav needs the default speed as much as a decided one (R-70).
 
     It groups under `MGL-CT-V50` like any unnumbered speed; the tonnage on the same
     segment keeps its own regulation.
@@ -239,7 +238,7 @@ def test_a_pedestrian_area_is_a_ban_not_a_five_kilometre_speed_limit(clean_data)
 
 
 def test_a_pedestrian_area_carries_the_local_access_exemption_like_a_ztl(clean_data):
-    """One enters a pedestrian area to reach an address, not to drive through (2026-09-17)."""
+    """One enters a pedestrian area to reach an address, not to drive through (R-71)."""
     area = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")
     assert area["vehicle_exempted_types"].to_list() == [["desserteLocale"]] * area.height
     assert set(area["vehicle_all_vehicles"]) == {True}
@@ -490,9 +489,8 @@ def test_a_labelled_pedestrian_area_is_kept(clean_data):
 def test_a_labelled_area_off_the_road_network_is_dropped_all_the_same(clean_data):
     """Esplanade Fernand Rude is labelled a pedestrian area, and is not a street.
 
-    Since 2026-09-17 the label filter and the name-based filter are chained: a ban in a
-    park or on a private lane is noise for a satnav, whatever the producer files.
-    44 of the 381 labelled areas were in that case on the 2026-09-09 draw.
+    The label filter and the name-based filter are chained: a ban in a park or on a
+    private lane is noise for a satnav, whatever the producer files.
     """
     labels = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")["location_label"]
 
@@ -500,7 +498,7 @@ def test_a_labelled_area_off_the_road_network_is_dropped_all_the_same(clean_data
 
 
 def test_five_kilometres_per_hour_alone_is_not_a_pedestrian_area(clean_data):
-    """3 254 segments are filed at 5 km/h without the label — we publish none of them.
+    """Segments filed at 5 km/h without the label are never published (R-71).
 
     Allée des Tilleuls, Voie sans dénomination and Chemin Rural 20 all read 5 km/h and
     carry no `reglementationzca`. Publishing a `noEntry` there would state a driving ban
@@ -533,7 +531,7 @@ def test_the_filter_only_touches_pedestrian_areas(clean_data):
     assert "GABARIT_T3_5" in set(others["measure_group_key"])
 
 
-# --- The rule that preceded it, kept for rollback ------------------------------------
+# --- The name-based rule, on its own ------------------------------------------------
 
 
 def test_the_name_based_rule_drops_private_nameless_and_non_road_areas():

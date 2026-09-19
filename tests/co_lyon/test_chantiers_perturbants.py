@@ -361,7 +361,7 @@ def test_identifier_is_the_gid_and_carries_no_commune():
 
 
 def test_identifier_namespace_is_isolated_from_the_other_channel():
-    """813 Lyon regulations already reach DiaLog through another channel."""
+    """Lyon regulations already reach DiaLog through another channel (`LYON_…`)."""
     identifier = compute_regulation_fields(frame()).get_column("regulation_identifier")[0]
     for existing in ("LYON_2022RP40610", "VAULX_EN_VELIN_1378", "2023RP43879"):
         assert not existing.startswith("MGL-CHP-")

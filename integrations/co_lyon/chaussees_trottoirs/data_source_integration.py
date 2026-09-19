@@ -1,33 +1,20 @@
 """Data source integration for Métropole de Lyon: chaussées et trottoirs.
 
 The layer is a GIS inventory of the road network — 37 569 segments, one row per segment.
-A row is **not** an order: it is a piece of road, and it carries whatever is in force
-there. Turning each row into a DiaLog regulation would fabricate 37 569 administrative
-acts that do not exist, so rows are grouped instead (R-28):
+A row is **not** an order: it is a piece of road carrying whatever is in force there.
+One regulation per row would fabricate 37 569 administrative acts, so rows are grouped
+instead (R-28):
 
 - when the free-text field yields an order number, the rows citing it become emprises of
   that order — but only for **the one measure the order decides**, whatever municipality
-  they fall in;
+  they fall in (`principal_measure_of_each_order`);
 - everything else groups *by measure*: one metropolitan-wide regulation per distinct
   measure — one "30 km/h across the Métropole de Lyon" holding N emprises.
-
-"Everything else" covers two populations that behave alike: segments carrying no order
-number, and the other measures of a segment whose order decides something else. An order
-number is typed on every segment of its zone, and those segments also carry whatever else
-applies there. Keeping it all made `MGL-CT-2024RP44520` a single regulation holding
-30 km/h *and* a pedestrian area *and* two tonnage limits *and* 20 km/h — an act saying
-seven things it never said (measured 2026-09-07: 48 of 596 numbered orders were like
-that, and they held half the corpus).
 
 A row can feed two measures at once: its speed limit and its dimension limit. They are
 qualified separately, so discarding one never discards the other, and the same segment
 legitimately appears in two regulations — its speed under its order, its tonnage under
 the metropolitan regulation of that tonnage. Two distinct restrictions at one place.
-
-Replayed on 2026-09-09 on the 2026-09-07 export: 21 503 emprises → 701 regulations, one
-measure each — 597 carry a real order number, 104 are metropolitan-wide fallbacks — then
-10 070 emprises once contiguous segments are chained, and 703 POSTs once the two
-regulations above the ceiling are split.
 """
 
 import json
@@ -60,52 +47,43 @@ from integrations.shared.perimeter import Perimeter, discard_outside_perimeter
 
 WFS_LAYER = "pvo_patrimoine_voirie.pvochausseetrottoir"
 
-# Every identifier we create is prefixed, so our batch stays recognisable and removable
-# in one go. The organisation already holds 812 Lyon orders pushed by a channel absent
+# Every identifier we create is prefixed, so our batch stays isolable and removable as a
+# block (R-29). The organisation already holds ~800 Lyon orders pushed by a channel absent
 # from this repository (Litteralis), whose identifiers use 52 municipality prefixes for
-# ~40 municipalities — there is no convention to align with (R-29, P-04 still open).
-#
-# `MGL` is the stem the whole organisation uses: the work sites of
-# `chantiers_perturbants` are `MGL-CHP-`, and these are `MGL-CT-`. One stem means one
-# handle — R-29's point is that a prefixed batch is isolable and removable as a block,
-# and two stems for one organisation would be two blocks to chase.
+# ~40 municipalities — there is no convention to align with (P-04 still open). `MGL` is
+# the stem of the whole organisation (`MGL-CHP-` for the work sites): one stem, one block.
 IDENTIFIER_PREFIX = "MGL-CT"
 
 # Default speeds — 50 km/h in a built-up area, 80 outside — are published like any other
-# limit since 2026-09-17 (R-70, team decision of 2026-09-14: a satnav needs the default
-# limit as much as a decided one). They were discarded until then as "nobody's decision";
-# that rule is gone. The 50 covers 14 638 segments and becomes one metropolitan-wide
-# `MGL-CT-V50`, split into slices of `MAX_LOCATIONS_PER_REGULATION`; the 80, some 130.
+# limit (R-70: a satnav needs the default limit as much as a decided one). The 50 becomes
+# one metropolitan-wide `MGL-CT-V50`, split into slices of `MAX_LOCATIONS_PER_REGULATION`.
 
 # Segments whose `domanialite` is "État" — the A46, the A7, the Rocade Est — are kept on
 # purpose, under the Métropole's name. The Métropole did not decide those limits, but its
 # inventory is the only channel through which they reach DiaLog at all. Decision of
-# 2026-09-09, recorded in `ai/docs/vers-l-equipe.md` ("Les libertés qu'on prend"): 375
-# speed-bearing segments at 70, 90, 110 or 130 km/h on the 2026-09-07 export, once the
-# API's own refusals are removed.
+# 2026-09-09, recorded in `ai/docs/vers-l-equipe.md` ("Les libertés qu'on prend").
+# R-73 (2026-09-14) reverses it: kept while co_lyon targets staging only, pending the
+# Métropole's answer (Q-22); drop them before prod unless they agree.
 
 # The source files a pedestrian area as a 5 km/h speed limit. A pedestrian area is first
-# a ban on driving, and "5 km/h" would read as a speed advisory on a GPS. Business call
-# of 2026-09-04: publish it as `noEntry`; since 2026-09-17 with the same `desserteLocale`
-# exemption as the ZTL — one enters to reach an address, not to drive through — which is
-# what the sign at its entrance states. Nothing filed at 5 km/h is ever published as a
-# speed limit.
+# a ban on driving, and "5 km/h" would read as a speed advisory on a GPS: it is published
+# as `noEntry` with the ZTL's `desserteLocale` exemption — one enters to reach an address,
+# not to drive through (R-71). Nothing filed at 5 km/h is ever published as a speed limit.
 PEDESTRIAN_AREA_SPEED = "5"
 
 # …but 5 km/h alone does not make a pedestrian area. `reglementationzca` is the producer's
 # own word for the zone, and it agrees with the speed exactly wherever it is filled:
 # "Zone 30" is always 30, "Zone de rencontre" always 20, "Aire Piétonne" always 5. It is
-# filled on 381 of the 3 635 segments we would otherwise publish (2026-09-09 draw), so
-# inferring the area from the speed would state a driving ban on 1 860 streets the source
-# never calls pedestrian — Rue du Pavé, Place de Milan, Allée de la Prairie. We publish
-# what the producer asserts and drop the rest (R-35 again: no invented threshold, and no
-# invented ban either).
+# filled on a minority of the 5 km/h segments only, so inferring the area from the speed
+# would state a driving ban on streets the source never calls pedestrian — Rue du Pavé,
+# Place de Milan. We publish what the producer asserts and drop the rest (R-35, R-71;
+# volumes in `ai/docs/vers-l-equipe.md`).
 PEDESTRIAN_AREA_LABEL = "Aire Piétonne"
 
 # Does an order number read off the free-text field also cover the dimension limit of
-# the same row? The field describes the calmed-traffic zone, so by default it does not:
-# only 46 of the 1 191 numbered dimension rows mention a dimension at all. Flip this to
-# True to attach every dimension measure to the row's order number instead.
+# the same row? The field describes the calmed-traffic zone, so by default it does not
+# (see `mentions_dimensions`). Flip this to True to attach every dimension measure to the
+# row's order number instead.
 ATTACH_DIMENSION_LIMITS_TO_PARSED_ORDER = False
 
 # `vehicleSet.heavyweightMaxWeight` is capped at 44 by the API — the French legal maximum
@@ -113,42 +91,29 @@ ATTACH_DIMENSION_LIMITS_TO_PARSED_ORDER = False
 # the same column.
 MAX_HEAVYWEIGHT_TONNES = 44
 
-# A zone à trafic limité bans driving through, with an exemption for local access. The
-# source also files a speed for those segments — 5, 20 or 30 km/h across the Presqu'île —
-# which describes driving *inside* the zone rather than the restriction on entering it.
-# True publishes the ban alone, which is what the sign at the entrance states.
+# True publishes a zone à trafic limité as the ban alone, replacing the speed the source
+# files for its segments; see `explode_into_measures`.
 ZTL_REPLACES_SPEED = True
 
 # The organisation as DiaLog knows it. DiaLog refuses any emprise whose geometry does not
-# intersect the organisation's territory (« L'organisation ne semble pas avoir les
-# compétences pour intervenir sur ce linéaire de route »), and one refused emprise takes the
-# whole regulation down. That territory is public and its recipe is fixed — the communes of
-# the EPCI from geo.api.gouv.fr, unioned, simplified at 0.002° — so we rebuild it and drop
-# upstream what DiaLog would refuse (`integrations/shared/perimeter.py`). Measured on the
-# 2026-09-07 probe: 270 of the 271 refused segments fall outside this perimeter, the last
-# one touches its edge; nothing accepted by the API is dropped. Since 2026-09-18 a segment
-# must also touch the exact contour (2 refusals on the first staging run, 1 165 emprises
-# lost; the rule costs 11 accepted boundary segments). Before 2026-09-15 this was
-# a hand-probed blocklist of 271 `codetroncon`, believed unpredictable from the source —
-# it was: neither the name nor `domanialite` decide, the position does.
-ORGANIZATION_PERIMETER = ("epci", "200046977")  # Métropole de Lyon, code SIREN de l'EPCI
+# intersect the organisation's territory, and one refused emprise takes the whole
+# regulation down (R-77). `integrations/shared/perimeter.py` rebuilds that territory and
+# drops upstream what DiaLog would refuse (recipe there, measurements under R-77).
+# Neither the road's name nor `domanialite` predicts a refusal; the position does.
+ORGANIZATION_PERIMETER = ("epci", "200046977")  # Métropole de Lyon, SIREN code of the EPCI
 
 # A pedestrian area only means something to a satnav if it sits on a road a vehicle could
-# otherwise have driven on. The source files as "aire piétonne" a great many things that are
-# not roads: towpaths, rural tracks, park promenades, private condominium lanes, and 295
-# nameless segments. Measured on 2026-09-07: 1 440 of the 3 635 pedestrian-area segments,
-# 40 %, fall under one of the three motives below.
+# otherwise have driven on. The source files as "aire piétonne" things that are not roads:
+# towpaths, rural tracks, park promenades, private condominium lanes, nameless segments.
 #
 # What is deliberately **kept**: `Rue Saint Jean` (Vieux Lyon), `Quai Rambaud`,
 # `Rue Victor Hugo`, `Rue Moncey`, `Place de la Mairie` — real pedestrian streets a driver
-# must not enter. Dropping the whole measure to be rid of the noise would have cost 2 786
-# emprises over 54 regulations, four fifths of which describe genuine restrictions.
+# must not enter. So the measure is filtered, not dropped whole.
 #
-# The filter reads the road's name, and a name is a weak predictor — the same shape of rule
-# failed twice today on the API's refusals. It is defensible here because it qualifies
-# business content rather than guessing an API behaviour, and because each motive is
-# separately arguable. It stays coarse: `Chemin de la Digue` and `Voie Communale 6 des
-# Carrières` survive it, and may well deserve to go too.
+# The filter reads the road's name, and a name is a weak predictor. It is defensible here
+# because it qualifies business content rather than guessing an API behaviour, and because
+# each motive is separately arguable. It stays coarse: `Chemin de la Digue` and `Voie
+# Communale 6 des Carrières` survive it, and may well deserve to go too.
 PEDESTRIAN_AREA_PRIVATE = r"(?i)priv"
 PEDESTRIAN_AREA_NAMELESS = r"(?i)sans d[ée]nomination|sans nom"
 PEDESTRIAN_AREA_NOT_A_ROAD = (
@@ -156,11 +121,10 @@ PEDESTRIAN_AREA_NOT_A_ROAD = (
     r"|contre.all[ée]e|passerelle|halage)"
 )
 
-# Ceiling on the locations of one POST. Measured on staging on 2026-09-04: 1 500
-# locations are accepted in 39 s, 2 000 die on a server-side timeout after 43 s — and
-# splitting the same 2 000 across four measures fails identically, so the ceiling is per
-# regulation, not per measure. 1 000 is the working margin agreed with the team; it is a
-# stopgap until the API can take a larger batch.
+# Ceiling on the locations of one POST. The API dies on a server-side timeout between
+# 1 500 and 2 000 locations, and the ceiling is per regulation, not per measure (probes:
+# `ai/docs/output-api.md`, R-76). 1 000 is the working margin agreed with the team; it is
+# a stopgap until the API can take a larger batch (S-10 / S-11).
 MAX_LOCATIONS_PER_REGULATION = 1000
 
 # Size of the latitude bands used to keep a split regulation geographically coherent:
@@ -224,7 +188,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_regulation_fields)
             # Before the chaining: it merges rows, it discards none.
             .pipe(self.count_retained_restrictions)
-            # Après l'identifiant : le chaînage regroupe par (arrêté, mesure, voie).
+            # After the identifier: chaining groups by (regulation, measure, street).
             .pipe(merge_contiguous_segments)
             .pipe(compute_geographic_split_order)
         )
@@ -287,10 +251,9 @@ def discard_unlabelled_pedestrian_areas(df: pl.DataFrame) -> pl.DataFrame:
     return df.filter(~discarded)
 
 
-# Out of the pipeline from 2026-09-09 to 2026-09-17, back since, **after** the label
-# filter above: of the labelled pedestrian areas, it drops the ones on a private domain,
-# the nameless ones and those named as something other than a road (44 of 381 on the
-# 2026-09-09 draw: 27 private, 3 nameless, 14 "Esplanade", "Promenade", "Passage"…).
+# Runs **after** the label filter above: of the labelled pedestrian areas, it drops the
+# ones on a private domain, the nameless ones and those named as something other than a
+# road (volumes: `ai/docs/vers-l-equipe.md`, « Aire piétonne »).
 # Decision of Thibaut, 2026-09-17: a ban published on a private lane or in a park is
 # noise for a satnav, even when the producer labels it. Esplanade Fernand Rude and
 # Jardin de la Grande Côte fall out with it; narrowing to the private motive alone is a
@@ -523,11 +486,11 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     presume a past date. An invented date is *false* — it claims an order applied when
     nothing says it did.
 
-    The start date used to be the day of the run, which made every order look modified
-    each morning: the date is part of what the synchronization compares. It is now left
-    null and resolved when DiaLog is written (`integrations/sync/dating.py`): the day of
-    the run on creation, "in force when we published it"; the date DiaLog already holds
-    on update.
+    The start is left null, not set to the run day: the date is part of what the
+    synchronization compares, so a run day would make every order look modified each
+    morning. `integrations/sync/dating.py` resolves it when DiaLog is written: the run
+    day on creation, "in force when we published it"; the date DiaLog already holds on
+    update.
     """
     return df.with_columns(
         pl.lit(None, dtype=pl.String).alias("period_start_date"),
@@ -571,12 +534,12 @@ def principal_measure_of_each_order(df: pl.DataFrame) -> pl.DataFrame:
 
     The order's own measure is the one covering the most of its emprises — R-28's
     "reasonable effort", not a truth: which measure an act really carries is asked of the
-    Métropole in `ai/docs/vers-l-equipe.md`. Replayed on 2026-09-09: 45 orders carry
-    several measures, 38 have a strict majority, and it is overwhelming where it matters —
-    5 462 of 5 701 emprises for 2024RP44520 on the 2026-09-07 draw (96 %). The 7 ties
-    (6 emprises or fewer each) are broken on emprise count then on the signature itself,
-    so the choice never depends on row order and stays identical from one run to the next
-    (R-20). Since the ZTL replaces the speed of its segments, no order sits below 50 %.
+    Métropole in `ai/docs/vers-l-equipe.md` (multi-measure and tie counts: R-28). The
+    majority is overwhelming where it matters — 5 462 of 5 701 emprises for 2024RP44520
+    on the 2026-09-07 draw (96 %). Ties are broken on emprise count then on the signature
+    itself, so the choice never depends on row order and stays identical from one run to
+    the next (R-20). Since the ZTL replaces the speed of its segments, no order sits below
+    50 %.
     """
     return (
         df.filter(pl.col("order_key").is_not_null())
@@ -621,8 +584,8 @@ def warn_ambiguous_principals(df: pl.DataFrame) -> None:
         "tie-break decided. Which measure the act really carries is a business call:"
     )
     for row in ambiguous.sort("total", descending=True).head(10).iter_rows(named=True):
-        reason = "égalité" if row["tied"] > 1 else f"majorité relative {row['top']}/{row['total']}"
-        logger.warning(f"  {row['order_key']}: {row['distinct_measures']} mesures, {reason}")
+        reason = "tie" if row["tied"] > 1 else f"plurality {row['top']}/{row['total']}"
+        logger.warning(f"  {row['order_key']}: {row['distinct_measures']} measures, {reason}")
 
 
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
@@ -810,8 +773,8 @@ def merge_contiguous_segments(df: pl.DataFrame) -> pl.DataFrame:
     The key is `(regulation, measure, street)`: two segments only ever join if they state
     the same measure, on the same named street, inside the same regulation. Every other
     field of the group is identical by construction — the measure signature fixes the
-    vehicle set and the measure type, and the period is the day of the run — so the first
-    row carries them for the whole chain.
+    vehicle set and the measure type, and the period is the same permanent undated one —
+    so the first row carries them for the whole chain.
     """
     others = [column for column in df.columns if column not in MERGE_KEY + ["location_geometry"]]
     merged = (

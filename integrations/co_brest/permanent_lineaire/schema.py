@@ -4,8 +4,7 @@ import pandera.polars as pa
 
 
 class Schema(pa.DataFrameModel):
-    """Schema for raw data from Brest shapefile after minimal casting
-    - only columns we actually use."""
+    """Raw Brest shapefile after preprocess_raw_data: only the columns we use."""
 
     NOARR: str | None = pa.Field(nullable=True)
     DESCRIPTIF: str | None = pa.Field(nullable=True)
