@@ -72,8 +72,11 @@ jobs:
         # `--json` prints the run counters on stdout; the logs stay on stderr.
         run: |
           org="${{ matrix.organization }}"
-          # --summary: the run's counters, funnel, alerts and errors, shown on the run page.
-          if uv run dialog integrate "$org" --json --summary "$GITHUB_STEP_SUMMARY" > result.json; then
+          # --summary: the run's counters, funnel, alerts and errors. Written to a file
+          # rather than to this job's summary: the notify job gathers the seven of them
+          # into one document, in matrix order (hence the job index in the name).
+          summary="$(printf 'summary-%02d-%s.md' "${{ strategy.job-index }}" "$org")"
+          if uv run dialog integrate "$org" --json --summary "$summary" > result.json; then
             result="$(tr -d '\n' < result.json)"
             if [ -z "$result" ]; then
               result='{"success":true}'
@@ -88,6 +91,14 @@ jobs:
             echo "failed=true" >> "$GITHUB_OUTPUT"
           fi
           echo "result_${org}=${result}" >> "$GITHUB_OUTPUT"
+      - name: Upload the run summary for the notify job
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: summary-${{ strategy.job-index }}-${{ matrix.organization }}
+          path: summary-*.md
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Fail job if integration failed
         if: ${{ steps.integration.outputs.failed == 'true' }}
         run: exit 1
@@ -105,6 +116,42 @@ jobs:
 
       - name: Generate API client
         run: make api:generate-client
+
+      - name: Gather the summaries of every organization
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          pattern: summary-*
+          path: summaries
+          merge-multiple: true
+
+      - name: Publish one report for the whole run
+        if: always()
+        id: report
+        # One document, in matrix order: on this job's summary, and as an artifact
+        # named by date. Each organization's synchronization report stays folded.
+        run: |
+          day="$(date -u +%Y-%m-%d)"
+          report="rapport-${day}.md"
+          {
+            echo "# Intégrations du ${day} — run ${{ github.run_id }}"
+            echo
+            for file in $(ls summaries/summary-*.md 2>/dev/null | sort); do
+              cat "$file"
+              echo
+            done
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          echo "name=rapport-${day}" >> "$GITHUB_OUTPUT"
+          echo "path=${report}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.report.outputs.name }}
+          path: ${{ steps.report.outputs.path }}
+          retention-days: 30
 
       - name: Notify Tchap
         env:
