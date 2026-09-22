@@ -21,6 +21,9 @@ class AveyronLimitationsVitesseRawDataSchema(pa.DataFrameModel):
     abf: float | None = pa.Field(nullable=True)
     agglo: str | None = pa.Field(nullable=True)
     limit: int | None = pa.Field(nullable=True)
+    # Free text qualifying `limit`: a second limit for a vehicle class ("50 PL>12t") or
+    # a condition ("70 chaussee mouillee"). Read by `discard_vehicle_class_limits`.
+    limit_spec: str | None = pa.Field(nullable=True)
     sens: int | None = pa.Field(nullable=True)
 
     class Config(pa.DataFrameModel.Config):

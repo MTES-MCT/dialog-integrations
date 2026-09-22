@@ -6,15 +6,17 @@ One regulation per row would fabricate 37 569 administrative acts, so rows are g
 instead (R-28):
 
 - when the free-text field yields an order number, the rows citing it become emprises of
-  that order — but only for **the one measure the order decides**, whatever municipality
-  they fall in (`principal_measure_of_each_order`);
+  that order — for **every measure present on all of them**, whatever municipality they
+  fall in (`measures_carried_by_each_order`); a measure missing from one segment is not
+  something the act can be said to decide, and joins the fallback below;
 - everything else groups *by measure*: one metropolitan-wide regulation per distinct
   measure — one "30 km/h across the Métropole de Lyon" holding N emprises.
 
-A row can feed two measures at once: its speed limit and its dimension limit. They are
-qualified separately, so discarding one never discards the other, and the same segment
-legitimately appears in two regulations — its speed under its order, its tonnage under
-the metropolitan regulation of that tonnage. Two distinct restrictions at one place.
+A row can feed several measures at once: its speed limit, its dimension limit, and for a
+pedestrian area the ban and the walking-pace limit. They are qualified separately, so
+discarding one never discards the other, and the same segment legitimately appears in
+two regulations — its speed under its order, its tonnage under the metropolitan
+regulation of that tonnage. Two distinct restrictions at one place.
 """
 
 import json
@@ -34,10 +36,11 @@ from api.dia_log_client.models import (
 from api.dia_log_client.models import (
     PostApiRegulationsAddBodyMeasuresItemVehicleSetType0RestrictedTypesType0Item as VehicleRestrictedTypeEnum,  # noqa: E501
 )
+from integrations.api import DialogApi
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.co_lyon.chaussees_trottoirs.regulation_key import (
+    foreign_order_keys,
     is_project,
-    mentions_dimensions,
     order_key,
     order_number,
 )
@@ -53,6 +56,10 @@ WFS_LAYER = "pvo_patrimoine_voirie.pvochausseetrottoir"
 # ~40 municipalities — there is no convention to align with (P-04 still open). `MGL` is
 # the stem of the whole organisation (`MGL-CHP-` for the work sites): one stem, one block.
 IDENTIFIER_PREFIX = "MGL-CT"
+# Everything under the stem is ours; any other identifier in the organisation belongs to
+# that other channel, and an order number it already carries is not created again
+# (`foreign_order_keys`).
+ORGANISATION_STEM = "MGL-"
 
 # Default speeds — 50 km/h in a built-up area, 80 outside — are published like any other
 # limit (R-70: a satnav needs the default limit as much as a decided one). The 50 becomes
@@ -66,10 +73,14 @@ IDENTIFIER_PREFIX = "MGL-CT"
 # Métropole's answer (Q-22); drop them before prod unless they agree.
 
 # The source files a pedestrian area as a 5 km/h speed limit. A pedestrian area is first
-# a ban on driving, and "5 km/h" would read as a speed advisory on a GPS: it is published
-# as `noEntry` with the ZTL's `desserteLocale` exemption — one enters to reach an address,
-# not to drive through (R-71). Nothing filed at 5 km/h is ever published as a speed limit.
+# a ban on driving, and "5 km/h" alone would read as a speed advisory on a GPS: it is
+# published as `noEntry` with the ZTL's `desserteLocale` exemption — one enters to reach
+# an address, not to drive through (R-71) — **and**, since 2026-09-22, as the walking-pace
+# limit the Code de la route attaches to the area, in the same regulation
+# (`add_pedestrian_area_speed`). A 5 km/h segment the source does not label never yields
+# either: neither the ban nor the speed.
 PEDESTRIAN_AREA_SPEED = "5"
+PEDESTRIAN_AREA_SPEED_KEY = "AIRE_PIETONNE_V5"
 
 # …but 5 km/h alone does not make a pedestrian area. `reglementationzca` is the producer's
 # own word for the zone, and it agrees with the speed exactly wherever it is filled:
@@ -79,12 +90,6 @@ PEDESTRIAN_AREA_SPEED = "5"
 # Place de Milan. We publish what the producer asserts and drop the rest (R-35, R-71;
 # volumes in `ai/docs/vers-l-equipe.md`).
 PEDESTRIAN_AREA_LABEL = "Aire Piétonne"
-
-# Does an order number read off the free-text field also cover the dimension limit of
-# the same row? The field describes the calmed-traffic zone, so by default it does not
-# (see `mentions_dimensions`). Flip this to True to attach every dimension measure to the
-# row's order number instead.
-ATTACH_DIMENSION_LIMITS_TO_PARSED_ORDER = False
 
 # `vehicleSet.heavyweightMaxWeight` is capped at 44 by the API — the French legal maximum
 # for a heavy goods vehicle. Anything above is a structure's load capacity that landed in
@@ -157,11 +162,38 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     # Loaded with the source and reused by `compute_clean_data`; tests inject their own.
     perimeter: Perimeter | None = None
+    # Order numbers the organisation already holds under another channel's identifiers;
+    # None when they could not be read, in which case no number is held back.
+    foreign_order_keys: frozenset[str] | None = None
 
     def fetch_raw_data(self) -> pl.DataFrame:
         df = fetch_layer(WFS_LAYER)
         self.perimeter = Perimeter.fetch(*ORGANIZATION_PERIMETER)
+        self.foreign_order_keys = self.fetch_foreign_order_keys()
         return df
+
+    def fetch_foreign_order_keys(self) -> frozenset[str] | None:
+        """Read the organisation's identifiers and keep the order numbers that are not ours.
+
+        The check is a courtesy to the other channel, not a condition of the run: offline
+        (`ai/tools/funnel.py`) or when the API is unreadable, the pipeline goes on without
+        it and says so, rather than failing the whole integration on a read.
+        """
+        try:
+            identifiers = DialogApi(self.client).identifiers()
+        except Exception as error:
+            logger.warning(
+                f"Foreign identifier check skipped: the organisation's identifiers could not "
+                f"be read ({error!r}) — numbers already published by another channel will "
+                "not be held back"
+            )
+            return None
+        keys = foreign_order_keys(identifiers, ORGANISATION_STEM)
+        logger.info(
+            f"{len(keys)} order keys already published in the organisation by another "
+            f"channel, out of {len(identifiers)} identifiers"
+        )
+        return keys
 
     def discard_outside_perimeter(self, df: pl.DataFrame) -> pl.DataFrame:
         """Drop the segments DiaLog would refuse: those that do not touch the territory."""
@@ -185,9 +217,13 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_vehicle_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
-            .pipe(compute_regulation_fields)
+            .pipe(compute_regulation_fields, self.foreign_order_keys)
             # Before the chaining: it merges rows, it discards none.
             .pipe(self.count_retained_restrictions)
+            # After the counters: the walking-pace limit is the second face of one stated
+            # restriction, not a restriction of its own. After the identifier: it sits in
+            # the regulation of its ban, whichever that is.
+            .pipe(add_pedestrian_area_speed)
             # After the identifier: chaining groups by (regulation, measure, street).
             .pipe(merge_contiguous_segments)
             .pipe(compute_geographic_split_order)
@@ -195,7 +231,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def read_order_number(df: pl.DataFrame) -> pl.DataFrame:
-    """Read the order number, its grouping key, and the two annotations that qualify it.
+    """Read the order number, its grouping key, and the annotation that qualifies it.
 
     Rows annotated "Proposition zone apaisable" lose their attachment — the number they
     cite belongs to a project — but they lose nothing else: their measures are real and
@@ -205,7 +241,6 @@ def read_order_number(df: pl.DataFrame) -> pl.DataFrame:
     df = df.with_columns(
         text.map_elements(order_number, return_dtype=pl.String).alias("order_number"),
         text.map_elements(is_project, return_dtype=pl.Boolean).alias("is_project"),
-        text.map_elements(mentions_dimensions, return_dtype=pl.Boolean).alias("cites_dimensions"),
     ).with_columns(
         pl.when(pl.col("is_project"))
         .then(None)
@@ -344,17 +379,12 @@ def explode_into_measures(df: pl.DataFrame) -> pl.DataFrame:
         & (~is_ztl if ZTL_REPLACES_SPEED else pl.lit(True))
     ).with_columns(pl.lit("speed").alias("measure_kind"))
 
+    # The dimension limit keeps the row's order number like the speed does: whether the
+    # order carries it is decided downstream, on all the segments citing that number
+    # (`measures_carried_by_each_order`), not on a word of the free text.
     dimensions = df.filter(
         pl.any_horizontal(pl.col(column).is_not_null() for column in DIMENSION_COLUMNS)
-    ).with_columns(
-        pl.lit("dimensions").alias("measure_kind"),
-        # The order number describes the calmed-traffic zone; it only covers the
-        # dimension limit when the text says so.
-        pl.when(pl.lit(ATTACH_DIMENSION_LIMITS_TO_PARSED_ORDER) | pl.col("cites_dimensions"))
-        .then(pl.col("order_key"))
-        .otherwise(None)
-        .alias("order_key"),
-    )
+    ).with_columns(pl.lit("dimensions").alias("measure_kind"))
 
     total = speeds.height + dimensions.height + ztl.height
     logger.info(
@@ -522,89 +552,78 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def principal_measure_of_each_order(df: pl.DataFrame) -> pl.DataFrame:
-    """The one measure each order number actually decides.
+def measures_carried_by_each_order(df: pl.DataFrame) -> pl.DataFrame:
+    """The measures each order number actually decides: those on **all** its segments.
 
-    A numbered order regulates *one thing*: "Ville 30" limits to 30 km/h. But its number
-    is typed in `precisionreglementation` on every segment of the zone, and those segments
-    also carry whatever else applies there — a pedestrian area, a 7.5 t limit, a 20 km/h
-    stretch. Keeping them all made `MGL-CT-2024RP44520` a regulation holding 30 km/h *and*
-    noEntry *and* two tonnage limits *and* 20 km/h: an administrative act saying seven
-    things it never said.
+    A numbered order's number is typed in `precisionreglementation` on every segment of
+    its zone, and those segments also carry whatever else applies there — a 7.5 t limit
+    on two of them, a 20 km/h stretch, a pedestrian area. Keeping everything made
+    `MGL-CT-2024RP44520` a regulation holding 30 km/h *and* noEntry *and* two tonnage
+    limits: an act saying seven things it never said. Keeping the majority measure
+    (the rule until 2026-09-22) attributed a speed to acts another reader of the same
+    acts publishes as tonnage limits — 15 of the 19 numbers shared with the other
+    channel (`foreign_order_keys`).
 
-    The order's own measure is the one covering the most of its emprises — R-28's
-    "reasonable effort", not a truth: which measure an act really carries is asked of the
-    Métropole in `ai/docs/vers-l-equipe.md` (multi-measure and tie counts: R-28). The
-    majority is overwhelming where it matters — 5 462 of 5 701 emprises for 2024RP44520
-    on the 2026-09-07 draw (96 %). Ties are broken on emprise count then on the signature
-    itself, so the choice never depends on row order and stays identical from one run to
-    the next (R-20). Since the ZTL replaces the speed of its segments, no order sits below
-    50 %.
-    """
-    return (
-        df.filter(pl.col("order_key").is_not_null())
-        .group_by(["order_key", "measure_group_key"])
-        .agg(pl.len().alias("_n"))
-        .sort(["order_key", "_n", "measure_group_key"], descending=[False, True, False])
-        .group_by("order_key", maintain_order=True)
-        .first()
-        .select("order_key", pl.col("measure_group_key").alias("_principal_measure"))
-    )
+    R-28 as Thibaut settled it on 2026-09-22: an order carries a measure only when every
+    segment citing the number carries it; speed, dimensions, ZTL and pedestrian area are
+    judged one by one, so an order can carry several (`2022-080`: 20 km/h and 3.5 t) or
+    none at all. What falls short goes to the metropolitan fallback of its own measure,
+    still published, only not under the act's name. The rule is a set intersection:
+    no threshold, no tie-break, the same answer from one run to the next (R-20).
 
-
-def warn_ambiguous_principals(df: pl.DataFrame) -> None:
-    """Report the orders where no measure is clearly the one the order decides.
-
-    Two shapes deserve a human: a tie, where the tie-break picks a winner among equals,
-    and a plurality below half, where the "principal" measure covers a minority of the
-    order's emprises. The rule stays deterministic in both cases — but which measure a
-    given order really decides is a business reading of the act, not something the
-    emprise count can settle, so it is surfaced rather than silently arbitrated.
+    Returns one row per `(order_key, measure_group_key)` the order carries.
     """
     numbered = df.filter(pl.col("order_key").is_not_null())
-    if not numbered.height:
-        return
-
-    per_measure = numbered.group_by(["order_key", "measure_group_key"]).agg(pl.len().alias("n"))
-    per_order = per_measure.group_by("order_key").agg(
-        pl.col("n").max().alias("top"),
-        pl.col("n").sum().alias("total"),
-        pl.len().alias("distinct_measures"),
-        (pl.col("n") == pl.col("n").max()).sum().alias("tied"),
+    segments = numbered.group_by("order_key").agg(
+        pl.col("codetroncon").n_unique().alias("_segments")
     )
-    ambiguous = per_order.filter(
-        (pl.col("distinct_measures") > 1)
-        & ((pl.col("tied") > 1) | (pl.col("top") / pl.col("total") < 0.5))
+    covered = numbered.group_by(["order_key", "measure_group_key"]).agg(
+        pl.col("codetroncon").n_unique().alias("_covered")
     )
-    if not ambiguous.height:
-        return
-
-    logger.warning(
-        f"{ambiguous.height} numbered order(s) have no clear principal measure — the "
-        "tie-break decided. Which measure the act really carries is a business call:"
+    carried = (
+        covered.join(segments, on="order_key")
+        .filter(pl.col("_covered") == pl.col("_segments"))
+        .select("order_key", "measure_group_key", pl.lit(True).alias("_is_own_measure"))
     )
-    for row in ambiguous.sort("total", descending=True).head(10).iter_rows(named=True):
-        reason = "tie" if row["tied"] > 1 else f"plurality {row['top']}/{row['total']}"
-        logger.warning(f"  {row['order_key']}: {row['distinct_measures']} measures, {reason}")
+
+    emptied = segments.filter(~pl.col("order_key").is_in(carried["order_key"].implode()))
+    logger.info(
+        f"{carried['order_key'].n_unique()} numbered orders carry "
+        f"{carried.height} measure(s) present on all their segments; "
+        f"{emptied.height} order(s) carry none and go whole to the metropolitan "
+        "regulations of their measures"
+    )
+    for row in (
+        emptied.sort(["_segments", "order_key"], descending=[True, False])
+        .head(5)
+        .iter_rows(named=True)
+    ):
+        logger.info(f"  {row['order_key']}: {row['_segments']} segments, no measure on all")
+    return carried
 
 
-def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
+def compute_regulation_fields(
+    df: pl.DataFrame, foreign_order_keys: frozenset[str] | None = None
+) -> pl.DataFrame:
     """Identifier, category, subject and title of each regulation.
 
     The identifier rule, in full (R-23):
 
         MGL-CT-{order key}          when the free-text field yields an order number *and*
-                                    this is the measure that order decides —
+                                    this measure sits on every segment citing it —
                                     `MGL-CT-2024RP44520`
         MGL-CT-{measure signature}  everything else, one metropolitan-wide regulation per
                                     distinct measure — `MGL-CT-V30`, `MGL-CT-GABARIT_T3_5`
 
-    The second line covers two populations that behave alike: segments carrying no order
-    number at all, and the *other* measures of a segment whose order number decides
-    something else. Both are real measures with no act of their own to belong to, so both
-    are gathered by what they do. A segment legitimately appears twice — once in its
-    order's regulation for the speed, once in a metropolitan regulation for its tonnage
-    limit — because those are two distinct restrictions at the same place.
+    The second line covers three populations that behave alike: segments carrying no
+    order number at all, the measures of a numbered segment that its order cannot be
+    said to decide (`measures_carried_by_each_order`), and the orders whose number the
+    organisation already holds under another channel's identifier (`foreign_order_keys`,
+    P-04) — one act, one name, so ours steps aside. All are real measures with no act of
+    their own to belong to here, so all are gathered by what they do. A segment
+    legitimately appears twice — once in its order's regulation for the speed, once in a
+    metropolitan regulation for its tonnage limit — because those are two distinct
+    restrictions at the same place.
 
     The municipality is deliberately absent from the key. Lyon's "Ville 30" order spills
     onto 12 neighbouring municipalities for a handful of boundary segments; prefixing by
@@ -612,26 +631,31 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
     (`845`, `956`) could merge two orders from two municipalities — one such case is
     known, and the arbitration of 2026-09-04 is to merge rather than to split.
     """
-    df = df.join(principal_measure_of_each_order(df), on="order_key", how="left")
+    df = df.join(
+        measures_carried_by_each_order(df), on=["order_key", "measure_group_key"], how="left"
+    ).with_columns(pl.col("_is_own_measure").fill_null(False))
 
-    # `_is_own_measure` also drives the title: a measure pushed out of its order must not
-    # keep the order's name, or a metropolitan regulation would read "Arrêté n°…".
-    df = df.with_columns(
-        (
-            pl.col("order_key").is_not_null()
-            & (pl.col("measure_group_key") == pl.col("_principal_measure"))
-        ).alias("_is_own_measure")
-    )
+    if foreign_order_keys:
+        foreign = pl.col("order_key").is_in(list(foreign_order_keys))
+        held_back = df.filter(foreign & pl.col("_is_own_measure"))
+        if held_back.height:
+            logger.warning(
+                f"{held_back['order_key'].n_unique()} order number(s) already published in "
+                f"the organisation by another channel are not created again; their "
+                f"{held_back.height} emprises join the metropolitan regulations (P-04): "
+                f"{sorted(held_back['order_key'].unique().to_list())}"
+            )
+        # `_is_own_measure` also drives the title: a measure kept out of its order must
+        # not keep the order's name, or a metropolitan regulation would read "Arrêté n°…".
+        df = df.with_columns((pl.col("_is_own_measure") & ~foreign).alias("_is_own_measure"))
 
     displaced = df.filter(pl.col("order_key").is_not_null() & ~pl.col("_is_own_measure"))
     if displaced.height:
         logger.info(
             f"{displaced.height} emprises leave their numbered order for the metropolitan "
-            f"regulation of their own measure: they sit on a segment whose order number "
-            f"decides something else ({displaced['measure_group_key'].n_unique()} distinct "
-            f"measures over {displaced['order_key'].n_unique()} orders)"
+            f"regulation of their own measure ({displaced['measure_group_key'].n_unique()} "
+            f"distinct measures over {displaced['order_key'].n_unique()} orders)"
         )
-    warn_ambiguous_principals(df)
 
     identifier = (
         pl.when(pl.col("_is_own_measure"))
@@ -647,6 +671,33 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
         pl.lit(PostApiRegulationsAddBodySubject.OTHER.value).alias("regulation_subject"),
         pl.lit("Circulation").alias("regulation_other_category_text"),
     ).with_columns(regulation_title())
+
+
+def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:
+    """Give every published pedestrian area its walking-pace limit, in the same regulation.
+
+    The Code de la route (R. 110-2) defines the area by both: only the vehicles serving
+    it may enter, and they drive at walking pace. The ban alone left the 5 km/h the
+    source files unsaid; the speed alone would read as an advisory. Decision of the team
+    on 2026-09-14, applied on 2026-09-22.
+
+    The limit is a twin of the ban — same segment, same regulation identifier and title,
+    hence the same act or the same metropolitan fallback — so it never creates a
+    regulation of its own and inherits every filter the ban went through: an unlabelled
+    5 km/h segment, or a labelled one off the road network, yields neither. It applies
+    to every vehicle, with no exemption: the ones let in still drive at walking pace.
+    """
+    bans = df.filter(pl.col("measure_group_key") == pl.lit("AIRE_PIETONNE"))
+    if not bans.height:
+        return df
+    speeds = bans.with_columns(
+        pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value).alias("measure_type_"),
+        pl.lit(int(PEDESTRIAN_AREA_SPEED), dtype=pl.Int64).alias("measure_max_speed"),
+        pl.lit(PEDESTRIAN_AREA_SPEED_KEY).alias("measure_group_key"),
+        pl.lit(None, dtype=pl.List(pl.String)).alias("vehicle_exempted_types"),
+    )
+    logger.info(f"{speeds.height} pedestrian-area bans get their {PEDESTRIAN_AREA_SPEED} km/h twin")
+    return pl.concat([df, speeds], how="vertical")
 
 
 def regulation_title() -> pl.Expr:

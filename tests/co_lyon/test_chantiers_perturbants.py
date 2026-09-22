@@ -1,11 +1,13 @@
 """Unit tests for the Lyon "chantiers perturbants" transformation."""
 
+import datetime
 import json
 
 import polars as pl
 import pytest
 from loguru import logger
 
+from integrations.co_lyon.chantiers_perturbants import data_source_integration
 from integrations.co_lyon.chantiers_perturbants.data_source_integration import (
     LONG_DURATION_WARNING_DAYS,
     compute_location_fields,
@@ -54,6 +56,16 @@ def frame(*rows):
 def timed(*rows):
     """The frame as `compute_period_fields` receives it: time slots already read."""
     return compute_time_slot_fields(frame(*rows))
+
+
+# Every date in this file is later than this, so the expiry guard of
+# `compute_period_fields` never fires by accident as the calendar moves on.
+TODAY = datetime.date(2026, 1, 1)
+
+
+@pytest.fixture(autouse=True)
+def frozen_today(monkeypatch):
+    monkeypatch.setattr(data_source_integration, "today_in_paris", lambda: TODAY)
 
 
 @pytest.fixture
@@ -292,6 +304,22 @@ def test_a_measure_without_hours_carries_no_time_slot():
 def test_period_drops_broken_dates(start, end):
     result = compute_period_fields(timed(row(debutchantier=start, finchantier=end)))
     assert result.height == 0
+
+
+def test_a_work_site_already_over_is_not_created(warnings):
+    """R-40: the producer withdraws sites on their end date; a stale row must not slip in."""
+    yesterday = (TODAY - datetime.timedelta(days=1)).isoformat()
+    result = compute_period_fields(timed(row(debutchantier="2025-12-01", finchantier=yesterday)))
+    assert result.height == 0
+    assert any("already over" in message for message in warnings)
+
+
+def test_a_work_site_ending_today_is_still_in_force(warnings):
+    result = compute_period_fields(
+        timed(row(debutchantier="2025-12-01", finchantier=TODAY.isoformat()))
+    )
+    assert result.height == 1
+    assert not any("already over" in message for message in warnings)
 
 
 def test_multi_year_work_sites_are_reported_but_published(warnings):

@@ -72,6 +72,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             raw_data.pipe(compute_measure_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
+            .pipe(discard_vehicle_class_limits)
             # Production ignores `direction` (D-19): a limit signposted one way would be
             # broadcast both ways. Remove this line once the bug is fixed.
             .pipe(discard_directional_stretches)
@@ -117,6 +118,42 @@ REFUSED_SEGMENTS: frozenset[str] = frozenset(
         "D568-de-1+924-a-2+239",
     }
 )
+
+
+# `limit_spec` qualifies the general limit with a second one. Two shapes on the
+# 2026-09-22 export (73 rows of 5 814): a limit for a **vehicle class** — `30 PL`,
+# `50 PL>12t`, `70 PL` (62 rows) — and a limit under a **condition** — `70 chaussee
+# mouillee`, `70 par temps de pluie`, `50 du 1 juillet au 31 aout` (11 rows).
+#
+# Only the first is a conflict. "Every vehicle at 90" is false for the lorries held to
+# 50, and the lorry limit cannot be published on its own: `30 PL` names no tonnage, and
+# R-35 forbids inventing one. A condition DiaLog cannot express leaves the general limit
+# true whenever it does not apply, so those rows are kept and counted (decision of
+# Thibaut, 2026-09-22). The pattern is deliberately wider than the values observed.
+VEHICLE_CLASS_PATTERN = r"(?i)\bPL\b|poids.lourd|camion|autocar|\bbus\b|\bcar\b|>\s*\d+\s*t\b"
+
+
+def discard_vehicle_class_limits(df: pl.DataFrame) -> pl.DataFrame:
+    """Drop the stretches whose `limit_spec` sets another limit for a vehicle class."""
+    spec = pl.col("limit_spec").fill_null("").str.strip_chars()
+    specified = spec != ""
+    conflicting = specified & spec.str.contains(VEHICLE_CLASS_PATTERN)
+
+    n_conflicting = df.select(conflicting.sum()).item()
+    if n_conflicting:
+        values = sorted(df.filter(conflicting)["limit_spec"].unique().to_list())
+        logger.warning(
+            f"Discarding {n_conflicting}/{df.height} stretches whose limit differs for a "
+            f"vehicle class we cannot publish (R-35): {values}"
+        )
+    n_conditional = df.select((specified & ~conflicting).sum()).item()
+    if n_conditional:
+        values = sorted(df.filter(specified & ~conflicting)["limit_spec"].unique().to_list())
+        logger.info(
+            f"Keeping {n_conditional} stretches under a condition DiaLog cannot express; "
+            f"their general limit is published alone: {values}"
+        )
+    return df.filter(~conflicting)
 
 
 def discard_directional_stretches(df: pl.DataFrame) -> pl.DataFrame:

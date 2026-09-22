@@ -15,6 +15,7 @@ from integrations.dp_aveyron.limitations_vitesse.data_source_integration import 
     compute_split_order,
     discard_directional_stretches,
     discard_refused_segments,
+    discard_vehicle_class_limits,
     measure_group_key,
 )
 
@@ -448,3 +449,28 @@ def test_split_order_follows_the_road_then_the_milestones():
     assert ranked["location_road_number"].to_list() == ["D12", "D12", "D920", "D920"]
     assert ranked["location_from_point_number"].to_list() == ["9", "10", "4", "39"]
     assert ranked["regulation_split_order"].to_list() == [0, 1, 2, 3]
+
+
+# --- limit_spec: a second limit next to the general one ----------------------------
+
+
+def specified(*specs):
+    """One stretch per `limit_spec` value, all under the same general limit."""
+    return pl.DataFrame({"limit_spec": list(specs), "measure_max_speed": [90] * len(specs)})
+
+
+def test_a_limit_for_a_vehicle_class_is_a_conflict_and_drops_the_stretch():
+    """`50 PL` under a general 90: "every vehicle at 90" would be false for lorries."""
+    assert discard_vehicle_class_limits(specified("50 PL")).height == 0
+    assert discard_vehicle_class_limits(specified("30 PL>12T")).height == 0
+
+
+def test_a_condition_dialog_cannot_express_keeps_the_general_limit():
+    """`70 chaussee mouillee`: the 90 stays true on a dry road, so it is published alone."""
+    kept = discard_vehicle_class_limits(specified("70 chaussee mouillee", "70 par temps de pluie"))
+    assert kept.height == 2
+
+
+def test_a_stretch_without_limit_spec_is_untouched():
+    kept = discard_vehicle_class_limits(specified(None, ""))
+    assert kept.height == 2

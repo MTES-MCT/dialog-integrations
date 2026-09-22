@@ -16,6 +16,7 @@ eight spellings observed on 2026-08-12; it will not absorb the ninth.
 """
 
 import re
+from collections.abc import Iterable
 
 # « Arrêté N° », « Arrêté n », « Arrêté » — then the number, non-greedy, up to the first
 # closing delimiter. The number itself may contain a space ("UC 22-272") and a slash
@@ -63,13 +64,6 @@ ORDER_NUMBER_PATTERN = re.compile(
 # word never appears outside a proposal.
 PROJECT_PATTERN = re.compile(r"propos|apaisab", re.IGNORECASE)
 
-# Words that show the cited order is about vehicle dimensions and not only about the
-# calmed-traffic zone the field otherwise describes.
-DIMENSION_PATTERN = re.compile(
-    r"tonnage|gabarit|poids|hauteur|largeur|longueur",
-    re.IGNORECASE,
-)
-
 
 def order_number(text: str | None) -> str | None:
     """Order number read from the free-text field, or None.
@@ -106,12 +100,30 @@ def is_project(text: str | None) -> bool:
     return bool(text) and bool(PROJECT_PATTERN.search(text))  # type: ignore[arg-type]
 
 
-def mentions_dimensions(text: str | None) -> bool:
-    """Does the field tie its order number to a vehicle dimension limit?
+def foreign_order_keys(identifiers: Iterable[str], own_prefix: str) -> frozenset[str]:
+    """Order keys already published in the organisation by a channel other than ours.
 
-    `precisionreglementation` describes the *calmed-traffic zone*. Of the 2 245 segments
-    carrying a dimension limit, 1 191 also carry an order number, but only 46 mention a
-    dimension. Attaching the other 1 145 to the number they cite would make Lyon's
-    "Ville 30" order say something it never said.
+    « Lyon (métropole) » holds ~800 regulations pushed by a channel absent from this
+    repository (P-04), whose identifiers are `{MUNICIPALITY}_{order number}`:
+    `LYON_2022RP40610`, `VAULX_EN_VELIN_22P010`, `SAINT-PRIEST_A_2022_0838`. Publishing
+    `MGL-CT-2022RP40610` next to `LYON_2022RP40610` would put one act twice in DiaLog,
+    with two contents, under two names — 19 such numbers on the 2026-09-22 draw.
+
+    The municipality prefix follows no convention (52 spellings), so the number is not
+    read at a fixed position: every suffix cut at an underscore is a candidate —
+    `A_2022_0838`, `2022_0838`, `0838` — plus the whole identifier for the few typed
+    without a prefix (`2023-ZFE-006`). Each candidate is normalised like our own keys.
+    Cutting at underscores only, rather than matching a trailing substring, is what
+    keeps `2019` from colliding with `TASSIN_2019_145`: the false positives found on
+    2026-08-12 (`2019`, `2021`, `7575`) do not appear.
     """
-    return bool(text) and bool(DIMENSION_PATTERN.search(text))  # type: ignore[arg-type]
+    keys: set[str] = set()
+    for identifier in identifiers:
+        if identifier.startswith(own_prefix):
+            continue
+        parts = identifier.split("_")
+        for start in range(len(parts)):
+            key = order_key("_".join(parts[start:]))
+            if key:
+                keys.add(key)
+    return frozenset(keys)

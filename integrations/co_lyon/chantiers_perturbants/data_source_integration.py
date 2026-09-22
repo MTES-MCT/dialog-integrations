@@ -31,7 +31,9 @@ Known gaps, all measured and all deliberate:
 Volumes dropped per motive: `ai/docs/vers-l-equipe.md`.
 """
 
+import datetime
 import json
+from zoneinfo import ZoneInfo
 
 import polars as pl
 from loguru import logger
@@ -44,7 +46,7 @@ from api.dia_log_client.models import (
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.co_lyon.grand_lyon import fetch_layer
-from integrations.shared.local_time import end_of_local_day, start_of_local_day
+from integrations.shared.local_time import PARIS, end_of_local_day, start_of_local_day
 
 from .description import RESIDUAL_MAX_CHARS, read_description
 from .schema import LyonChantiersPerturbantsRawDataSchema
@@ -228,10 +230,10 @@ def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Temporary period, from `debutchantier` to `finchantier`, plus its daily slots.
 
-    Drops rows without both dates and rows ending before they start (R-38). Long
-    durations are **reported, not dropped**: whether a multi-year "temporary"
-    restriction is a data defect or a real one is a case-by-case call, and silently
-    discarding it hides the question.
+    Drops rows without both dates, rows ending before they start (R-38), and rows
+    already over (R-40). Long durations are **reported, not dropped**: whether a
+    multi-year "temporary" restriction is a data defect or a real one is a case-by-case
+    call, and silently discarding it hides the question.
     """
     missing = pl.col("debutchantier").is_null() | pl.col("finchantier").is_null()
     n_missing = df.select(missing.sum()).item()
@@ -244,6 +246,17 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     if n_inverted:
         logger.warning(f"Dropping {n_inverted} rows ending before they start")
     df = df.filter(~inverted)
+
+    # The producer withdraws a work site from the layer on its end date, so this catches
+    # nothing on an ordinary day: it is the guard against a stale row being *created* as
+    # a restriction already over (R-40). Kept local to this source on purpose — the
+    # other sources have their own withdrawal habits, and a shared rule would only add
+    # noise to their logs. A site ending today is still in force until midnight.
+    expired = pl.col("finchantier") < today_in_paris()
+    n_expired = df.select(expired.sum()).item()
+    if n_expired:
+        logger.warning(f"Dropping {n_expired} rows whose work site is already over (R-40)")
+    df = df.filter(~expired)
 
     warn_long_durations(df)
 
@@ -267,6 +280,11 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
             pl.lit(False).alias("period_is_permanent"),
         ]
     )
+
+
+def today_in_paris() -> datetime.date:
+    """The producer's calendar day: the runner may sit in another zone."""
+    return datetime.datetime.now(ZoneInfo(PARIS)).date()
 
 
 def warn_long_durations(df: pl.DataFrame) -> None:

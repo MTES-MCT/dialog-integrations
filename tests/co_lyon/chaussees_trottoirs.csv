@@ -1,7 +1,7 @@
 codetroncon,codefuv,nomvoie1,commune1,insee1,domanialite,ztl,reglementationzca,limitationvitesse,limitationtonnage,limitationhauteur,limitationlargeur,limitationlongueur,precisionreglementation,geometry
 T001,16121,Rue de la Republique,Lyon 2e Arrondissement,69382,Métropole,,Zone 30,30,,,,,ZCA : 2022 - Arrete N°2024RP44520 du 29/09/2022,"{""type"": ""LineString"", ""coordinates"": [[4.8320, 45.7600], [4.8330, 45.7610]]}"
 T002,16121,Rue Edouard Herriot,Lyon 2e Arrondissement,69382,Métropole,,Zone 30,30,,,,,ZCA : 2022 - Arrete N°2024RP44520 du 29/09/2022,"{""type"": ""LineString"", ""coordinates"": [[4.8340, 45.7620], [4.8350, 45.7630]]}"
-T003,16122,Rue Victor Hugo,Lyon 2e Arrondissement,69382,Métropole,,Aire Piétonne,5,,,,,ZCA : 2022 - Arrete N°2024RP44520 du 29/09/2022,"{""type"": ""LineString"", ""coordinates"": [[4.8290, 45.7560], [4.8295, 45.7570]]}"
+T003,16122,Rue Victor Hugo,Lyon 2e Arrondissement,69382,Métropole,,Aire Piétonne,5,,,,,ZCA : 2022,"{""type"": ""LineString"", ""coordinates"": [[4.8290, 45.7560], [4.8295, 45.7570]]}"
 T004,16200,Rue des Docks,Lyon 9e Arrondissement,69389,Métropole,,,50,3.5,,,,,"{""type"": ""LineString"", ""coordinates"": [[4.8100, 45.7800], [4.8110, 45.7810]]}"
 T005,16201,Quai Paul Sedallian,Lyon 9e Arrondissement,69389,Métropole,,,50,3.5,,,,,"{""type"": ""LineString"", ""coordinates"": [[4.8120, 45.7820], [4.8130, 45.7830]]}"
 T006,16300,Avenue Franklin Roosevelt,Villeurbanne,69266,Métropole,,,30,,,,,,"{""type"": ""LineString"", ""coordinates"": [[4.8800, 45.7700], [4.8810, 45.7710]]}"
@@ -19,3 +19,9 @@ T017,16702,Voie sans dénomination,Lyon 5e Arrondissement,69385,Commune,,,5,,,,,
 T018,16703,Chemin Rural 20,Lyon 5e Arrondissement,69385,Commune,,,5,,,,,,"{""type"": ""LineString"", ""coordinates"": [[4.83, 45.765], [4.8305, 45.7655]]}"
 T019,16704,Esplanade Fernand Rude,Lyon 1er Arrondissement,69381,Métropole,,Aire Piétonne,5,,,,,,"{""type"": ""LineString"", ""coordinates"": [[4.8330, 45.7690], [4.8335, 45.7695]]}"
 T020,16800,Route de Strasbourg,Rillieux-la-Pape,69286,Métropole,,,80,7.5,,,,,"{""type"": ""LineString"", ""coordinates"": [[4.8900, 45.8100], [4.8910, 45.8110]]}"
+T021,16900,Rue Germain,Albigny-sur-Saone,69003,Métropole,,Zone de rencontre,20,3.5,,,,Arrete N°2022-080 du 18/03/2022,"{""type"": ""LineString"", ""coordinates"": [[4.8300, 45.8600], [4.8310, 45.8610]]}"
+T022,16900,Rue Germain,Albigny-sur-Saone,69003,Métropole,,Zone de rencontre,20,3.5,,,,Arrete N°2022-080 du 18/03/2022,"{""type"": ""LineString"", ""coordinates"": [[4.8310, 45.8610], [4.8320, 45.8620]]}"
+T023,17000,Rue de la Gare,Oullins,69149,Métropole,,Zone 30,30,3.5,,,,Arrete n°2025-100 du 05/01/2025,"{""type"": ""LineString"", ""coordinates"": [[4.8050, 45.7150], [4.8060, 45.7160]]}"
+T024,17001,Rue de la Poste,Oullins,69149,Métropole,,Zone 30,30,,,,,Arrete n°2025-100 du 05/01/2025,"{""type"": ""LineString"", ""coordinates"": [[4.8070, 45.7170], [4.8080, 45.7180]]}"
+T025,17100,Rue du Marche,Bron,69029,Métropole,,Zone 30,30,,,,,Arrete n°2025-200 du 12/02/2025,"{""type"": ""LineString"", ""coordinates"": [[4.9100, 45.7350], [4.9110, 45.7360]]}"
+T026,17101,Rue de l Eglise,Bron,69029,Métropole,,Zone de rencontre,20,,,,,Arrete n°2025-200 du 12/02/2025,"{""type"": ""LineString"", ""coordinates"": [[4.9120, 45.7370], [4.9130, 45.7380]]}"
