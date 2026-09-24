@@ -19,6 +19,18 @@ def test_the_same_regulation_always_hashes_the_same():
     assert fingerprint(first) == fingerprint(second)
 
 
+def test_an_empty_time_slot_list_is_the_same_as_none_at_all():
+    """`timeSlots: []` appeared with the daily slots: a snapshot built before (Paris) and one
+    built after (Lyon) must both keep matching what is produced today."""
+    without = build_regulation("A-1")
+    with_empty = build_regulation("A-1")
+    with_empty.measures[0].periods[0].time_slots = []  # type: ignore[index]
+
+    assert fingerprint(compute_regulation_digest(without)) == fingerprint(
+        compute_regulation_digest(with_empty)
+    )
+
+
 def test_a_changed_speed_changes_the_fingerprint():
     before = compute_regulation_digest(build_regulation("A-1", max_speed=50))
     after = compute_regulation_digest(build_regulation("A-1", max_speed=30))

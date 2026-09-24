@@ -28,6 +28,7 @@ jobs:
           - { organization: co_lyon, target: staging }
           - { organization: co_rennes, target: staging }
           - { organization: co_nantes, target: staging }
+          - { organization: co_paris, target: staging }
     environment: ${{ matrix.target == 'prod' && matrix.organization || format('{0}-{1}', matrix.organization, matrix.target) }}
     outputs:
       # One output per matrix value — names must be static
@@ -38,6 +39,7 @@ jobs:
       result_co_lyon:    ${{ steps.integration.outputs.result_co_lyon }}
       result_co_rennes:  ${{ steps.integration.outputs.result_co_rennes }}
       result_co_nantes:  ${{ steps.integration.outputs.result_co_nantes }}
+      result_co_paris:   ${{ steps.integration.outputs.result_co_paris }}
 
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +70,8 @@ jobs:
           DIALOG_BASE_URL: ${{ secrets.DIALOG_BASE_URL }}
           DIALOG_CLIENT_ID: ${{ secrets.DIALOG_CLIENT_ID }}
           DIALOG_CLIENT_SECRET: ${{ secrets.DIALOG_CLIENT_SECRET }}
+          # Source credentials, set only in the environments that need them (co_paris).
+          EUDONET_PARIS_CREDENTIALS: ${{ secrets.EUDONET_PARIS_CREDENTIALS }}
         # `--json` prints the run counters on stdout (the logs stay on stderr); they go
         # to the step output named after this org.
         run: |
