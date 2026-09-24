@@ -8,11 +8,24 @@ Every `location_*` column produced here is passed verbatim to `SaveNamedStreetDT
 nothing else may be emitted under that prefix (no label, no geometry).
 
 What is dropped, and counted (plan §5.3, R-02): zones, axes (the ring road by kilometre
-point), points without a number, sections without both bounds, withdrawn locations.
+point), points without a number, sections without both bounds, withdrawn locations, and
+locations limited to one direction (R-32 freeze).
+
+Crossing-road labels from the 2017 data migration are upper case with no accent nor
+apostrophe ("RUE D AUTEUIL"). DiaLog's geocoder does not recognise them; the official name
+does (probed on 2026-09-16, 6 cases out of 6). `street_names.json` is the list of official
+names (`l_longmin`) of the Paris open data street referential "Dénominations des emprises
+des voies actuelles" (ODbL), taken on 2026-09-08. The migration is frozen since 2017, so a
+frozen list covers it; only a street renamed since would be missed, and it is then sent
+as is. Rebuild: `sorted({f["properties"]["l_longmin"] for f in paris_voie.geojson})`.
 """
 
+import json
 import re
+import unicodedata
 from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
 
 import polars as pl
 from loguru import logger
@@ -41,16 +54,14 @@ CITY_CODE_BY_DISTRICT = {
     **{f"{n}ème arrondissement": f"751{n:02d}" for n in range(2, 21)},
 }
 
-# `2711` "Sens", relative to the geocoded segment (from the first bound to the last one).
-# The two "circulation générale" values are relative to the traffic, which the geocoded
-# segment does not know: they fall back on BOTH, and R-32 keeps one-way measures out
-# unless the direction is one of the three segment-relative values (see measure fields).
-DIRECTION_BY_LABEL = {
-    "du début vers la fin du segment": DirectionEnum.A_TO_B.value,
-    "de la fin vers le début du segment": DirectionEnum.B_TO_A.value,
-    "dans les deux sens": DirectionEnum.BOTH.value,
-}
-SEGMENT_RELATIVE_DIRECTIONS = tuple(DIRECTION_BY_LABEL)
+# `2711` "Sens" values that limit a location to one direction. R-32 freeze: no
+# one-direction measure is published until DiaLog carries the side of the road, so these
+# locations are dropped rather than widened to both directions. Every other value, the two
+# "circulation générale" ones included (relative to the traffic, not to the segment),
+# says nothing about the segment: BOTH.
+ONE_DIRECTION_LABELS = ("du début vers la fin du segment", "de la fin vers le début du segment")
+
+STREET_NAMES_FILE = Path(__file__).with_name("street_names.json")
 
 # "4", "12 bis", "n°39 à 43", "12B", "9t ", "39-43", "1B PASSAGE TURQUETIL". A one-letter
 # suffix only counts when nothing else follows it ("4 avenue" is a plain 4).
@@ -159,7 +170,7 @@ def parse_bound(
         match = _LEADING_NUMBER.match(label)
         if match:
             return Bound(POINT_TYPE_HOUSE_NUMBER, house_number=_format_number(*match.groups()))
-        return Bound(POINT_TYPE_INTERSECTION, road_name=label.strip())
+        return Bound(POINT_TYPE_INTERSECTION, road_name=official_street_name(label.strip()))
     return None
 
 
@@ -177,8 +188,23 @@ def city_code(district: str | None) -> str | None:
     return CITY_CODE_BY_DISTRICT.get(first)
 
 
-def direction(label: str | None) -> str:
-    return DIRECTION_BY_LABEL.get(label or "", DirectionEnum.BOTH.value)
+def street_key(name: str) -> str:
+    """ "Rue d'Auteuil", "RUE D AUTEUIL" → "RUE D AUTEUIL": no accent, no punctuation."""
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    return re.sub(r"[^A-Za-z0-9]+", " ", ascii_name).upper().strip()
+
+
+@cache
+def official_street_names() -> dict[str, str]:
+    names = json.loads(STREET_NAMES_FILE.read_text(encoding="utf-8"))
+    return {street_key(name): name for name in names}
+
+
+def official_street_name(label: str) -> str:
+    """The official spelling of an upper-case migration label, or the label unchanged."""
+    if label != label.upper():
+        return label
+    return official_street_names().get(street_key(label), label)
 
 
 def resolve_location(row: dict) -> dict:
@@ -189,9 +215,11 @@ def resolve_location(row: dict) -> dict:
         return {**fields, "location_rejection": "measure without location"}
     if row["l_status"] in WITHDRAWN_STATUSES:
         return {**fields, "location_rejection": "withdrawn location"}
-    road_name = (row["l_road_name"] or "").strip()
+    road_name = official_street_name((row["l_road_name"] or "").strip())
     if not road_name:
         return {**fields, "location_rejection": "no road name"}
+    if row["l_direction"] in ONE_DIRECTION_LABELS:
+        return {**fields, "location_rejection": "one direction only (R-32 freeze)"}
     code = city_code(row["l_district"])
     if code is None:
         return {**fields, "location_rejection": "no arrondissement"}
@@ -232,7 +260,7 @@ def resolve_location(row: dict) -> dict:
         location_city_code=code,
         location_city_label=CITY_LABEL,
         location_road_name=road_name,
-        location_direction=direction(row["l_direction"]),
+        location_direction=DirectionEnum.BOTH.value,
     )
     if start is not None and end is not None:
         fields.update(
@@ -256,7 +284,8 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     Drops, and counts by reason: rows without location, withdrawn locations (`2768`),
     missing road name, missing arrondissement, points without a house number, sections
-    without both bounds, zones, axes, unknown scopes. House-number suffixes are dropped.
+    without both bounds, zones, axes, unknown scopes, one-direction locations (R-32 freeze).
+    House-number suffixes are dropped; upper-case migration labels are respelled.
     """
     number_columns = ["l_from_house_number", "l_to_house_number", "l_point_house_number"]
     suffixed = df.select(

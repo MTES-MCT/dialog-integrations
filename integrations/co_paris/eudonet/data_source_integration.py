@@ -25,7 +25,14 @@ from zoneinfo import ZoneInfo
 import polars as pl
 from loguru import logger
 
-from api.dia_log_client.models import PeriodRecurrenceTypeEnum, PostApiRegulationsAddBodySubject
+from api.dia_log_client.models import (
+    MeasureTypeEnum,
+    PeriodRecurrenceTypeEnum,
+    PostApiRegulationsAddBodySubject,
+)
+from api.dia_log_client.models import (
+    PostApiRegulationsAddBodyMeasuresItemVehicleSetType0ExemptedTypesType0Item as VehicleExemptedTypeEnum,  # noqa: E501
+)
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.shared.local_time import end_of_local_day, start_of_local_day
 
@@ -35,7 +42,6 @@ from .schema import EudonetRawDataSchema
 from .vocabulary import (
     ACCEPTED_STATE_LABELS,
     ALL_VEHICLES_LABELS,
-    DIRECTIONAL_LOCATION_LABELS,
     EXEMPTED_OTHER,
     EXEMPTION_BY_LABEL,
     EXEMPTION_PARAMETERS,
@@ -43,16 +49,18 @@ from .vocabulary import (
     IMPLIED_MAX_SPEED_BY_LABEL,
     LABEL_CATEGORY_LIMIT,
     LABEL_DIMENSION_LIMIT,
-    LABEL_ONE_WAY,
+    LABEL_PEDESTRIAN_AREA,
     LABEL_SPEED_LIMIT,
     MEASURE_TYPE_BY_LABEL,
     MULTI_VALUE_SEPARATOR,
+    PEDESTRIAN_AREA_SPEED,
     PERMANENT_SUBJECT_TEXT,
     REGULATION_CATEGORY_BY_LABEL,
     REGULATION_SUBJECT_BY_REASON,
     RESTRICTED_OTHER,
     RESTRICTION_BY_LABEL,
     RESTRICTION_PARAMETERS,
+    SERVICE_POLICE_PREFECTURE,
     TIME_SLOT_PARAMETERS,
     TYPE_PERMANENT_LABEL,
     TYPE_TEMPORARY_LABEL,
@@ -76,6 +84,9 @@ TABLE_LOCATIONS = 2700
 FIELD_REGULATION_LINK = 1101
 FIELD_MEASURE_LINK = 1202
 FILTER_MEASURE_OF_LOCATION = TABLE_MEASURES
+
+# `1202` on table 1200 is the measure name (catalog), on table 2700 the link to the measure.
+FIELD_MEASURE_NAME = 1202
 
 # Perimeter fields on table 1100.
 FIELD_TYPE = 1108
@@ -211,6 +222,17 @@ SPEED_PARAMETER = "valeur de la vitesse"
 # Working column: the start date a permanent regulation ends up using (R-39).
 PERIOD_START_SOURCE = "_period_start_source"
 
+# The police prefecture signs about a third of the acts in Eudonet, on Paris streets, under
+# its own authority. R-73 by analogy: another authority is not published under the City's
+# name without the City's agreement. True while co_paris targets staging only (decision of
+# 2026-09-23, question to Paris in the team report); set it to False before prod unless
+# Paris agrees.
+PUBLISH_POLICE_PREFECTURE = True
+
+# Ceiling on the locations of one POST (R-76, same margin as Lyon). The largest Paris act
+# carries ~600 locations: a guard, not a cut that happens today.
+MAX_LOCATIONS_PER_REGULATION = 1000
+
 
 def today_in_paris() -> date:
     """The current day on the French calendar, which is the one Eudonet dates are on."""
@@ -242,13 +264,21 @@ def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[st
     """The three tables of the perimeter, as flat rows keyed by table number.
 
     Measures are filtered on their parent's fields, which the API accepts one level up but
-    not two: locations are therefore fetched by batches of measure identifiers.
+    not two: locations are therefore fetched by batches of measure identifiers — and only
+    for the measures DiaLog can carry. The others are dropped by `compute_measure_fields`
+    whatever their locations; asking for them cost 83 % of the location pages (1 744 pages,
+    ~25 min on the run of 2026-09-16).
     """
     where = perimeter_criteria(today)
 
     regulations = client.search_all(TABLE_REGULATIONS, REGULATION_COLUMNS, where, "regulations")
     measures = client.search_all(TABLE_MEASURES, MEASURE_COLUMNS, where, "measures")
-    measure_ids = [row["FileId"] for row in measures]
+    located_measures = [row for row in measures if needs_locations(row)]
+    logger.info(
+        f"Fetching the locations of {len(located_measures)} measures out of {len(measures)}: "
+        "the others have no DiaLog equivalent"
+    )
+    measure_ids = [row["FileId"] for row in located_measures]
     locations = client.search_by_ids(
         TABLE_LOCATIONS,
         LOCATION_COLUMNS,
@@ -257,13 +287,22 @@ def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[st
         label="locations",
     )
 
-    check_extraction_completeness(measures, locations)
+    check_extraction_completeness(located_measures, locations)
 
     return {
         str(TABLE_REGULATIONS): regulations,
         str(TABLE_MEASURES): measures,
         str(TABLE_LOCATIONS): locations,
     }
+
+
+def needs_locations(measure: dict[str, Any]) -> bool:
+    """False only for a measure whose label the closed table marks as out of the model.
+
+    An unknown label keeps its locations: `compute_measure_fields` has to raise on it.
+    """
+    label = _text(measure, FIELD_MEASURE_NAME)
+    return label not in MEASURE_TYPE_BY_LABEL or MEASURE_TYPE_BY_LABEL[label] is not None
 
 
 def check_extraction_completeness(
@@ -299,7 +338,10 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
     """One row per location, carrying its measure and its regulation.
 
     Childless parents are kept with null children so that the funnel counts them:
-    a regulation with no measure, a measure with no location.
+    a regulation with no measure, a measure with no location. A measure out of the model
+    gets a single row without location, whether or not its locations were read: the
+    online extraction does not fetch them (`needs_locations`), and a frozen dump must give
+    the same rows.
     """
     regulations = tables.get(str(TABLE_REGULATIONS), [])
     measures = tables.get(str(TABLE_MEASURES), [])
@@ -343,6 +385,9 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
 
         for measure in own_measures:
             measure_fields = _measure_fields(measure)
+            if not needs_locations(measure):
+                rows.append({**regulation_fields, **measure_fields, **_location_fields(None)})
+                continue
             own_locations = locations_by_measure.get(measure["FileId"], [])
             if not own_locations:
                 measures_without_location += 1
@@ -366,6 +411,9 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
 class DataSourceIntegration(BaseDataSourceIntegration):
     name = "eudonet"
     raw_data_schema = EudonetRawDataSchema
+    # One Eudonet measure is one DiaLog measure carrying all its locations (R-76, D-18).
+    group_locations_by_measure = True
+    max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
     metrics: dict[str, int]
 
     def fetch_raw_data(self) -> pl.DataFrame:
@@ -401,19 +449,22 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         return build_raw_dataframe(tables)
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
-        """The five transformations, piped in the order their filters depend on.
+        """The transformations, piped in the order their filters depend on.
 
-        The perimeter filter comes first (it removes whole regulations), then the measure
+        The perimeter filters come first (they remove whole regulations), then the measure
         type (it decides what a row even is), then the vehicles it restricts, then the
         dates, then the location. `compute_location_fields` lives in `locations.py`: it
-        owns the `l_*` columns, the `2768` status and the shapes of the borders.
+        owns the `l_*` columns, the `2768` status and the shapes of the borders. The
+        pedestrian areas get their speed twin last, so that it inherits every filter.
         """
         return (
-            raw_data.pipe(compute_regulation_fields)
+            raw_data.pipe(discard_police_prefecture)
+            .pipe(compute_regulation_fields)
             .pipe(compute_measure_fields)
             .pipe(compute_vehicle_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
+            .pipe(add_pedestrian_area_speed)
         )
 
     def _credentials(self) -> dict[str, Any]:
@@ -500,7 +551,7 @@ def _measure_fields(row: dict[str, Any] | None) -> dict[str, Any]:
         return {"m_file_id": None, "m_type": None, "m_params": None, "m_modified_at": None}
     return {
         "m_file_id": row["FileId"],
-        "m_type": _text(row, 1202),
+        "m_type": _text(row, FIELD_MEASURE_NAME),
         "m_params": _measure_parameters(row),
         "m_modified_at": _db_datetime(row, 1296),
     }
@@ -574,6 +625,30 @@ def _count_by(df: pl.DataFrame, column: str) -> dict[str, int]:
         return {}
     counts = df.get_column(column).fill_null("(empty)").value_counts(sort=True)
     return {str(k): int(v) for k, v in counts.iter_rows()}
+
+
+def discard_police_prefecture(df: pl.DataFrame, publish: bool | None = None) -> pl.DataFrame:
+    """Drop the acts of the police prefecture unless `PUBLISH_POLICE_PREFECTURE` says so.
+
+    Counted either way, so the report always carries the share of the prefecture.
+    """
+    publish = PUBLISH_POLICE_PREFECTURE if publish is None else publish
+    is_prefecture = (pl.col("a_service") == SERVICE_POLICE_PREFECTURE).fill_null(False)
+    prefecture = df.filter(is_prefecture)
+    if not prefecture.height:
+        return df
+    regulations = prefecture["a_identifier"].n_unique()
+    if publish:
+        logger.info(
+            f"Keeping {prefecture.height} rows of {regulations} police prefecture regulations "
+            "(PUBLISH_POLICE_PREFECTURE, staging only until Paris agrees)"
+        )
+        return df
+    logger.warning(
+        f"Dropping {prefecture.height} rows of {regulations} police prefecture regulations "
+        "(R-73: another authority)"
+    )
+    return df.filter(~is_prefecture)
 
 
 def compute_regulation_fields(df: pl.DataFrame, today: date | None = None) -> pl.DataFrame:
@@ -724,16 +799,20 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     * measures whose type has no DiaLog equivalent, counted **by label** (R-30);
     * `limitation de vitesse` without a readable "valeur de la vitesse" parameter: a speed
       limitation with no speed says nothing, and 30 or 50 is not ours to pick (R-02, R-35);
-    * `sens interdit (ou sens unique)` whose location does not name a direction along the
-      segment (R-32). `2711` is filled on 0 of the 1 187 one-way locations of the
-      2026-09-08 perimeter, so this drops all of them today — that is the measurement, not
-      an accident, and it is what makes question 2 to Paris worth asking.
+    * measures with a filled "Jours et Horaires" parameter: the text has to be read in full
+      or the measure goes (R-78), and none read so far is expressible in DiaLog.
+
+    Produces `measure_group_key` too: the Eudonet measure, so that its locations collapse
+    into one DiaLog measure (R-76).
 
     Raises `EudonetVocabularyError` on a measure label absent from `MEASURE_TYPE_BY_LABEL`:
     Paris can extend catalog `1202`, and a new value has to be qualified by a human.
 
     `zone 30` carries its limit in its own name (30 km/h); every other speed comes from the
     parameter, read as the first integer before `km/h` ("à 30 km/h", "30 km/h").
+
+    `sens interdit` and `mise en impasse` are out of the model on purpose (R-32 freeze,
+    R-02): see `vocabulary.MEASURE_TYPE_BY_LABEL`.
     """
     no_measure = df.filter(pl.col("m_type").is_null())
     if no_measure.height:
@@ -794,15 +873,26 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
         )
     df = df.filter(~speedless)
 
-    has_direction = pl.col("l_direction").is_in(DIRECTIONAL_LOCATION_LABELS).fill_null(False)
-    is_one_way = pl.col("m_type") == LABEL_ONE_WAY
-    dropped = df.filter(is_one_way & ~has_direction)
+    has_time_slot = pl.Series(
+        [
+            any(
+                len(pair) == 2 and pair[0].strip() in TIME_SLOT_PARAMETERS and pair[1].strip()
+                for pair in params or []
+            )
+            for params in df.get_column("m_params").to_list()
+        ],
+        dtype=pl.Boolean,
+    )
+    dropped = df.filter(has_time_slot)
     if dropped.height:
         logger.warning(
-            f"Dropping {dropped.height} '{LABEL_ONE_WAY}' measures whose location carries no "
-            "usable direction (2711): a one-way without a direction is a coin toss (R-32)"
+            f"Dropping {dropped.height} rows of {dropped['m_file_id'].n_unique()} measures whose "
+            "'Jours et Horaires' text DiaLog cannot express (R-78): "
+            f"{_count_by(dropped, 'm_type')}"
         )
-    return df.filter(~is_one_way | has_direction)
+    df = df.filter(~has_time_slot)
+
+    return df.with_columns(pl.col("m_file_id").cast(pl.Utf8).alias("measure_group_key"))
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
@@ -817,14 +907,15 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     `dérogation pour véhicule`, `dérogation pour usager` and `Dérogations véhicules` say who
     is exempted. Values are multi-valued, joined by "; ", and are split before mapping.
     `caractère aggravant` is skipped (it qualifies the offence, not the vehicle);
-    `Jours et Horaires` is skipped too but counted, because the pivot has no time slot and
-    dropping the slot silently widens the measure to the whole day (plan §4.3).
+    `Jours et Horaires` has already been handled by `compute_measure_fields`.
 
-    `allVehicles = true` only when nothing restricts (R-34) — **except** on
-    `limitation dimensionnelle` and `limitation catégorielle`, where an empty vehicle set
-    would turn a gauge limit into a road closed to everyone (R-30, review B-2). Those get
-    `other` + the measure label as free text instead. A label the tables do not know also
-    becomes `other` + that label: readable, and no threshold invented (R-35).
+    `allVehicles = true` only when nothing restricts (R-34). A pedestrian area also exempts
+    `desserteLocale` (R-71), on top of the exemptions Paris lists. A label the tables do not
+    know becomes `other` + that label: readable, and no threshold invented (R-35).
+
+    Drops, and counts, the `limitation dimensionnelle` and `limitation catégorielle`
+    measures with no readable vehicle value: an empty vehicle set would close the road to
+    everyone, and "other" with no threshold tells a GPS nothing (R-35).
     """
     restricted_types: list[list[str] | None] = []
     exempted_types: list[list[str] | None] = []
@@ -838,8 +929,7 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     unknown_restrictions: Counter[str] = Counter()
     unknown_exemptions: Counter[str] = Counter()
-    time_slots_dropped = 0
-    forced_other = 0
+    unreadable_limit: list[bool] = []
 
     for measure_label, params in zip(df.get_column("m_type"), df.get_column("m_params").to_list()):
         restricted: list[str] = []
@@ -852,11 +942,7 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
             if len(pair) != 2:
                 continue
             name = pair[0].strip()
-            if name in IGNORED_PARAMETERS:
-                continue
-            if name in TIME_SLOT_PARAMETERS:
-                if pair[1].strip():
-                    time_slots_dropped += 1
+            if name in IGNORED_PARAMETERS or name in TIME_SLOT_PARAMETERS:
                 continue
             if name not in RESTRICTION_PARAMETERS and name not in EXEMPTION_PARAMETERS:
                 continue
@@ -887,11 +973,11 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
                         continue
                     _append_unique(exempted, known_exemption)
 
-        if not restricted and measure_label in (LABEL_DIMENSION_LIMIT, LABEL_CATEGORY_LIMIT):
-            # Never a closure of the whole road for a gauge or a category we could not read.
-            forced_other += 1
-            restricted = [RESTRICTED_OTHER]
-            restricted_texts = [measure_label]
+        unreadable_limit.append(
+            not restricted and measure_label in (LABEL_DIMENSION_LIMIT, LABEL_CATEGORY_LIMIT)
+        )
+        if measure_label == LABEL_PEDESTRIAN_AREA:
+            exempted.insert(0, VehicleExemptedTypeEnum.DESSERTELOCALE.value)
 
         restricted_types.append(restricted or None)
         exempted_types.append(exempted or None)
@@ -921,15 +1007,13 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
             f"{sum(unknown_exemptions.values())} exemption values outside the DiaLog "
             f"enumeration, kept as 'other' + free text: {dict(unknown_exemptions)}"
         )
-    if time_slots_dropped:
+    unreadable = pl.Series(unreadable_limit, dtype=pl.Boolean)
+    dropped = df.filter(unreadable)
+    if dropped.height:
         logger.warning(
-            f"Ignoring the 'Jours et Horaires' parameter on {time_slots_dropped} measures: "
-            "the pivot has no time slot, so they are broadcast for the whole day (phase 2)"
-        )
-    if forced_other:
-        logger.info(
-            f"{forced_other} gauge or category measures had no readable vehicle value: "
-            "restricted to 'other' + the measure label rather than to every vehicle"
+            f"Dropping {dropped.height} rows of {dropped['m_file_id'].n_unique()} gauge or "
+            "category measures with no readable vehicle value (R-35): "
+            f"{_count_by(dropped, 'm_type')}"
         )
 
     return df.with_columns(
@@ -944,7 +1028,7 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
             pl.Series("vehicle_other_restricted_type_text", other_restricted, dtype=pl.Utf8),
             pl.Series("vehicle_other_exempted_type_text", other_exempted, dtype=pl.Utf8),
         ]
-    )
+    ).filter(~unreadable)
 
 
 def _append_unique(values: list[str], value: str) -> None:
@@ -970,16 +1054,15 @@ def compute_period_fields(df: pl.DataFrame, today: date | None = None) -> pl.Dat
 
     Temporary: `1109` at the first instant of its day, `1110` at the last second of its day,
     `is_permanent = False`. Permanent: no end date, `is_permanent = True`, and a start date
-    taken from `1109`, else the signature date `1111`, else the day of `1196` "Modifié le" —
-    never a constant (R-39). Each fallback is counted.
+    taken from `1109`, else the signature date `1111`, else none: the pipeline dates it on
+    first write (R-39, `integrations/sync/dating.py`). Each fallback is counted.
 
     Drops (each counted in a log line):
 
     * **the whole regulation**, every row of it, when a date control of R-38 fails —
       `début > fin`, `année(début) > année(today) + 1`, `année(fin) > année(today) + 5`.
       A typo on the year leaves the act "En vigueur" in Eudonet until that year comes
-      (`2019T15796` runs to 2109), so the state alone cannot be trusted;
-    * permanent regulations with no date at all, start, signature and modification alike.
+      (`2019T15796` runs to 2109), so the state alone cannot be trusted.
 
     Temporary regulations lasting more than a year are **kept** and counted: on the
     2026-09-08 perimeter they are long works sites (tramway, RATP), not mistakes.
@@ -1017,13 +1100,7 @@ def compute_period_fields(df: pl.DataFrame, today: date | None = None) -> pl.Dat
     df = df.with_columns(
         pl.when(~is_permanent)
         .then(pl.col("a_start_date"))
-        .otherwise(
-            pl.coalesce(
-                pl.col("a_start_date"),
-                pl.col("a_signed_at"),
-                pl.col("a_modified_at").dt.date(),
-            )
-        )
+        .otherwise(pl.coalesce(pl.col("a_start_date"), pl.col("a_signed_at")))
         .alias(PERIOD_START_SOURCE)
     )
 
@@ -1032,17 +1109,9 @@ def compute_period_fields(df: pl.DataFrame, today: date | None = None) -> pl.Dat
         on_signature = fallbacks.filter(pl.col("a_signed_at").is_not_null()).height
         logger.warning(
             f"{fallbacks.height} permanent rows have no start date: {on_signature} fall back on "
-            f"the signature date, {fallbacks.height - on_signature} on the modification date "
+            f"the signature date, {fallbacks.height - on_signature} are dated on first write "
             "(R-39)"
         )
-
-    undated = df.filter(pl.col(PERIOD_START_SOURCE).is_null())
-    if undated.height:
-        logger.warning(
-            f"Dropping {undated.height} rows of {undated['a_identifier'].n_unique()} regulations "
-            "with no usable start date at all (start, signature and modification all empty)"
-        )
-    df = df.filter(pl.col(PERIOD_START_SOURCE).is_not_null())
 
     if not df.height:
         return df.drop(PERIOD_START_SOURCE).with_columns(
@@ -1065,3 +1134,32 @@ def compute_period_fields(df: pl.DataFrame, today: date | None = None) -> pl.Dat
             is_permanent.alias("period_is_permanent"),
         ]
     ).drop(PERIOD_START_SOURCE)
+
+
+def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:
+    """Give every published pedestrian area its walking-pace limit, in the same regulation.
+
+    R-71 (Code de la route R. 110-2): only the vehicles serving the area may enter, and at
+    walking pace. The limit is a twin of the ban — same locations, same regulation — so it
+    inherits every filter the ban went through. It applies to every vehicle, with no
+    exemption: the ones let in still drive at walking pace. Same rule as Lyon.
+    """
+    bans = df.filter(pl.col("m_type") == LABEL_PEDESTRIAN_AREA)
+    if not bans.height:
+        return df
+    speeds = bans.with_columns(
+        pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value).alias("measure_type_"),
+        pl.lit(PEDESTRIAN_AREA_SPEED, dtype=df.schema["measure_max_speed"]).alias(
+            "measure_max_speed"
+        ),
+        (pl.col("measure_group_key") + pl.lit(f"-V{PEDESTRIAN_AREA_SPEED}")).alias(
+            "measure_group_key"
+        ),
+        pl.lit(None, dtype=pl.List(pl.Utf8)).alias("vehicle_exempted_types"),
+        pl.lit(None, dtype=pl.Utf8).alias("vehicle_other_exempted_type_text"),
+    )
+    logger.info(
+        f"{bans['m_file_id'].n_unique()} pedestrian-area bans get their "
+        f"{PEDESTRIAN_AREA_SPEED} km/h twin ({speeds.height} locations)"
+    )
+    return pl.concat([df, speeds], how="vertical")

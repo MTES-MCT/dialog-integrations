@@ -129,7 +129,18 @@ def test_bound_from_a_2017_label_with_a_number_is_a_house_number():
 
 
 def test_bound_from_a_2017_label_without_a_number_is_an_intersection():
-    assert parse_bound(None, None, "RUE DANTE") == Bound("intersection", road_name="RUE DANTE")
+    assert parse_bound(None, None, "RUE DANTE") == Bound("intersection", road_name="Rue Dante")
+
+
+def test_a_2017_label_is_respelled_with_the_official_street_name():
+    """Staging of 2026-09-16: "RUE D AUTEUIL" refused, "Rue d'Auteuil" geocoded."""
+    assert locations.official_street_name("RUE D AUTEUIL") == "Rue d'Auteuil"
+    assert locations.official_street_name("PLACE PAUL PAINLEVE") == "Place Paul Painlevé"
+
+
+def test_a_label_outside_the_referential_or_already_spelled_is_left_as_is():
+    assert locations.official_street_name("PONT DES ARTS ZZZ") == "PONT DES ARTS ZZZ"
+    assert locations.official_street_name("Rue des Dames") == "Rue des Dames"
 
 
 def test_no_bound():
@@ -242,7 +253,7 @@ def test_section_from_the_2017_migration():
     )
     assert (row["location_to_point_type"], row["location_to_road_name"]) == (
         "intersection",
-        "BOULEVARD VINCENT AURIOL",
+        "Boulevard Vincent Auriol",
     )
 
 
@@ -303,18 +314,20 @@ def test_kept_rows_keep_their_other_columns_and_lose_the_rejection_column():
 
 
 @pytest.mark.parametrize(
-    "label, expected",
-    [
-        ("du début vers la fin du segment", "A_TO_B"),
-        ("de la fin vers le début du segment", "B_TO_A"),
-        ("dans les deux sens", "BOTH"),
-        ("dans le sens de la circulation générale", "BOTH"),
-        (None, "BOTH"),
-    ],
+    "label",
+    ["dans les deux sens", "dans le sens de la circulation générale", None],
 )
-def test_direction(label, expected):
+def test_a_location_not_limited_to_one_direction_goes_both_ways(label):
     row = compute_location_fields(frame(point("4", l_direction=label))).row(0, named=True)
-    assert row["location_direction"] == expected
+    assert row["location_direction"] == "BOTH"
+
+
+@pytest.mark.parametrize(
+    "label", ["du début vers la fin du segment", "de la fin vers le début du segment"]
+)
+def test_a_location_limited_to_one_direction_is_dropped(label):
+    """R-32 freeze: never widened to both directions, never published one way."""
+    assert compute_location_fields(frame(point("4", l_direction=label))).height == 0
 
 
 # -- contract with the pivot and the DTO -------------------------------------------------
@@ -356,4 +369,4 @@ def test_a_numbered_road_label_is_a_house_number_on_the_road_itself():
     bound = parse_bound(None, "22 RUE DES REGLISES", "22 RUE DES REGLISES")
     assert bound == Bound(locations.POINT_TYPE_HOUSE_NUMBER, house_number="22")
     bound = parse_bound(None, "RUE DU FAUCONNIER", None)
-    assert bound == Bound(locations.POINT_TYPE_INTERSECTION, road_name="RUE DU FAUCONNIER")
+    assert bound == Bound(locations.POINT_TYPE_INTERSECTION, road_name="Rue du Fauconnier")

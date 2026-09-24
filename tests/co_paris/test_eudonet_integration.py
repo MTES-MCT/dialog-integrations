@@ -76,7 +76,7 @@ def test_the_whole_integration_runs_offline(integration, captured_regulations):
     assert all(len(identifier) <= 60 for identifier in identifiers)
 
     for regulation in captured_regulations:
-        assert regulation.status == PostApiRegulationsAddBodyStatus.DRAFT
+        assert regulation.status == PostApiRegulationsAddBodyStatus.PUBLISHED
         assert regulation.title and len(regulation.title) <= 255
         assert regulation.other_category_text is None or (
             len(regulation.other_category_text) <= 100
