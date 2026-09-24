@@ -39,7 +39,9 @@ ACCEPTED_STATE_LABELS = ("En vigueur", "Publié", "Signé")
 # `None` means "outside the five DiaLog types" (R-30): the measure is dropped and counted,
 # never bent into an approaching type (R-02).
 MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
-    "aire piétonne": None,
+    # R-71: the producer names the area, so it is published as `noEntry` + `desserteLocale`
+    # plus a 5 km/h twin (`add_pedestrian_area_speed`).
+    "aire piétonne": MeasureTypeEnum.NOENTRY.value,
     "cédez le passage": None,
     "circulation alternée": MeasureTypeEnum.ALTERNATEROAD.value,
     "circulation interdite": MeasureTypeEnum.NOENTRY.value,
@@ -57,12 +59,15 @@ MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
     "limitation de vitesse": MeasureTypeEnum.SPEEDLIMITATION.value,
     "limitation dimensionnelle": MeasureTypeEnum.NOENTRY.value,
     "Mesure libre": None,
-    "mise en impasse": MeasureTypeEnum.NOENTRY.value,
+    # A dead end closes one end of the street, not the street: as `noEntry` both ways it
+    # would read as a full closure (R-02, decision of 2026-09-23).
+    "mise en impasse": None,
     "obligation d'allumage des feux": None,
     "obligation de mouvement": None,
     "périmètre zone": None,
     "rétablissement double sens": None,
-    "sens interdit (ou sens unique)": MeasureTypeEnum.NOENTRY.value,
+    # R-32 freeze: no one-direction measure until DiaLog carries the side of the road.
+    "sens interdit (ou sens unique)": None,
     "stationnement réservé": None,
     "stop": None,
     "suppression stationnement réservé": None,
@@ -78,21 +83,18 @@ MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
 # Measure labels the transformations single out by name.
 LABEL_SPEED_LIMIT = "limitation de vitesse"
 LABEL_ZONE_30 = "zone 30"
-LABEL_ONE_WAY = "sens interdit (ou sens unique)"
+LABEL_PEDESTRIAN_AREA = "aire piétonne"
 LABEL_DIMENSION_LIMIT = "limitation dimensionnelle"
 LABEL_CATEGORY_LIMIT = "limitation catégorielle"
 
 # `zone 30` carries its speed in its own name; nothing else does.
 IMPLIED_MAX_SPEED_BY_LABEL: dict[str, int] = {LABEL_ZONE_30: 30}
 
-# `2711` Sens. Only the three that name a direction along the segment can be turned into a
-# DiaLog direction; "dans le sens (inverse) de la circulation générale" says nothing about
-# how the segment itself is oriented, so a one-way built on it would be a coin toss (R-32).
-DIRECTIONAL_LOCATION_LABELS = (
-    "du début vers la fin du segment",
-    "de la fin vers le début du segment",
-    "dans les deux sens",
-)
+# R-71: a pedestrian area is also a walking-pace limit, published in the same regulation.
+PEDESTRIAN_AREA_SPEED = 5
+
+# `1105` Service: the police prefecture is another authority than the City (R-73 by analogy).
+SERVICE_POLICE_PREFECTURE = "Préfecture de Police"
 
 # `1114` Raison. Everything the catalog holds beyond these lands on `other` + free text
 # (R-27); permanent regulations carry no reason at all and get their own text.
@@ -136,8 +138,9 @@ EXEMPTION_PARAMETERS = frozenset(
 # qualification of an illegal parking, not a restriction on a vehicle set.
 IGNORED_PARAMETERS = frozenset({"caractère aggravant"})
 
-# Time slots. The pivot has no `timeSlots` / `dailyRange`, so the parameter is dropped —
-# but counted, because dropping it broadens the measure to the whole day (plan §4.3).
+# Time slots, as free text. A filled one drops the measure (R-78): the only value seen on a
+# mappable measure, "de 20h00 à 7h00 ainsi que les dimanches et jours fériés", names public
+# holidays, which DiaLog cannot express.
 TIME_SLOT_PARAMETERS = frozenset({"Jours et Horaires"})
 
 # The only value that means "no restriction at all" (R-34).

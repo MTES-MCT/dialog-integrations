@@ -15,6 +15,7 @@ from integrations.co_paris.eudonet.data_source_integration import (
     DataSourceIntegration,
     build_raw_dataframe,
     load_fixture,
+    needs_locations,
     perimeter_criteria,
 )
 from integrations.co_paris.eudonet.schema import EudonetRawDataSchema
@@ -77,15 +78,20 @@ def test_the_raw_dataframe_matches_the_column_contract(raw):
 
 
 def test_there_is_one_row_per_location_plus_the_childless_parents(raw, tables):
-    measures_with_location = {row["1202_fid"] for row in tables["2700"]}
-    childless_measures = [m for m in tables["1200"] if m["FileId"] not in measures_with_location]
+    """Out-of-model measures take one row without location, like the online extraction."""
+    carried = {m["FileId"] for m in tables["1200"] if needs_locations(m)}
+    carried_locations = [row for row in tables["2700"] if row["1202_fid"] in carried]
+    measures_with_location = {row["1202_fid"] for row in carried_locations}
+    locationless_measures = [m for m in tables["1200"] if m["FileId"] not in measures_with_location]
     regulations_with_measure = {m["1101_fid"] for m in tables["1200"]}
     childless_regulations = [
         a for a in tables["1100"] if a["FileId"] not in regulations_with_measure
     ]
 
-    assert raw.height == len(tables["2700"]) + len(childless_measures) + len(childless_regulations)
-    assert raw["l_file_id"].null_count() == len(childless_measures) + len(childless_regulations)
+    assert raw.height == (
+        len(carried_locations) + len(locationless_measures) + len(childless_regulations)
+    )
+    assert raw["l_file_id"].null_count() == len(locationless_measures) + len(childless_regulations)
     assert raw["m_file_id"].null_count() == len(childless_regulations)
 
 
@@ -216,3 +222,12 @@ def test_credentials_are_read_from_the_organization_settings(source, monkeypatch
 
     assert seen["credentials"] == {"user": "someone"}
     assert seen["today"] == datetime.now(ZoneInfo("Europe/Paris")).date()
+
+
+def test_only_the_measures_dialog_can_carry_need_their_locations():
+    """83 % of the location pages served measures dropped anyway (run of 2026-09-16)."""
+    assert needs_locations({"1202": "interdiction de stationnement"})
+    assert needs_locations({"1202": "aire piétonne"})
+    assert not needs_locations({"1202": "stationnement réservé"})
+    # An unknown label keeps its locations: the transformation has to raise on it.
+    assert needs_locations({"1202": "interdiction de klaxonner"})

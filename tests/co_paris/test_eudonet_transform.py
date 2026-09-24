@@ -27,11 +27,13 @@ from integrations.co_paris.eudonet.data_source_integration import (
     TITLE_MAX_LENGTH,
     DataSourceIntegration,
     EudonetVocabularyError,
+    add_pedestrian_area_speed,
     build_raw_dataframe,
     compute_measure_fields,
     compute_period_fields,
     compute_regulation_fields,
     compute_vehicle_fields,
+    discard_police_prefecture,
     load_fixture,
 )
 from integrations.co_paris.eudonet.vocabulary import (
@@ -309,8 +311,8 @@ def test_measures_outside_the_model_are_dropped_and_counted(raw, captured_logs):
     compute_measure_fields(compute_regulation_fields(raw, TODAY))
     dropped = [line for line in captured_logs if "without a DiaLog equivalent" in line]
     assert len(dropped) == 1
-    assert "'stationnement réservé': 179" in dropped[0]
-    assert "'aire piétonne': 1" in dropped[0]
+    # One row per measure: the locations of out-of-model measures are never read.
+    assert "'stationnement réservé': 6" in dropped[0]
 
 
 def test_rows_without_any_measure_are_dropped_and_counted(captured_logs):
@@ -354,36 +356,72 @@ def test_no_speed_leaks_onto_another_measure_type():
     assert df.get_column("measure_max_speed").to_list() == [None]
 
 
-@pytest.mark.parametrize(
-    "direction, kept",
-    [
-        ("du début vers la fin du segment", True),
-        ("de la fin vers le début du segment", True),
-        ("dans les deux sens", True),
-        ("dans le sens de la circulation générale", False),
-        ("dans le sens inverse de la circulation générale", False),
-        (None, False),
-        ("", False),
-    ],
-)
-def test_a_one_way_needs_a_direction_along_the_segment(direction, kept):
-    """R-32. `2711` is filled on 0 of the 1 187 one-way locations of the perimeter."""
-    row = make_row(m_type="sens interdit (ou sens unique)", l_direction=direction)
-    df = compute_measure_fields(compute_regulation_fields(make_frame(row), TODAY))
-    assert df.height == (1 if kept else 0)
+@pytest.mark.parametrize("label", ["sens interdit (ou sens unique)", "mise en impasse"])
+def test_one_ways_and_dead_ends_are_out_of_the_model(label, captured_logs):
+    """R-32 freeze for the one-way; a dead end is not a closure of the street (R-02)."""
+    row = make_row(m_type=label, l_direction="du début vers la fin du segment")
+    assert pipeline(row).height == 0
+    assert any("without a DiaLog equivalent" in line and label in line for line in captured_logs)
 
 
-def test_the_one_way_of_the_fixture_is_dropped_for_lack_of_a_direction(clean):
+def test_the_one_way_of_the_fixture_is_dropped(clean):
     assert "05-00133" not in set(clean.get_column("a_identifier"))
 
 
-def test_a_dead_end_closes_the_road_to_everyone():
-    """`mise en impasse` → `noEntry` + `allVehicles` (plan §4.1, to confirm with Paris)."""
-    row = make_row(m_type="mise en impasse", m_params=None)
-    df = pipeline(row)
-    assert df.get_column("measure_type_").to_list() == [MeasureTypeEnum.NOENTRY.value]
-    assert df.get_column("vehicle_all_vehicles").to_list() == [True]
-    assert df.get_column("vehicle_restricted_types").to_list() == [None]
+def test_a_filled_time_slot_drops_the_measure(captured_logs):
+    """R-78: "les dimanches et jours fériés" is not expressible, so the measure goes."""
+    row = make_row(
+        m_params=[["Jours et Horaires", "de 20h00 à 7h00 ainsi que les dimanches et jours fériés"]]
+    )
+    assert pipeline(row).height == 0
+    assert any("'Jours et Horaires'" in line for line in captured_logs)
+
+
+def test_an_empty_time_slot_is_no_time_slot():
+    assert pipeline(make_row(m_params=[["Jours et Horaires", ""]])).height == 1
+
+
+def test_every_location_of_a_measure_shares_its_group_key():
+    """R-76: one Eudonet measure is one DiaLog measure, whatever its number of locations."""
+    df = pipeline(make_row(l_file_id=1), make_row(l_file_id=2), make_row(m_file_id=11))
+    assert df.get_column("measure_group_key").to_list() == ["10", "10", "11"]
+    assert DataSourceIntegration.group_locations_by_measure
+
+
+def test_a_pedestrian_area_is_a_ban_with_local_access_and_a_walking_pace_twin():
+    """R-71: `noEntry` + `desserteLocale` + Paris's own exemptions, and 5 km/h for all."""
+    row = make_row(
+        m_type="aire piétonne",
+        m_params=[
+            [
+                "Dérogations véhicules",
+                "cycles ; véhicules d'intérêt général prioritaires"
+                " ou bénéficiant de facilités de passage",
+            ]
+        ],
+    )
+    df = add_pedestrian_area_speed(pipeline(row)).sort("measure_type_")
+    assert df.get_column("measure_type_").to_list() == [
+        MeasureTypeEnum.NOENTRY.value,
+        MeasureTypeEnum.SPEEDLIMITATION.value,
+    ]
+    assert df.get_column("vehicle_exempted_types").to_list() == [
+        ["desserteLocale", "bicycle", "emergencyServices"],
+        None,
+    ]
+    assert df.get_column("measure_max_speed").to_list() == [None, 5]
+    assert df.get_column("vehicle_all_vehicles").to_list() == [True, True]
+    assert df.get_column("measure_group_key").to_list() == ["10", "10-V5"]
+    assert df.get_column("regulation_identifier").n_unique() == 1
+
+
+@pytest.mark.parametrize("publish, kept", [(True, 2), (False, 1)])
+def test_the_police_prefecture_is_published_only_behind_its_constant(publish, kept):
+    """R-73 by analogy: on the staging only, until Paris agrees."""
+    df = make_frame(
+        make_row(), make_row(a_identifier="2024P10002", a_service="Préfecture de Police")
+    )
+    assert discard_police_prefecture(df, publish).height == kept
 
 
 # ---------------------------------------------------------------------------
@@ -466,13 +504,11 @@ def test_cycles_are_restricted_as_other_because_bicycle_is_exemption_only():
 
 
 @pytest.mark.parametrize("label", ["limitation dimensionnelle", "limitation catégorielle"])
-def test_an_unreadable_gauge_never_closes_the_road_to_everyone(label):
-    """R-30, review B-2: an empty vehicle set on a gauge limit would broadcast a closure."""
+def test_an_unreadable_gauge_is_dropped_and_counted(label, captured_logs):
+    """R-35: neither a closure for everyone, nor "other" with no threshold."""
     row = make_row(m_type=label, m_params=[["véhicule concerné (1)", "à tous les véhicules"]])
-    df = pipeline(row)
-    assert df.get_column("vehicle_all_vehicles").to_list() == [False]
-    assert df.get_column("vehicle_restricted_types").to_list() == [["other"]]
-    assert df.get_column("vehicle_other_restricted_type_text").to_list() == [label]
+    assert pipeline(row).height == 0
+    assert any("no readable vehicle value" in line for line in captured_logs)
 
 
 @pytest.mark.parametrize(
@@ -613,18 +649,15 @@ def test_a_permanent_without_a_start_falls_back_on_the_signature_date(captured_l
     assert any("fall back on" in line for line in captured_logs)
 
 
-def test_a_permanent_without_a_signature_falls_back_on_the_modification_date():
+def test_a_permanent_without_a_start_nor_a_signature_is_dated_on_first_write(captured_logs):
+    """R-39: never the moving "Modifié le"; `sync/dating.py` dates it when DiaLog is written."""
     row = make_row(
         a_start_date=None, a_signed_at=None, a_modified_at=datetime(2017, 2, 3, 0, 30, 7)
     )
     df = pipeline(row)
-    assert df.get_column("period_start_date").to_list() == ["2017-02-03T00:00:00+01:00"]
-
-
-def test_a_regulation_with_no_date_at_all_is_dropped_and_counted(captured_logs):
-    row = make_row(a_start_date=None, a_signed_at=None, a_modified_at=None)
-    assert pipeline(row).height == 0
-    assert any("no usable start date" in line for line in captured_logs)
+    assert df.get_column("period_start_date").to_list() == [None]
+    assert df.get_column("period_is_permanent").to_list() == [True]
+    assert any("dated on first write" in line for line in captured_logs)
 
 
 def test_a_start_after_its_end_rejects_the_whole_regulation(captured_logs):
@@ -737,16 +770,19 @@ def test_the_pivot_keys_this_step_owns_are_all_produced(clean):
 
 def test_the_funnel_of_the_fixture_is_the_one_we_expect(raw, clean):
     """Row by row, what the fixture loses and why. Update the numbers, never the rule."""
-    assert raw.height == 252
+    # 251 locations, but out-of-model measures take one row each, locations unread
+    assert raw.height == 79
     after_state = compute_regulation_fields(raw, TODAY)
-    assert after_state.height == 249  # 1 Abrogé + 1 Non signé + 1 Périmé
+    assert after_state.height == 76  # 1 Abrogé + 1 Non signé + 1 Périmé
     after_type = compute_measure_fields(after_state)
-    assert after_type.height == 62  # 183 out of model, 2 speedless, 2 one-way without direction
-    assert clean.height == 59  # 2025T15489 and 2026T17998, R-38 date controls
+    # 13 measures out of model (3 one-ways and 1 dead end among them), 2 speedless; the
+    # pedestrian area is in the model since 2026-09-23 (R-71)
+    assert after_type.height == 61
+    assert clean.height == 58  # 2025T15489 and 2026T17998, R-38 date controls
     assert dict(
         zip(*clean.get_column("measure_type_").value_counts(sort=True).to_dict().values())
     ) == {
         MeasureTypeEnum.PARKINGPROHIBITED.value: 47,
-        MeasureTypeEnum.NOENTRY.value: 11,
+        MeasureTypeEnum.NOENTRY.value: 10,
         MeasureTypeEnum.SPEEDLIMITATION.value: 1,
     }
