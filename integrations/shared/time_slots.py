@@ -1,6 +1,7 @@
-"""Reading opening hours out of the layer's free-text description.
+"""Reading daily time slots out of a free-text description.
 
-The Métropole publishes the *existence* of a daily window in `typeperturbation`
+Written for Lyon's `chantiers_perturbants`: the Métropole publishes the *existence* of
+a daily window in `typeperturbation`
 ("de jour", "de nuit") and its *hours* nowhere in particular: they land in
 `descripchantierinternet`, a free-text field that also carries directions of travel
 and general remarks. Eight spellings were observed for the same information —

@@ -91,6 +91,8 @@ def test_compute_period_fields():
         {
             "DT_MAT": [datetime(2023, 6, 15, 10, 30, 45), datetime(2024, 1, 1)],
             "NOARR": ["A", "B"],
+            "CONDITION": [None, "interdit de 22H à 7H"],
+            "DESCR": [None, None],
         }
     )
 
@@ -108,6 +110,11 @@ def test_compute_period_fields():
     assert result["period_start_date"][1] == "2024-01-01T00:00:00+01:00"
     assert result["period_recurrence_type"][0] == "everyDay"
     assert result["period_is_permanent"][0] is True
+    # No text, around the clock; a night slot is anchored on DT_MAT's day, winter offset.
+    assert result["period_time_slots"].to_list() == [
+        None,
+        [{"start_time": "2024-01-01T22:00:00+01:00", "end_time": "2024-01-01T07:00:00+01:00"}],
+    ]
 
 
 def test_compute_period_fields_filters_null_dt_mat():
@@ -122,7 +129,10 @@ def test_compute_period_fields_filters_null_dt_mat():
         {
             "DT_MAT": [datetime(2023, 6, 15), None, datetime(2024, 1, 1)],
             "NOARR": ["A", "B", "C"],
-        }
+            "CONDITION": [None, None, None],
+            "DESCR": [None, None, None],
+        },
+        schema_overrides={"CONDITION": pl.Utf8, "DESCR": pl.Utf8},
     )
 
     result = compute_period_fields(df)
@@ -293,29 +303,167 @@ def test_compute_measure_fields_filters_invalid_descriptif():
     assert result["DESCRIPTIF"].to_list() == ["Limitation Vitesse", "Stationnement interdit"]
 
 
-def test_compute_measure_fields_filters_sens_unique():
-    """Test that compute_measure_fields filters Sens interdit/Sens unique with SENS=1."""
+def test_discard_misleading_rows():
+    """Test that discard_misleading_rows drops what DiaLog would publish wrong, and only that."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
-        compute_measure_fields,
+        discard_misleading_rows,
+    )
+
+    # (NOARR, DESCRIPTIF, SENS, CONDITION, DESCR, POIDS, HAUTEUR)
+    rows = [
+        ("one-way-0", "Sens interdit / Sens unique", 0, None, None, 0.0, 0.0),
+        ("one-way-1", "Sens interdit / Sens unique", 1, None, None, 0.0, 0.0),
+        ("one-direction", "Limitation Vitesse", 1, None, None, 0.0, 0.0),
+        ("no-tonnage", "Interdit aux transports de marchandises", 0, None, None, None, None),
+        ("unread-note", "Stationnement interdit", 0, None, "en épis", 0.0, 0.0),
+        (
+            "local-access-and-more",
+            "Limitation Poids",
+            0,
+            "sauf desserte locale, sens V.C. 6 -> rue Danton",
+            None,
+            3.5,
+            0.0,
+        ),
+        (
+            "more-in-other-field",
+            "Limitation Poids",
+            0,
+            "sauf desserte locale",
+            "transport de marchandises",
+            3.5,
+            0.0,
+        ),
+        ("short-number", "Limitation Vitesse", 0, None, "30", 0.0, 0.0),
+        ("truncated-exemption", "Interdit dans les 2 sens", 0, "sauf", None, 0.0, 0.0),
+        ("invalid-clock", "Limitation Poids", 0, "interdit de 25H à 7H", None, 3.5, 0.0),
+        ("height", "Limitation Hauteur", 0, None, None, 0.0, 2.1),
+        ("blank-text", "Stationnement interdit", None, " ", None, 0.0, 0.0),
+        ("local-access", "Limitation Poids", 0, " Sauf  desserte locale ", None, 3.5, 0.0),
+        ("time-slot", "Limitation Poids", 0, "interdit de 22H à 7H", None, 3.5, 0.0),
+        (
+            "neutral-note",
+            "Stationnement interdit aux poids-lourds",
+            0,
+            "interdit sur chaussée",
+            None,
+            3.5,
+            0.0,
+        ),
+    ]
+    columns = ["NOARR", "DESCRIPTIF", "SENS", "CONDITION", "DESCR", "POIDS", "HAUTEUR"]
+    df = pl.DataFrame(rows, schema=columns, orient="row").with_columns(pl.lit(0.0).alias("LARGEUR"))
+
+    result = discard_misleading_rows(df)
+
+    assert result["NOARR"].to_list() == [
+        "height",
+        "blank-text",
+        "local-access",
+        "time-slot",
+        "neutral-note",
+    ]
+
+
+def test_read_free_text():
+    """Test that the free text is read in full, or reported as not read."""
+    from integrations.co_brest.permanent_lineaire.data_source_integration import (
+        read_free_text,
+    )
+
+    assert read_free_text("interdit entre 22H et 6H", "sauf desserte locale") == {
+        "fully_read": True,
+        "local_access": True,
+        "time_slots": [["22:00", "06:00"]],
+    }
+    assert read_free_text("de 20h00 à 6h00", None)["time_slots"] == [["20:00", "06:00"]]
+    assert read_free_text(None, "Voie verte")["fully_read"] is True
+    # Days of the week are not read: the hours alone would publish every day.
+    assert (
+        read_free_text("les lundis , mardis de 8h15 à 9h15, de 11h30 à 12h15", None)["fully_read"]
+        is False
+    )
+    assert read_free_text("excepté la desserte riveraine", None)["local_access"] is True
+    assert read_free_text("excepté la desserte riveraine", None)["fully_read"] is True
+    # Another exemption next to it is not read; nor is the producer's typo corrected.
+    assert (
+        read_free_text(
+            "excepté la desserte riveraine et les véhicules d'entretien des ouvrages publics", None
+        )["fully_read"]
+        is False
+    )
+    assert read_free_text("sauf desserte rivearaine", None)["fully_read"] is False
+
+
+def test_compute_vehicle_fields_restricts_to_the_threshold():
+    """Test that a gauge limit targets the vehicles over it, never every vehicle (R-33)."""
+    from integrations.co_brest.permanent_lineaire.data_source_integration import (
+        compute_vehicle_fields,
     )
 
     df = pl.DataFrame(
         {
             "DESCRIPTIF": [
-                "Sens interdit / Sens unique",
-                "Sens interdit / Sens unique",
-                "Limitation Vitesse",
+                "Limitation Hauteur",
+                "Limitation Largeur",
+                "Limitation Poids",
+                "Interdit dans les 2 sens",
             ],
-            "SENS": [1, 2, 1],  # First should be filtered, second kept
-            "VITEMAX": [0, 0, 50],
+            "POIDS": [0.0, 0.0, 12.0, 0.0],
+            "HAUTEUR": [1.9, 0.0, 0.0, 0.0],
+            "LARGEUR": [0.0, 2.2, 0.0, 0.0],
+            "CYCLO": [False, False, False, False],
+            "VELO": [False, False, False, False],
+            "CONDITION": ["", "", "", ""],
+            "DESCR": ["", "", "", ""],
         }
     )
 
-    result = compute_measure_fields(df)
+    result = compute_vehicle_fields(df)
 
-    assert result.height == 2
-    assert result["DESCRIPTIF"].to_list() == ["Sens interdit / Sens unique", "Limitation Vitesse"]
-    assert result["SENS"].to_list() == [2, 1]
+    assert result["vehicle_restricted_types"].to_list() == [
+        ["dimensions"],
+        ["dimensions"],
+        ["heavyGoodsVehicle"],
+        None,
+    ]
+    assert result["vehicle_all_vehicles"].to_list() == [False, False, False, True]
+    assert result["vehicle_max_height"].to_list() == [1.9, None, None, None]
+    assert result["vehicle_heavyweight_max_weight"].to_list() == [None, None, 12.0, None]
+
+
+def test_compute_vehicle_fields_reads_local_access():
+    """Test that "sauf desserte locale" becomes the desserteLocale exemption, next to the
+    exemptions the row already had."""
+    from integrations.co_brest.permanent_lineaire.data_source_integration import (
+        compute_vehicle_fields,
+    )
+
+    df = pl.DataFrame(
+        {
+            "DESCRIPTIF": [
+                "Limitation Poids",
+                "Interdit à  tous véhicules à moteur",
+                "Interdit dans les 2 sens",
+            ],
+            "POIDS": [3.5, 0.0, 0.0],
+            "HAUTEUR": [0.0, 0.0, 0.0],
+            "LARGEUR": [0.0, 0.0, 0.0],
+            "CYCLO": [False, False, False],
+            "VELO": [False, False, False],
+            "CONDITION": ["sauf desserte locale", None, None],
+            "DESCR": [None, "Sauf desserte locale", None],
+        }
+    )
+
+    result = compute_vehicle_fields(df)
+
+    assert result["vehicle_exempted_types"].to_list() == [
+        ["desserteLocale"],
+        ["bicycle", "pedestrians", "desserteLocale"],
+        None,
+    ]
+    assert "_local_access" not in result.columns
 
 
 def test_compute_measure_fields_filters_invalid_speed():

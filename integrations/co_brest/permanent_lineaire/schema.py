@@ -20,6 +20,8 @@ class Schema(pa.DataFrameModel):
     LARGEUR: float | None = pa.Field(nullable=True)
     DT_MAT: datetime | None = pa.Field(nullable=True)
     LIEN_URL: str | None = pa.Field(nullable=True)
+    DESCR: str | None = pa.Field(nullable=True)
+    CONDITION: str | None = pa.Field(nullable=True)
 
     class Config(pa.DataFrameModel.Config):
         strict = False  # Allow extra columns

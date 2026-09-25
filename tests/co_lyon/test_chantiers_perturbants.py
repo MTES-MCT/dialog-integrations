@@ -18,7 +18,7 @@ from integrations.co_lyon.chantiers_perturbants.data_source_integration import (
     compute_vehicle_fields,
 )
 from integrations.co_lyon.chantiers_perturbants.description import read_description
-from integrations.co_lyon.chantiers_perturbants.time_slots import parse_time_slots
+from integrations.shared.time_slots import parse_time_slots
 
 GEOMETRY = json.dumps(
     {"type": "MultiPolygon", "coordinates": [[[[4.83, 45.76], [4.84, 45.76], [4.83, 45.77]]]]}
