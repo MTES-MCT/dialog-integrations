@@ -110,7 +110,6 @@ def test_compute_period_fields():
     assert result["period_start_date"][1] == "2024-01-01T00:00:00+01:00"
     assert result["period_recurrence_type"][0] == "everyDay"
     assert result["period_is_permanent"][0] is True
-    # No text, around the clock; a night slot is anchored on DT_MAT's day, winter offset.
     assert result["period_time_slots"].to_list() == [
         None,
         [{"start_time": "2024-01-01T22:00:00+01:00", "end_time": "2024-01-01T07:00:00+01:00"}],
@@ -309,11 +308,14 @@ def test_discard_misleading_rows():
         discard_misleading_rows,
     )
 
-    # (NOARR, DESCRIPTIF, SENS, CONDITION, DESCR, POIDS, HAUTEUR)
+    columns = ["NOARR", "DESCRIPTIF", "SENS", "CONDITION", "DESCR", "POIDS", "HAUTEUR"]
     rows = [
         ("one-way-0", "Sens interdit / Sens unique", 0, None, None, 0.0, 0.0),
         ("one-way-1", "Sens interdit / Sens unique", 1, None, None, 0.0, 0.0),
         ("one-direction", "Limitation Vitesse", 1, None, None, 0.0, 0.0),
+        ("unknown-direction", "Interdit dans les 2 sens", 2, None, None, 0.0, 0.0),
+        ("undirected", "Limitation Vitesse", None, None, None, 0.0, 0.0),
+        ("height-given-as-weight", "Limitation Hauteur", 0, None, None, 3.5, 0.0),
         ("no-tonnage", "Interdit aux transports de marchandises", 0, None, None, None, None),
         ("unread-note", "Stationnement interdit", 0, None, "en épis", 0.0, 0.0),
         (
@@ -337,8 +339,9 @@ def test_discard_misleading_rows():
         ("short-number", "Limitation Vitesse", 0, None, "30", 0.0, 0.0),
         ("truncated-exemption", "Interdit dans les 2 sens", 0, "sauf", None, 0.0, 0.0),
         ("invalid-clock", "Limitation Poids", 0, "interdit de 25H à 7H", None, 3.5, 0.0),
+        ("number-after-slot", "Limitation Poids", 0, "interdit de 22h à 6h 35", None, 3.5, 0.0),
         ("height", "Limitation Hauteur", 0, None, None, 0.0, 2.1),
-        ("blank-text", "Stationnement interdit", None, " ", None, 0.0, 0.0),
+        ("blank-text", "Stationnement interdit", 0, " ", None, 0.0, 0.0),
         ("local-access", "Limitation Poids", 0, " Sauf  desserte locale ", None, 3.5, 0.0),
         ("time-slot", "Limitation Poids", 0, "interdit de 22H à 7H", None, 3.5, 0.0),
         (
@@ -351,7 +354,6 @@ def test_discard_misleading_rows():
             0.0,
         ),
     ]
-    columns = ["NOARR", "DESCRIPTIF", "SENS", "CONDITION", "DESCR", "POIDS", "HAUTEUR"]
     df = pl.DataFrame(rows, schema=columns, orient="row").with_columns(pl.lit(0.0).alias("LARGEUR"))
 
     result = discard_misleading_rows(df)
@@ -408,14 +410,15 @@ def test_compute_vehicle_fields_restricts_to_the_threshold():
                 "Limitation Largeur",
                 "Limitation Poids",
                 "Interdit dans les 2 sens",
+                "Limitation Hauteur",
             ],
-            "POIDS": [0.0, 0.0, 12.0, 0.0],
-            "HAUTEUR": [1.9, 0.0, 0.0, 0.0],
-            "LARGEUR": [0.0, 2.2, 0.0, 0.0],
-            "CYCLO": [False, False, False, False],
-            "VELO": [False, False, False, False],
-            "CONDITION": ["", "", "", ""],
-            "DESCR": ["", "", "", ""],
+            "POIDS": [0.0, 0.0, 12.0, 0.0, 3.5],
+            "HAUTEUR": [1.89999998, 0.0, 0.0, 0.0, 2.5],
+            "LARGEUR": [0.0, 2.20000005, 0.0, 0.0, 0.0],
+            "CYCLO": [False, False, False, False, False],
+            "VELO": [False, False, False, False, False],
+            "CONDITION": ["", "", "", "", ""],
+            "DESCR": ["", "", "", "", ""],
         }
     )
 
@@ -426,15 +429,17 @@ def test_compute_vehicle_fields_restricts_to_the_threshold():
         ["dimensions"],
         ["heavyGoodsVehicle"],
         None,
+        ["heavyGoodsVehicle", "dimensions"],
     ]
-    assert result["vehicle_all_vehicles"].to_list() == [False, False, False, True]
-    assert result["vehicle_max_height"].to_list() == [1.9, None, None, None]
-    assert result["vehicle_heavyweight_max_weight"].to_list() == [None, None, 12.0, None]
+    assert result["vehicle_all_vehicles"].to_list() == [False, False, False, True, False]
+    assert result["vehicle_max_height"].to_list() == [1.9, None, None, None, 2.5]
+    assert result["vehicle_max_width"].to_list() == [None, 2.2, None, None, None]
+    assert result["vehicle_heavyweight_max_weight"].to_list() == [None, None, 12.0, None, 3.5]
 
 
 def test_compute_vehicle_fields_reads_local_access():
     """Test that "sauf desserte locale" becomes the desserteLocale exemption, next to the
-    exemptions the row already had."""
+    exemptions the row already had, from its type or its CYCLO and VELO flags."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
         compute_vehicle_fields,
     )
@@ -445,14 +450,15 @@ def test_compute_vehicle_fields_reads_local_access():
                 "Limitation Poids",
                 "Interdit à  tous véhicules à moteur",
                 "Interdit dans les 2 sens",
+                "Interdit dans les 2 sens",
             ],
-            "POIDS": [3.5, 0.0, 0.0],
-            "HAUTEUR": [0.0, 0.0, 0.0],
-            "LARGEUR": [0.0, 0.0, 0.0],
-            "CYCLO": [False, False, False],
-            "VELO": [False, False, False],
-            "CONDITION": ["sauf desserte locale", None, None],
-            "DESCR": [None, "Sauf desserte locale", None],
+            "POIDS": [3.5, 0.0, 0.0, 0.0],
+            "HAUTEUR": [0.0, 0.0, 0.0, 0.0],
+            "LARGEUR": [0.0, 0.0, 0.0, 0.0],
+            "CYCLO": [False, False, False, True],
+            "VELO": [False, False, False, True],
+            "CONDITION": ["sauf desserte locale", None, None, None],
+            "DESCR": [None, "Sauf desserte locale", None, None],
         }
     )
 
@@ -462,7 +468,9 @@ def test_compute_vehicle_fields_reads_local_access():
         ["desserteLocale"],
         ["bicycle", "pedestrians", "desserteLocale"],
         None,
+        ["other", "bicycle"],
     ]
+    assert result["vehicle_other_exempted_type_text"].to_list() == [None, None, None, "cyclomoteur"]
     assert "_local_access" not in result.columns
 
 

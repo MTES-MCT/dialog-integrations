@@ -28,7 +28,6 @@ from .schema import Schema
 
 # URL = "https://echanges.brest-metropole.fr/VIPDU72/GPB/DEP_ARR_CIRC_STAT_L_V.zip"
 URL = "https://www.data.gouv.fr/api/1/datasets/r/760ac62d-b3aa-4d30-898c-94fea81e4537"
-FILENAME = "DEP_ARR_CIRC_STAT_L_V.shp"
 
 transformer = Transformer.from_crs("EPSG:2154", "EPSG:4326", always_xy=True)
 
@@ -36,9 +35,7 @@ transformer = Transformer.from_crs("EPSG:2154", "EPSG:4326", always_xy=True)
 class C(NamedTuple):
     measure_type: MTE
     exempted_types: list[str] | None = None
-    # Aimed at the vehicles over a weight, height or width: without POIDS, HAUTEUR or
-    # LARGEUR it would be published for every vehicle.
-    needs_threshold: bool = False
+    threshold_column: str | None = None
 
 
 DESCRIPTION_CONFIG = {
@@ -48,18 +45,18 @@ DESCRIPTION_CONFIG = {
     "Stationnement interdit": C(MTE.PARKINGPROHIBITED),
     "Arrêt interdit": C(MTE.PARKINGPROHIBITED),
     "Stationnement gênant": C(MTE.PARKINGPROHIBITED),
-    "Stationnement interdit aux poids-lourds": C(MTE.PARKINGPROHIBITED, needs_threshold=True),
+    "Stationnement interdit aux poids-lourds": C(MTE.PARKINGPROHIBITED, threshold_column="POIDS"),
     # noEntry – limitations dimensionnelles (poids / hauteur)
-    "Limitation Poids": C(MTE.NOENTRY, needs_threshold=True),
-    "Limitation Hauteur": C(MTE.NOENTRY, needs_threshold=True),
-    "Interdit aux transports de marchandises": C(MTE.NOENTRY, needs_threshold=True),
+    "Limitation Poids": C(MTE.NOENTRY, threshold_column="POIDS"),
+    "Limitation Hauteur": C(MTE.NOENTRY, threshold_column="HAUTEUR"),
+    "Interdit aux transports de marchandises": C(MTE.NOENTRY, threshold_column="POIDS"),
     # noEntry – catégories particulières
     "Interdit dans les 2 sens": C(MTE.NOENTRY),
     "Interdit à  tous véhicules à moteur": C(MTE.NOENTRY, ["bicycle", "pedestrians"]),
     "Interdit aux véhicules à moteur sauf cyclos": C(
         MTE.NOENTRY, ["bicycle", "pedestrians", "other"]
     ),
-    "Limitation Largeur": C(MTE.NOENTRY, needs_threshold=True),
+    "Limitation Largeur": C(MTE.NOENTRY, threshold_column="LARGEUR"),
     "Sens interdit / Sens unique": C(MTE.NOENTRY),
 }
 
@@ -72,7 +69,7 @@ LOCAL_ACCESS = re.compile(
     r"(?:sauf|excepté)\s+(?:la\s+)?desserte\s+(?:locale|riveraine)", re.IGNORECASE
 )
 TIME_SLOT = re.compile(
-    r"(?:interdit\s+)?(?:de|entre)\s+(\d{1,2})\s*h\s*(\d{2})?\s*(?:à|et)\s+(\d{1,2})\s*h\s*(\d{2})?",
+    r"(?:interdit\s+)?(?:de|entre)\s+(\d{1,2})\s*h(\d{2})?\s*(?:à|et)\s+(\d{1,2})\s*h(\d{2})?",
     re.IGNORECASE,
 )
 # Notes that add nothing to what is published: parking "on the carriageway" is what a
@@ -128,7 +125,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_path = Path(tmpdir) / "data.zip"
 
-            r = requests.get(URL)
+            r = requests.get(URL, timeout=(10, 120))
             r.raise_for_status()
             zip_path.write_bytes(r.content)
             logger.info(f"Downloaded zip file to {zip_path}")
@@ -137,7 +134,6 @@ class DataSourceIntegration(BaseDataSourceIntegration):
                 z.extractall(tmpdir)
 
             shp_path = next(Path(tmpdir).rglob("*.shp"))
-            shp_path = Path(tmpdir) / FILENAME
 
             logger.info(f"Reading file {shp_path}")
             gdf = gpd.read_file(shp_path)
@@ -300,25 +296,23 @@ def discard_misleading_rows(df: pl.DataFrame) -> pl.DataFrame:
       07700 and 07710, audit of 2026-09-23): as a rawGeoJSON location it would be
       published as a street closed both ways. One-way data is frozen until DiaLog
       carries the direction (R-32).
-    - SENS=1 is a restriction in one direction only: published in both (R-32).
+    - SENS=1 is a restriction in one direction only: published in both (R-32). Only 0
+      means both ways; any other value is dropped with it.
     - Free text in CONDITION or DESCR that says more than `read_free_text` understands:
       a direction, another exemption, days of the week… (R-78).
-    - A weight, height or width restriction without its threshold would apply to every
-      vehicle (R-35).
+    - A weight, height or width restriction without its own threshold would apply to
+      every vehicle, or to the wrong ones (R-35).
     """
-    has_threshold = pl.any_horizontal(
-        pl.col(column).fill_null(0) > 0 for column in ("POIDS", "HAUTEUR", "LARGEUR")
+    lacks_threshold = pl.any_horizontal(
+        (pl.col("DESCRIPTIF") == descriptif) & ~(pl.col(config.threshold_column).fill_null(0) > 0)
+        for descriptif, config in DESCRIPTION_CONFIG.items()
+        if config.threshold_column
     )
-    needs_threshold = [
-        descriptif for descriptif, config in DESCRIPTION_CONFIG.items() if config.needs_threshold
-    ]
     motives = {
         "one-way street (R-32)": pl.col("DESCRIPTIF") == "Sens interdit / Sens unique",
-        "one direction only, SENS=1 (R-32)": pl.col("SENS").fill_null(0) == 1,
+        "not both directions, SENS other than 0 (R-32)": pl.col("SENS").fill_null(-1) != 0,
         "free text in CONDITION or DESCR not read in full (R-78)": ~text_reading("fully_read"),
-        "vehicle restriction without threshold (R-35)": (
-            pl.col("DESCRIPTIF").is_in(needs_threshold) & ~has_threshold
-        ),
+        "vehicle restriction without threshold (R-35)": lacks_threshold,
     }
 
     counts = df.select(**{motive: rule.sum() for motive, rule in motives.items()}).row(
@@ -342,19 +336,21 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
         descriptif: config.exempted_types for descriptif, config in DESCRIPTION_CONFIG.items()
     }
 
+    # The producer writes some values through float32 (1.9 m as 1.89999998, 2026-09-28),
+    # and DiaLog keeps them as sent.
     df = df.with_columns(
         [
             pl.when((pl.col("POIDS").is_null()) | (pl.col("POIDS") == 0))
             .then(None)
-            .otherwise(pl.col("POIDS"))
+            .otherwise(pl.col("POIDS").round(2))
             .alias("vehicle_heavyweight_max_weight"),
             pl.when((pl.col("HAUTEUR").is_null()) | (pl.col("HAUTEUR") == 0))
             .then(None)
-            .otherwise(pl.col("HAUTEUR"))
+            .otherwise(pl.col("HAUTEUR").round(2))
             .alias("vehicle_max_height"),
             pl.when((pl.col("LARGEUR").is_null()) | (pl.col("LARGEUR") == 0))
             .then(None)
-            .otherwise(pl.col("LARGEUR"))
+            .otherwise(pl.col("LARGEUR").round(2))
             .alias("vehicle_max_width"),
         ]
     )
@@ -390,12 +386,9 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
         .alias("vehicle_exempted_types")
     )
 
+    # The API reads the text only next to `other`.
     def compute_other_text(exempted_types):
-        if exempted_types is None or len(exempted_types) == 0:
-            return None
-        if "other" in exempted_types:
-            return "cyclomoteur"
-        return "autres véhicules autorisés"
+        return "cyclomoteur" if exempted_types is not None and "other" in exempted_types else None
 
     df = df.with_columns(
         pl.col("vehicle_exempted_types")
