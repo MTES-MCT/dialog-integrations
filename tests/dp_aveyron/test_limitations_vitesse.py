@@ -435,6 +435,30 @@ def test_only_what_applies_both_ways_is_sent_while_production_ignores_the_direct
     assert discard_directional_stretches(df)["location_road_number"].to_list() == ["D1"]
 
 
+def test_only_a_limit_true_both_ways_and_for_every_vehicle_leaves_the_pipeline():
+    """D-19 and D-21 through `compute_clean_data`, where their order matters: D840 PR 17,
+    `50 PL` on one side only, must not come out as "every vehicle at 90, both ways"."""
+    raw = pl.DataFrame(
+        {
+            "route": ["12_D1", "12_D1", "12_D2", "12_D2", "12_D3"],
+            "cote": ["droite", "gauche", "droite", "gauche", "droite"],
+            "prd": [1] * 5,
+            "abd": [0.0] * 5,
+            "prf": [2] * 5,
+            "abf": [0.0] * 5,
+            "num_arrete": ["A21R0166"] * 5,
+            "agglo": [None] * 5,
+            "limit": [90] * 5,
+            "limit_spec": ["50 PL", None, None, None, None],
+        },
+        schema_overrides={"agglo": pl.Utf8},
+    )
+
+    clean = DataSourceIntegration(None, None).compute_clean_data(raw)  # type: ignore[arg-type]
+
+    assert clean["location_road_number"].to_list() == ["D2"]
+
+
 def test_split_order_follows_the_road_then_the_milestones():
     df = pl.DataFrame(
         {

@@ -71,8 +71,10 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         return (
             raw_data.pipe(compute_measure_fields)
             .pipe(compute_period_fields)
-            .pipe(compute_location_fields)
+            # Before the direction is read: a side left with no conflicting limit must
+            # stand alone, not keep the "both ways" its discarded twin gave it (D840).
             .pipe(discard_vehicle_class_limits)
+            .pipe(compute_location_fields)
             # Production ignores `direction` (D-19): a limit signposted one way would be
             # broadcast both ways. Remove this line once the bug is fixed.
             .pipe(discard_directional_stretches)
