@@ -47,10 +47,10 @@ from api.dia_log_client.models import (
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.co_lyon.grand_lyon import fetch_layer
 from integrations.shared.local_time import PARIS, end_of_local_day, start_of_local_day
+from integrations.shared.time_slots import to_iso_slots
 
 from .description import RESIDUAL_MAX_CHARS, read_description
 from .schema import LyonChantiersPerturbantsRawDataSchema
-from .time_slots import to_iso_slots
 
 WFS_LAYER = "pvo_patrimoine_voirie.pvochantierperturbant"
 
