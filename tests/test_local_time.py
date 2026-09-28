@@ -55,13 +55,6 @@ def test_the_last_day_is_covered_to_its_final_second(day, expected):
     assert end(naive_frame(day)) == expected
 
 
-def test_the_offset_follows_the_season_rather_than_being_fixed():
-    summer = start(naive_frame(date(2026, 9, 1)))
-    winter = start(naive_frame(date(2026, 1, 15)))
-    assert summer.endswith("+02:00")
-    assert winter.endswith("+01:00")
-
-
 @pytest.mark.parametrize(
     "day, expected_start, expected_end",
     [

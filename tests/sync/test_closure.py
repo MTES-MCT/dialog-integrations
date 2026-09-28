@@ -128,6 +128,38 @@ def test_a_zone_is_written_back_as_its_computed_sections():
 
 
 @pytest.mark.parametrize(
+    "read_location, written_location",
+    [
+        (
+            {
+                "roadType": "namedStreet",
+                "namedStreet": {"roadName": "Rue Gentil", "cityCode": "69382"},
+            },
+            {
+                "roadType": "namedStreet",
+                "namedStreet": {"roadName": "Rue Gentil", "cityCode": "69382"},
+            },
+        ),
+        (
+            {
+                "roadType": "departmentalRoad",
+                "numberedRoad": {"administrator": "Aveyron", "roadNumber": "D911"},
+            },
+            {
+                "roadType": "departmentalRoad",
+                "departmentalRoad": {"administrator": "Aveyron", "roadNumber": "D911"},
+            },
+        ),
+    ],
+)
+def test_streets_and_numbered_roads_are_written_back_as_read(read_location, written_location):
+    """A numbered road is read under `numberedRoad` and written under its own type."""
+    read = {**READ, "measures": [dict(READ["measures"][0])]}
+    read["measures"][0]["locations"] = [{**read_location, "geometry": "{}"}]
+    assert save_payload_from_read(read)["measures"][0]["locations"] == [written_location]
+
+
+@pytest.mark.parametrize(
     "vehicle_set",
     [
         {"restrictedTypes": [], "exemptedTypes": [], "maxCharacteristics": [{"name": "w"}]},
@@ -176,14 +208,15 @@ def _payload(start: str, end: str | None, permanent: bool = False) -> dict:
 
 
 def test_closing_brings_a_running_period_back_to_yesterday():
-    closed, changed = close_payload(
-        _payload("2026-09-02T00:00:00+02:00", "2026-10-20T23:59:59+02:00"), CLOSED_AT
-    )
+    payload = _payload("2026-09-02T00:00:00+02:00", "2026-10-20T23:59:59+02:00")
+    closed, changed = close_payload(payload, CLOSED_AT)
     period = closed["measures"][0]["periods"][0]
     assert changed is True
     assert period["endDate"] == "2026-09-16T23:59:59+02:00"
     assert period["endTime"] == "2026-09-16T23:59:59+02:00"
     assert period["startDate"] == "2026-09-02T00:00:00+02:00"
+    # The caller's payload is left as it was.
+    assert payload["measures"][0]["periods"][0]["endDate"] == "2026-10-20T23:59:59+02:00"
 
 
 def test_a_period_that_already_ended_is_left_alone():
@@ -208,12 +241,6 @@ def test_a_permanent_period_becomes_temporary():
     assert changed is True
     assert period["isPermanent"] is False
     assert period["endDate"] == "2026-09-16T23:59:59+02:00"
-
-
-def test_the_original_payload_is_not_modified():
-    payload = _payload("2026-09-02T00:00:00+02:00", "2026-10-20T23:59:59+02:00")
-    close_payload(payload, CLOSED_AT)
-    assert payload["measures"][0]["periods"][0]["endDate"] == "2026-10-20T23:59:59+02:00"
 
 
 # --- closing_instant and is_ended -------------------------------------------------------

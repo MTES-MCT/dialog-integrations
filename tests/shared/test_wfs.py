@@ -35,21 +35,15 @@ def test_no_feature_gives_an_empty_frame():
     assert features_to_dataframe([]).height == 0
 
 
-def test_geometries_inside_the_box_pass_whatever_their_nesting():
-    df = features_to_dataframe([feature({}, POINT), feature({}, POLYGON), feature({}, None)])
-    assert_lon_lat_bbox(df, LYON)
+def test_the_axis_check_lets_lon_lat_through_and_stops_swapped_axes():
+    inside = features_to_dataframe([feature({}, POINT), feature({}, POLYGON), feature({}, None)])
+    empty = pl.DataFrame({"geometry": []}, schema={"geometry": pl.Utf8})
+    swapped = features_to_dataframe([feature({}, {"type": "Point", "coordinates": [45.75, 4.85]})])
 
-
-def test_swapped_axes_are_caught():
-    swapped = {"type": "Point", "coordinates": [45.75, 4.85]}
-    df = features_to_dataframe([feature({}, swapped)])
-
+    assert_lon_lat_bbox(inside, LYON)
+    assert_lon_lat_bbox(empty, LYON)
     with pytest.raises(ValueError, match="axis order"):
-        assert_lon_lat_bbox(df, LYON)
-
-
-def test_an_empty_frame_passes_the_check():
-    assert_lon_lat_bbox(pl.DataFrame({"geometry": []}, schema={"geometry": pl.Utf8}), LYON)
+        assert_lon_lat_bbox(swapped, LYON)
 
 
 def test_fetch_asks_for_geojson_in_lon_lat_and_flattens_the_answer(monkeypatch):

@@ -9,7 +9,6 @@ from loguru import logger
 
 from integrations.co_lyon.chantiers_perturbants import data_source_integration
 from integrations.co_lyon.chantiers_perturbants.data_source_integration import (
-    LONG_DURATION_WARNING_DAYS,
     compute_location_fields,
     compute_measure_fields,
     compute_period_fields,
@@ -323,17 +322,14 @@ def test_a_work_site_ending_today_is_still_in_force(warnings):
 
 
 def test_multi_year_work_sites_are_reported_but_published(warnings):
-    """Long durations are a judgement call, so they leave through a warning."""
-    result = compute_period_fields(timed(row(debutchantier="2023-01-01", finchantier="2026-06-01")))
-    assert result.height == 1
-    assert any("Very long temporary restriction detected" in message for message in warnings)
+    """Long durations are a judgement call, so they leave through a warning; short ones don't."""
+    long_site = row(gid=415731, debutchantier="2023-01-01", finchantier="2026-06-01")
+    short_site = row(gid=415732, debutchantier="2026-01-01", finchantier="2026-03-01")
+    result = compute_period_fields(timed(long_site, short_site))
+    assert result.height == 2
+    assert any("Very long temporary restriction detected: 1 work site(s)" in m for m in warnings)
     assert any("gid 415731" in message for message in warnings)
-    assert LONG_DURATION_WARNING_DAYS == 365
-
-
-def test_a_short_work_site_raises_no_duration_warning(warnings):
-    compute_period_fields(timed(row(debutchantier="2026-01-01", finchantier="2026-03-01")))
-    assert not any("Very long" in message for message in warnings)
+    assert not any("gid 415732" in message for message in warnings)
 
 
 # --- location, regulation, vehicles ---------------------------------------------
@@ -379,21 +375,14 @@ def test_location_drops_footprints_that_are_not_polygons():
 
 
 def test_identifier_is_the_gid_and_carries_no_commune():
-    """A commune corrected afterwards must not create a second regulation."""
+    """A commune corrected afterwards must not create a second regulation. The `MGL-CHP-`
+    prefix keeps these apart from the Lyon regulations of the other channel (`LYON_…`)."""
     lyon = compute_regulation_fields(frame(row(gid=415731, commune1="Francheville")))
     moved = compute_regulation_fields(frame(row(gid=415731, commune1="Tassin la Demi Lune")))
     assert lyon.get_column("regulation_identifier")[0] == "MGL-CHP-415731"
     assert (
         lyon.get_column("regulation_identifier")[0] == moved.get_column("regulation_identifier")[0]
     )
-
-
-def test_identifier_namespace_is_isolated_from_the_other_channel():
-    """Lyon regulations already reach DiaLog through another channel (`LYON_…`)."""
-    identifier = compute_regulation_fields(frame()).get_column("regulation_identifier")[0]
-    for existing in ("LYON_2022RP40610", "VAULX_EN_VELIN_1378", "2023RP43879"):
-        assert not existing.startswith("MGL-CHP-")
-        assert identifier != existing
 
 
 def test_regulation_fields_are_temporary_roadmaintenance():

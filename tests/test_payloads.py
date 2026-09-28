@@ -1,10 +1,17 @@
-"""From pivot rows to API DTOs: the period, with or without daily time slots; the way rows
-fold into measures and regulations."""
+"""From pivot rows to API DTOs: the period, with or without daily time slots; the location
+and the vehicles as the API reads them; the way rows fold into measures and regulations."""
 
 import polars as pl
+import pytest
 
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
-from integrations.payloads import build_measure, build_period, build_regulations
+from integrations.payloads import (
+    build_location,
+    build_measure,
+    build_period,
+    build_regulations,
+    build_vehicle_set,
+)
 
 
 def period(**overrides):
@@ -52,6 +59,54 @@ def test_time_slots_become_api_objects():
         ("2026-08-25T08:00:00+02:00", "2026-08-25T17:30:00+02:00"),
         ("2026-08-25T21:00:00+02:00", "2026-08-25T05:00:00+02:00"),
     ]
+
+
+# --- location and vehicles ---------------------------------------------------------
+
+
+POLYGON = (
+    '{"type": "Polygon", "coordinates": [[[4.8, 45.7], [4.9, 45.7], [4.9, 45.8], [4.8, 45.7]]]}'
+)
+
+
+@pytest.mark.parametrize(
+    "columns, sent",
+    [
+        (
+            {"road_type": "zone", "label": "Place Bellecour", "geometry": POLYGON},
+            {"roadType": "zone", "zone": {"label": "Place Bellecour", "geometry": POLYGON}},
+        ),
+        (
+            {"road_type": "departmentalRoad", "administrator": "Aveyron", "road_number": "D911"},
+            {
+                "roadType": "departmentalRoad",
+                "departmentalRoad": {"administrator": "Aveyron", "roadNumber": "D911"},
+            },
+        ),
+        (
+            {"road_type": "nationalRoad", "administrator": "DIR Centre-Est", "road_number": "N7"},
+            {
+                "roadType": "nationalRoad",
+                "nationalRoad": {"administrator": "DIR Centre-Est", "roadNumber": "N7"},
+            },
+        ),
+    ],
+)
+def test_each_road_type_reaches_the_api_under_its_own_key(columns, sent):
+    location = {f"location_{name}": value for name, value in columns.items()}
+    assert build_location(location).to_dict() == sent  # type: ignore[arg-type]
+
+
+def test_all_vehicles_goes_alone_and_a_restriction_replaces_it():
+    """The API reads any field next to `allVehicles` as a restriction."""
+    everyone = {"vehicle_all_vehicles": True, "vehicle_restricted_types": []}
+    lorries = {"vehicle_all_vehicles": False, "vehicle_restricted_types": ["heavyGoodsVehicle"]}
+
+    assert build_vehicle_set(everyone).to_dict() == {"allVehicles": True}  # type: ignore[arg-type]
+    assert build_vehicle_set(lorries).to_dict() == {  # type: ignore[arg-type]
+        "allVehicles": False,
+        "restrictedTypes": ["heavyGoodsVehicle"],
+    }
 
 
 # --- rows into measures and regulations ------------------------------------------

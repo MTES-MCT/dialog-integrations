@@ -280,6 +280,49 @@ def test_the_json_result_carries_the_counters(monkeypatch, tmp_path):
     assert json.loads(json.dumps(result)) == result
 
 
+def test_identifiers_restrict_the_run_to_those_regulations(monkeypatch, tmp_path):
+    api = _RecordingApi()
+    frame = measure_rows([f"{PREFIX}a", f"{PREFIX}b"])
+    integration = _build_integration(monkeypatch, tmp_path, frame, [], api=api)
+
+    integration.integrate_regulations(limit_to=[f"{PREFIX}b"])
+
+    assert api.posted == [f"{PREFIX}b"]
+
+
+def test_the_update_flag_overrides_the_organization_setting(monkeypatch, tmp_path):
+    """`--update-existing` rewrites all of DiaLog, snapshot or not; `--no-update-existing`
+    rewrites nothing, even what changed."""
+    regulations = [f"{PREFIX}a", f"{PREFIX}b"]
+    everything = _RecordingApi()
+    _build_integration(
+        monkeypatch,
+        tmp_path / "all",
+        measure_rows(regulations),
+        regulations,
+        api=everything,
+        identifier_prefix=PREFIX,
+        update_changed=True,
+    ).integrate_regulations(update_existing=True)
+
+    SnapshotStore("co_test", "fake", base_dir=tmp_path / "none").save(
+        {i: compute_regulation_digest(build_regulation(i, max_speed=50)) for i in regulations}
+    )
+    nothing = _RecordingApi()
+    _build_integration(
+        monkeypatch,
+        tmp_path / "none",
+        measure_rows(regulations, max_speed=30),
+        regulations,
+        api=nothing,
+        identifier_prefix=PREFIX,
+        update_changed=True,
+    ).integrate_regulations(update_existing=False)
+
+    assert sorted(everything.put) == regulations
+    assert nothing.put == []
+
+
 def test_a_pipeline_refusal_is_counted_apart_from_failures(monkeypatch, tmp_path):
     integration = _build_integration(
         monkeypatch, tmp_path, measure_rows([f"{PREFIX}a"]), [], identifier_prefix=PREFIX
@@ -305,16 +348,18 @@ def test_a_pipeline_refusal_is_counted_apart_from_failures(monkeypatch, tmp_path
 
 # --- Closure: a regulation that left the source keeps its history --------------------
 
-from datetime import datetime  # noqa: E402
+from datetime import datetime, timedelta  # noqa: E402
 from zoneinfo import ZoneInfo  # noqa: E402
 
 from tests.sync.test_closure import READ  # noqa: E402
 
 
-def _read_of(identifier: str, end: str = "2026-10-20T21:59:00+00:00") -> dict:
+def _read_of(identifier: str, end: str | None = None) -> dict:
+    """A regulation as DiaLog returns it; by default still running, a month from today."""
+    running = datetime.now(tz=ZoneInfo("UTC")) + timedelta(days=30)
     read = json.loads(json.dumps(READ))
     read["identifier"] = identifier
-    read["measures"][0]["periods"][0]["endDateTime"] = end
+    read["measures"][0]["periods"][0]["endDateTime"] = end or running.isoformat()
     return read
 
 

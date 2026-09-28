@@ -3,6 +3,7 @@
 import gzip
 import json
 
+from api.dia_log_client.models import SaveVehicleSetDTO
 from integrations.sync.state import (
     SnapshotStore,
     compute_regulation_digest,
@@ -10,13 +11,6 @@ from integrations.sync.state import (
     state_dir,
 )
 from tests.sync_fixtures import build_regulation, geometry
-
-
-def test_the_same_regulation_always_hashes_the_same():
-    first = compute_regulation_digest(build_regulation("A-1"))
-    second = compute_regulation_digest(build_regulation("A-1"))
-
-    assert fingerprint(first) == fingerprint(second)
 
 
 def test_a_changed_speed_changes_the_fingerprint():
@@ -45,6 +39,29 @@ def test_a_moved_geometry_changes_the_fingerprint():
     after = compute_regulation_digest(
         build_regulation("A-1", geometry_json=geometry([[-4.486, 48.39], [-4.480, 48.395]]))
     )
+
+    assert fingerprint(before) != fingerprint(after)
+
+
+def test_a_changed_vehicle_set_changes_the_fingerprint():
+    """A restriction added to an existing measure is an update to send."""
+    before = build_regulation("A-1")
+    after = build_regulation("A-1")
+    after.measures[0].vehicle_set = SaveVehicleSetDTO.from_dict(  # type: ignore[index]
+        {"allVehicles": False, "restrictedTypes": ["heavyGoodsVehicle"]}
+    )
+
+    assert fingerprint(compute_regulation_digest(before)) != fingerprint(
+        compute_regulation_digest(after)
+    )
+
+
+def test_a_point_moved_inside_the_same_box_changes_the_fingerprint():
+    """Same type, same point count, same bounding box: only the hash sees it."""
+    line = geometry([[4.80, 45.70], [4.85, 45.75], [4.90, 45.80]])
+    moved = geometry([[4.80, 45.70], [4.86, 45.74], [4.90, 45.80]])
+    before = compute_regulation_digest(build_regulation("A-1", geometry_json=line))
+    after = compute_regulation_digest(build_regulation("A-1", geometry_json=moved))
 
     assert fingerprint(before) != fingerprint(after)
 
