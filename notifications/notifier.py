@@ -162,7 +162,7 @@ class Notifier:
                 f"{count} {cls.HELD_LABELS.get(operation, operation)}"
                 for operation, count in sorted(held.items())
             )
-            lines.append(f"⚠️ lot retenu (plafond dépassé) : {rendered} - à revoir manuellement")
+            lines.append(f"⚠️ lot retenu : {rendered} - à revoir manuellement")
 
         errors = result.get("errors")
         if isinstance(errors, int) and not isinstance(errors, bool) and errors > 0:

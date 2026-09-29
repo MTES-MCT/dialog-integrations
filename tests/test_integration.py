@@ -716,3 +716,84 @@ def test_the_total_in_dialog_is_compared_with_the_previous_run(monkeypatch, tmp_
 
     assert limited.total_shift is None
     assert store.load() == Totals(dialog_in_prefix=8, produced=4)
+
+
+@pytest.mark.parametrize(
+    "failure, deleted, held",
+    [
+        (WriteFailure(503, "sans motif"), [], {"delete": 1}),
+        (WriteFailure(400, "hors compétence"), [f"{PREFIX}gone"], {}),
+    ],
+    ids=["outage", "rejection"],
+)
+def test_what_left_the_source_waits_for_a_creation_lost_to_an_outage(
+    monkeypatch, tmp_path, failure, deleted, held
+):
+    """A-07: the new regulation may replace the one that left; deleting it first loses both."""
+    api = _RecordingApi(add_ok=False)
+    api.write_failures = {f"{PREFIX}new": failure}  # type: ignore[attr-defined]
+    integration = _build_integration(
+        monkeypatch,
+        tmp_path,
+        measure_rows([f"{PREFIX}new"]),
+        [f"{PREFIX}gone"],
+        api=api,
+        identifier_prefix=PREFIX,
+        delete_missing=True,
+    )
+
+    outcome = integration.integrate_regulations()
+
+    assert api.deleted == deleted
+    assert outcome.held == held
+
+
+def test_a_regulation_that_cannot_be_built_is_left_as_dialog_has_it(monkeypatch, tmp_path):
+    """A-05: a construction error is not the source removing the regulation."""
+    kept, whole, part, new = (f"{PREFIX}{name}" for name in ("kept", "whole", "part", "new"))
+    snapshot = {
+        i: compute_regulation_digest(build_regulation(i, max_speed=50)) for i in (kept, whole, part)
+    }
+    SnapshotStore("co_test", "fake", base_dir=tmp_path).save(snapshot)
+    frame = measure_rows([kept, whole, part, part, new, new])
+    frame = frame.with_columns(
+        location_road_type=pl.when(pl.int_range(pl.len()).is_in([1, 3, 5]))
+        .then(pl.lit("lane"))
+        .otherwise(pl.col("location_road_type"))
+    )
+    api = _RecordingApi()
+    integration = _build_integration(
+        monkeypatch,
+        tmp_path,
+        frame,
+        list(snapshot),
+        api=api,
+        identifier_prefix=PREFIX,
+        update_changed=True,
+        delete_missing=True,
+    )
+
+    outcome = integration.integrate_regulations()
+
+    assert (api.posted, api.put, api.deleted) == ([], [kept], [])
+    assert outcome.error_causes == {"construction impossible": 3}
+    assert {i: d == snapshot[i] for i, d in _snapshot(tmp_path).items()} == {
+        kept: False,
+        whole: True,
+        part: True,
+    }
+
+
+def test_a_closure_that_cannot_be_rebuilt_does_not_stop_the_others(monkeypatch, tmp_path):
+    """A-27: an unexpected read used to crash the run after the writes, every night."""
+    odd = _read_of(f"{PREFIX}odd")
+    odd["measures"][0]["periods"][0]["recurrenceType"] = "fortnightly"
+    api = _ReadingApi({f"{PREFIX}odd": odd, f"{PREFIX}gone": _read_of(f"{PREFIX}gone")})
+    integration = _closing_org(
+        monkeypatch, tmp_path, [f"{PREFIX}a"], [f"{PREFIX}a", f"{PREFIX}gone", f"{PREFIX}odd"], api
+    )
+
+    outcome = integration.integrate_regulations()
+
+    assert api.put == [f"{PREFIX}gone"]
+    assert (outcome.closed, outcome.errors) == (1, 1)

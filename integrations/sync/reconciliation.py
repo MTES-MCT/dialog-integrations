@@ -20,6 +20,8 @@ Two guard rails:
   receives regulations from channels outside this repository.
 - a batch over its cap is held **whole** and flagged for manual review; its previous
   digest stays in the snapshot so it is detected again, identically, the next day.
+  While creations or updates are held, what left the source is held too: they may
+  carry its segments, and removing it first would leave them without a limit (A-07).
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
+from integrations.payloads import is_part_of
 from integrations.sync.closure import is_ended
 from integrations.sync.state import Digest, fingerprint
 
@@ -71,6 +74,10 @@ class Batch:
     @property
     def size(self) -> int:
         return len(self.identifiers)
+
+    @property
+    def over_cap(self) -> bool:
+        return self.limit is not None and self.size > self.limit
 
     @property
     def applicable(self) -> tuple[str, ...]:
@@ -236,11 +243,14 @@ def reconcile(
     max_deletions: int | None = None,
     max_closures: int | None = None,
     force_deletions: bool = False,
+    unbuilt: Iterable[str] = (),
 ) -> ReconciliationPlan:
     """Split today's production into its batches.
 
     `force_deletions` releases the batch of what left the source — deletions or
-    closures, whichever the organization chose — when its cap holds it.
+    closures, whichever the organization chose — when it is held. `unbuilt` are the
+    regulations whose construction failed, absent from `produced`: they and their
+    slices are not taken for gone (A-05).
     """
     assert_identifiers_in_prefix(produced.keys(), identifier_prefix)
     if delete_missing and close_missing:
@@ -281,8 +291,13 @@ def reconcile(
             "Refusing to compute deletions or closures without an identifier_prefix: "
             "an unbounded pass would touch regulations this pipeline does not own."
         )
-    missing = tuple(sorted(in_prefix - set(produced)))
+    unbuilt = set(unbuilt)
+    missing = tuple(sorted(i for i in in_prefix - set(produced) if not is_part_of(i, unbuilt)))
     to_delete = missing if delete_missing else ()
+
+    creations = _batch(CREATE, to_create, max_creations)
+    updates = _batch(UPDATE, to_update, max_updates)
+    waiting = creations.held or updates.held
 
     closures = None
     already_ended: tuple[str, ...] = ()
@@ -298,13 +313,13 @@ def reconcile(
         )
         ended = set(already_ended)
         to_close = tuple(identifier for identifier in missing if identifier not in ended)
-        closures = _batch(CLOSE, to_close, max_closures, released=force_deletions)
+        closures = _batch(CLOSE, to_close, max_closures, force_deletions, waiting)
 
     return ReconciliationPlan(
-        creations=_batch(CREATE, to_create, max_creations),
-        updates=_batch(UPDATE, to_update, max_updates),
+        creations=creations,
+        updates=updates,
         # --force-deletions releases the deletion batch only.
-        deletions=_batch(DELETE, to_delete, max_deletions, released=force_deletions),
+        deletions=_batch(DELETE, to_delete, max_deletions, force_deletions, waiting),
         unchanged=unchanged,
         closures=closures,
         closed_at=closed_at if close_missing else None,
@@ -322,6 +337,8 @@ def _batch(
     identifiers: tuple[str, ...],
     limit: int | None,
     released: bool = False,
+    waiting: bool = False,
 ) -> Batch:
-    held = bool(limit is not None and len(identifiers) > limit and not released)
+    over_cap = limit is not None and len(identifiers) > limit
+    held = bool(identifiers) and (over_cap or waiting) and not released
     return Batch(operation=operation, identifiers=identifiers, limit=limit, held=held)

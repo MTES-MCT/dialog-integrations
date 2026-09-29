@@ -306,3 +306,40 @@ def test_an_organization_that_does_not_close_has_no_closure_batch():
     )
     assert plan.closures is None
     assert "close" not in plan.planned
+
+
+def test_what_left_the_source_waits_while_an_update_is_held():
+    """A-07: the held updates may carry the segments of what left, which would lose its limit."""
+    produced = digests((f"{PREFIX}a", 30), (f"{PREFIX}b", 30))
+    snapshot = digests((f"{PREFIX}a", 50), (f"{PREFIX}b", 50))
+    remote = [f"{PREFIX}a", f"{PREFIX}b", f"{PREFIX}gone"]
+
+    def plan(**flags):
+        return reconcile(
+            produced,
+            remote,
+            snapshot,
+            identifier_prefix=PREFIX,
+            update_mode="changed",
+            close_missing=True,
+            closed_at=CLOSED_AT,
+            max_updates=1,
+            **flags,
+        )
+
+    assert plan().held == {"update": 2, "close": 1}
+    assert plan(force_deletions=True).held == {"update": 2}
+
+
+def test_the_slices_of_an_unbuilt_regulation_are_not_taken_for_gone():
+    """A-05: it could not be built today, it did not leave the source."""
+    plan = reconcile(
+        {},
+        [f"{PREFIX}X-01", f"{PREFIX}X-03", f"{PREFIX}Y"],
+        {},
+        identifier_prefix=PREFIX,
+        delete_missing=True,
+        unbuilt={f"{PREFIX}X"},
+    )
+
+    assert plan.deletions.identifiers == (f"{PREFIX}Y",)

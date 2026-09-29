@@ -9,7 +9,8 @@ share a `measure_group_key` into one measure carrying all their locations, and c
 a regulation with too many locations for a single POST into numbered slices.
 """
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Collection
 
 import polars as pl
 from loguru import logger
@@ -43,12 +44,14 @@ def build_regulations(
     *,
     group_locations_by_measure: bool = False,
     max_locations_per_regulation: int | None = None,
+    unbuilt: set[str] | None = None,
 ) -> list[PostApiRegulationsAddBody]:
     """Group the rows by `regulation_identifier`, one measure per row.
 
     The regulation fields are read on the first row of the group: every row of a
-    regulation carries the same values. A row whose measure cannot be built is logged
-    and skipped; a regulation left without any measure is skipped as a whole.
+    regulation carries the same values. A regulation with a measure that cannot be built
+    is left out whole, every slice of it, and its identifier goes into `unbuilt` when
+    given: sending the rest would drop that measure from DiaLog (A-05).
 
     Two opt-ins, driven by the data source (see `BaseDataSourceIntegration`):
 
@@ -61,9 +64,14 @@ def build_regulations(
 
     for _, group_df in clean_data.group_by("regulation_identifier"):
         slices = _split_regulation_rows(group_df, max_locations_per_regulation)
+        built = []
+        complete = True
 
         for index, slice_df in enumerate(slices):
-            measures = _build_measures(slice_df, build_measure, group_locations_by_measure)
+            measures, slice_complete = _build_measures(
+                slice_df, build_measure, group_locations_by_measure
+            )
+            complete = complete and slice_complete
             if not measures:
                 continue
 
@@ -72,21 +80,32 @@ def build_regulations(
             if len(slices) > 1:
                 identifier = f"{identifier}-{index + 1:02d}"
 
-            regulations.append(_build_regulation(first_row, identifier, status, measures))
+            built.append(_build_regulation(first_row, identifier, status, measures))
+
+        if complete:
+            regulations.extend(built)
+        elif unbuilt is not None:
+            unbuilt.add(group_df["regulation_identifier"][0])
 
     return regulations
 
 
+def is_part_of(identifier: str, regulations: Collection[str]) -> bool:
+    """Whether `identifier` is one of `regulations`, or a slice of one (`X-02` of `X`)."""
+    return identifier in regulations or re.sub(r"-\d{2}$", "", identifier) in regulations
+
+
 def _build_measures(
     slice_df: pl.DataFrame, build_measure: MeasureBuilder, group_by_measure: bool
-) -> list[SaveMeasureDTO]:
-    """The measures of one regulation (or one slice of it).
+) -> tuple[list[SaveMeasureDTO], bool]:
+    """The measures of one regulation (or one slice of it), and whether all were built.
 
     Without grouping, every row is its own measure with its own location: the
     historical behaviour of every source in production. With grouping, the rows
     sharing a `measure_group_key` become one measure carrying all their locations.
     """
     measures = []
+    complete = True
 
     if not group_by_measure:
         for row in slice_df.iter_rows(named=True):
@@ -94,7 +113,8 @@ def _build_measures(
                 measures.append(build_measure(row))
             except Exception as e:
                 logger.error(f"Error creating measure: {e}")
-        return measures
+                complete = False
+        return measures, complete
 
     for _, measure_df in slice_df.group_by("measure_group_key", maintain_order=True):
         rows = list(measure_df.iter_rows(named=True))
@@ -102,7 +122,8 @@ def _build_measures(
             measures.append(build_measure(rows[0], rows))
         except Exception as e:
             logger.error(f"Error creating measure: {e}")
-    return measures
+            complete = False
+    return measures, complete
 
 
 def _split_regulation_rows(group_df: pl.DataFrame, max_locations: int | None) -> list[pl.DataFrame]:

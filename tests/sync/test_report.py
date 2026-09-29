@@ -120,7 +120,30 @@ def test_a_held_batch_is_flagged_with_the_command_that_releases_it():
 
     assert "RETENU" in report
     assert "à revoir manuellement" in report
+    assert "  à supprimer : 4 > plafond 3 — lot non appliqué" in report
     assert "--force-deletions" in report
+
+
+def test_a_batch_held_by_another_says_so_and_offers_no_release():
+    """A-07: releasing it before the held updates would drop the segments they carry."""
+    produced = {f"{PREFIX}{i}": digest(f"{PREFIX}{i}", max_speed=30) for i in "ab"}
+    snapshot = {f"{PREFIX}{i}": digest(f"{PREFIX}{i}", max_speed=50) for i in "ab"}
+    plan = reconcile(
+        produced,
+        [*produced, f"{PREFIX}gone"],
+        snapshot,
+        identifier_prefix=PREFIX,
+        update_mode="changed",
+        delete_missing=True,
+        max_updates=1,
+        max_deletions=3,
+    )
+
+    report = report_for(plan, produced, snapshot=snapshot)
+
+    assert "  à mettre à jour : 2 > plafond 1 — lot non appliqué" in report
+    assert "  à supprimer : 1 en attente des lots ci-dessus — lot non appliqué" in report
+    assert "--force-deletions" not in report
 
 
 def test_an_organization_without_a_prefix_reads_as_creations_only():

@@ -123,6 +123,10 @@ uv run dialog integrate co_lyon --env=prod --force-deletions   # relâcher les s
 
 `--force-deletions` ne relâche que le lot de ce qui a disparu de la source — suppressions ou clôtures, selon l'organisation.
 
+Ce qui a disparu de la source attend aussi, sans plafond atteint, dans deux cas : tant qu'un lot de créations ou de mises à jour est retenu, et la nuit où une création ou une mise à jour est restée sans réponse (panne, 5xx). Ces écritures portent peut-être ses tronçons : le retirer d'abord laisserait la route sans limite. Un refus de l'API (4xx) ne fait pas attendre. Les créations, elles, ne sont jamais retenues par un autre lot. Le rapport dit « en attente des lots ci-dessus », Tchap « lot retenu ». `--force-deletions` relâche dans tous les cas ; le rapport ne le propose que pour un lot au-dessus de son propre plafond.
+
+Un arrêté dont une mesure n'a pas pu être construite n'est ni créé, ni mis à jour, ni supprimé, ni clos, toutes ses tranches (`-01`, `-02`…) comprises : il reste tel que DiaLog le détient, et compte comme une erreur « construction impossible ».
+
 ### L'instantané
 
 `state/{organisation}/{source}.json.gz` : un digest par arrêté (titre, catégorie, objet, et par mesure le type, la vitesse, la période, le jeu de véhicules et la localisation). On compare à cette empreinte de **notre propre envoi**, jamais à une relecture de DiaLog : l'API réécrit une partie de ce qu'elle reçoit et une relecture republierait tout le corpus chaque jour.

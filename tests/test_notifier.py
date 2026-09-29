@@ -87,7 +87,7 @@ def test_a_run_that_changed_nothing_says_so(notifier):
 def test_a_held_batch_is_reported_for_review(notifier):
     body, formatted_body = notifier.format_message(SYNCHRONIZED)
 
-    assert "lot retenu (plafond dépassé) : 60 suppressions - à revoir manuellement" in body
+    assert "⚠️ lot retenu : 60 suppressions - à revoir manuellement" in body
     assert "60 suppressions" in formatted_body
 
 

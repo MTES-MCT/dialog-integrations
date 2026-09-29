@@ -174,12 +174,18 @@ def render_report(
     if held:
         lines += ["", "⚠ Lots retenus — à revoir manuellement"]
         for batch in held:
-            lines.append(
-                f"  {OPERATION_LABELS[batch.operation]} : {batch.size} > plafond "
-                f"{batch.limit} — lot non appliqué, redétecté à l'identique demain"
+            reason = (
+                f"> plafond {batch.limit}" if batch.over_cap else "en attente des lots ci-dessus"
             )
-        missing_held = plan.deletions.held or (plan.closures is not None and plan.closures.held)
-        if missing_held and not force_deletions:
+            lines.append(
+                f"  {OPERATION_LABELS[batch.operation]} : {batch.size} {reason} — lot non "
+                "appliqué, redétecté à l'identique demain"
+            )
+        # A batch held only because others are waits for them: releasing it first is A-07.
+        missing_over_cap = any(
+            batch.operation in (DELETE, CLOSE) and batch.over_cap for batch in held
+        )
+        if missing_over_cap and not force_deletions:
             what = "suppressions" if plan.deletions.held else "clôtures"
             lines.append(
                 f"  Relâcher les {what} : uv run dialog integrate {organization} "

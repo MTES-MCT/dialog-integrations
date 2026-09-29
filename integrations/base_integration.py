@@ -33,7 +33,13 @@ from integrations.sync.closure import (
     save_payload_from_read,
 )
 from integrations.sync.dating import date_creation, date_update, has_undated_period, run_day
-from integrations.sync.reconciliation import IntegrationOutcome, UpdateMode, reconcile
+from integrations.sync.reconciliation import (
+    CLOSE,
+    DELETE,
+    IntegrationOutcome,
+    UpdateMode,
+    reconcile,
+)
 from integrations.sync.report import SourceFunnel, render_report
 from integrations.sync.state import Digest, SnapshotStore, compute_regulation_digest
 from integrations.sync.totals import Totals, TotalsStore, total_shift
@@ -42,6 +48,7 @@ from settings import OrganizationSettings
 
 # A zone regulation is updated by DELETE then POST: when the POST fails, it is gone.
 LOST_ON_UPDATE = "arrêté supprimé, nouvelle version non créée"
+UNBUILT = "construction impossible"
 
 
 class BaseIntegration:
@@ -146,6 +153,7 @@ class BaseIntegration:
         source_of: dict[str, str] = {}
         funnels: list[SourceFunnel] = []
         stores: dict[str, SnapshotStore] = {}
+        unbuilt: set[str] = set()
 
         for data_source in self.data_sources:
             name = data_source.name or data_source.__name__
@@ -159,7 +167,7 @@ class BaseIntegration:
 
             logger.info(f"Total records from source {name}: {clean_data.shape[0]}")
 
-            source_regulations = self.create_regulations(clean_data, source)
+            source_regulations = self.create_regulations(clean_data, source, unbuilt)
             for regulation in source_regulations:
                 regulation.identifier = f"{regulation.identifier}"
                 regulation.status = self.status
@@ -230,9 +238,16 @@ class BaseIntegration:
             max_deletions=self.max_deletions_per_run,
             max_closures=self.max_closures_per_run,
             force_deletions=force_deletions,
+            unbuilt=unbuilt,
         )
         outcome.planned = plan.planned
         outcome.held = plan.held
+        if unbuilt:
+            logger.warning(
+                f"{len(unbuilt)} regulations could not be built, left as DiaLog has them: "
+                f"{sorted(unbuilt)[:10]}"
+            )
+            outcome.error_causes = {UNBUILT: len(unbuilt)}
         outcome.regulations = outcome.produced = len(regulations)
         outcome.measures = sum(len(r.measures or []) for r in regulations.values())
         counted = [funnel.raw_rows for funnel in funnels if funnel.raw_rows is not None]
@@ -262,10 +277,29 @@ class BaseIntegration:
         updated, lost = self._integrate_regulations_update(
             [regulations[identifier] for identifier in plan.updates.applicable]
         )
-        deleted = self._delete_regulations(plan.deletions.applicable)
+        write_failures = getattr(self.api, "write_failures", {})
+        unwritten = (set(plan.creations.applicable) - set(created) - set(refused)) | (
+            set(plan.updates.applicable) - set(updated)
+        )
+        outages = [
+            i for i in unwritten if not getattr(write_failures.get(i), "is_rejection", False)
+        ]
+        deletions = plan.deletions.applicable
+        closures = plan.closures.applicable if plan.closures is not None else ()
+        if outages and not force_deletions:
+            # What was not written may have replaced what left the source (A-07). A
+            # refusal will be refused again tomorrow and does not wait; an outage does.
+            logger.warning(
+                f"{len(outages)} creations or updates got no answer: "
+                "deletions and closures wait for the next run"
+            )
+            waiting = {DELETE: len(deletions), CLOSE: len(closures)}
+            outcome.held |= {operation: n for operation, n in waiting.items() if n}
+            deletions = closures = ()
+        deleted = self._delete_regulations(deletions)
         closed_digests: dict[str, Digest] = {}
         if plan.closures is not None:
-            closed_digests = self._close_regulations(plan.closures.applicable, closed_at)
+            closed_digests = self._close_regulations(closures, closed_at)
             outcome.closed = len(closed_digests)
 
         outcome.created = len(created)
@@ -273,15 +307,12 @@ class BaseIntegration:
         outcome.deleted = len(deleted)
         outcome.refused = len(refused)
         failed = (
-            (set(plan.creations.applicable) - set(created) - set(refused))
-            | (set(plan.updates.applicable) - set(updated) - set(lost))
-            | (set(plan.deletions.applicable) - set(deleted))
+            (unwritten - set(lost))
+            | (set(deletions) - set(deleted))
+            | (set(closures) - set(closed_digests))
         )
-        if plan.closures is not None:
-            failed |= set(plan.closures.applicable) - set(closed_digests)
-        outcome.rejections, outcome.error_causes = split_failures(
-            sorted(failed), getattr(self.api, "write_failures", {})
-        )
+        outcome.rejections, causes = split_failures(sorted(failed), write_failures)
+        outcome.error_causes |= causes
         if lost:
             outcome.error_causes[LOST_ON_UPDATE] = len(lost)
         # Not in DiaLog after the run: the creations that were held, refused or failed.
@@ -291,19 +322,19 @@ class BaseIntegration:
         outcome.datasets = self._dataset_summaries(funnels, regulations, source_of, not_integrated)
 
         if whole_organization and (self.update_changed or self.close_missing):
-            # Closed today, or missing from the source and still in DiaLog: these stay
-            # in the snapshot so tomorrow knows they have ended (or retries a closure
-            # that failed or was held).
+            # Closed today, missing from the source and still in DiaLog, or not built
+            # today: these stay in the snapshot so tomorrow knows they have ended (or
+            # retries a closure that failed or was held, or an update the build missed).
             carried: dict[str, Digest] = dict(closed_digests)
-            if self.close_missing and snapshot:
-                remaining = set(plan.already_ended) | (
+            previous = snapshot or {}
+            remaining = {i for i in previous if payloads.is_part_of(i, unbuilt)}
+            if plan.closures is not None:
+                remaining |= set(plan.already_ended) | (
                     set(plan.closures.identifiers) - set(closed_digests)
-                    if plan.closures is not None
-                    else set()
                 )
-                carried.update(
-                    {i: snapshot[i] for i in remaining if i in snapshot and i not in carried}
-                )
+            carried.update(
+                {i: previous[i] for i in remaining if i in previous and i not in carried}
+            )
             self._save_snapshots(
                 stores=stores,
                 source_of=source_of,
@@ -646,14 +677,16 @@ class BaseIntegration:
             if read is None:
                 continue
             try:
-                payload = save_payload_from_read(read)
+                closed_payload, changed = close_payload(save_payload_from_read(read), closed_at)
+                regulation = PostApiRegulationsAddBody.from_dict(closed_payload)
+                digest = compute_regulation_digest(regulation)
             except ClosureNotRebuildable as e:
                 logger.error(f"Cannot close {identifier}, it would lose a detail: {e}")
                 continue
-
-            closed_payload, changed = close_payload(payload, closed_at)
-            regulation = PostApiRegulationsAddBody.from_dict(closed_payload)
-            digest = compute_regulation_digest(regulation)
+            except Exception as e:
+                # A read the rebuild does not expect: this one waits, the others go on (A-27).
+                logger.error(f"Cannot close {identifier}, unexpected read: {e!r}")
+                continue
             if not changed:
                 logger.info(f"{identifier} had already ended, nothing to write")
                 closed[identifier] = digest
@@ -698,6 +731,7 @@ class BaseIntegration:
         self,
         clean_data: pl.DataFrame,
         source: BaseDataSourceIntegration | type[BaseDataSourceIntegration] | None = None,
+        unbuilt: set[str] | None = None,
     ) -> list[PostApiRegulationsAddBody]:
         """The source decides how its rows fold into measures and regulations.
 
@@ -710,6 +744,7 @@ class BaseIntegration:
             self.create_measure,
             group_locations_by_measure=bool(source and source.group_locations_by_measure),
             max_locations_per_regulation=source.max_locations_per_regulation if source else None,
+            unbuilt=unbuilt,
         )
 
     def create_measure(

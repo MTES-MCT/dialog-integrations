@@ -170,6 +170,24 @@ def test_rows_sharing_a_group_key_become_one_measure_with_all_their_locations():
     ]
 
 
+def test_a_regulation_with_a_measure_that_cannot_be_built_is_left_out_whole():
+    """A-05: every slice goes, or rows sliding between slices would lose their limit."""
+    df = rows(("A", "30", 1), ("A", "noEntry", 2), ("A", "30", 3), ("B", "30", 1))
+    df = df.with_columns(
+        location_road_type=pl.when(pl.col("measure_group_key") == "noEntry")
+        .then(pl.lit("lane"))
+        .otherwise(pl.col("location_road_type"))
+    )
+    unbuilt: set[str] = set()
+
+    built = regulations(
+        df, group_locations_by_measure=True, max_locations_per_regulation=2, unbuilt=unbuilt
+    )
+
+    assert [r.identifier for r in built] == ["B"]
+    assert unbuilt == {"A"}
+
+
 def test_a_regulation_above_the_ceiling_is_cut_into_numbered_slices_along_the_split_order():
     """Past ~1 700 locations a POST times out; the ceiling is per regulation, not per measure."""
     df = rows(("A", "30", 5), ("A", "30", 1), ("A", "30", 4), ("A", "30", 2), ("A", "30", 3))
