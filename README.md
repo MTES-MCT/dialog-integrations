@@ -103,7 +103,7 @@ class Integration(BaseIntegration):
 
 `delete_missing` et `close_missing` s'excluent. Une source qui est un instantané de chantiers en cours (Lyon) **clôt** : l'équipe veut garder l'historique des chantiers.
 
-Un plafond à `0` (`max_updates_per_run = 0`, `max_deletions_per_run = 0`) fait de la synchronisation un **rapport seul** : le diff est calculé et notifié chaque nuit, lot retenu, rien n'est appliqué tant qu'on ne lève pas le plafond (`--force-deletions` ne relâche que les suppressions et clôtures). C'est le mode de l'Aveyron.
+Un plafond à `0` (`max_updates_per_run = 0`, `max_deletions_per_run = 0`) fait de la synchronisation un **rapport seul** : le diff est calculé et notifié chaque nuit, lot retenu, rien n'est appliqué tant qu'on ne lève pas le plafond (`--force-deletions` ne relâche que les suppressions et clôtures). L'Aveyron a tourné ainsi sur le staging, puis est passé à 5 pour la production.
 
 ### Le préfixe, garde-fou principal
 

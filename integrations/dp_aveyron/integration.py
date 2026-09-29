@@ -14,14 +14,14 @@ class Integration(BaseIntegration):
     # organisation holds outside it is not ours and is never touched.
     identifier_prefix = "AV-"
 
-    # Synchronization in report-only mode: the diff against the last send is computed
-    # and reported every night, but nothing is applied — a cap of 0 holds every batch
-    # for manual review. Creations are not capped. Both sources are permanent
-    # regulations, so what leaves them is a deletion, not a closure.
+    # The source changes a few times a year (last edited 2026-02-09): a handful of
+    # updates or deletions goes through, more is held for manual review. Creations are
+    # not capped. Both sources are permanent regulations, so what leaves them is a
+    # deletion, not a closure.
     update_changed = True
     delete_missing = True
-    max_updates_per_run = 0
-    max_deletions_per_run = 0
+    max_updates_per_run = 5
+    max_deletions_per_run = 5
 
     data_sources = [
         RestrictionGabarits,
