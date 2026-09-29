@@ -280,14 +280,30 @@ def test_the_json_result_carries_the_counters(monkeypatch, tmp_path):
     assert json.loads(json.dumps(result)) == result
 
 
-def test_identifiers_restrict_the_run_to_those_regulations(monkeypatch, tmp_path):
+@pytest.mark.parametrize("missing_policy", ["delete_missing", "close_missing"])
+def test_identifiers_restrict_the_run_to_those_regulations(monkeypatch, tmp_path, missing_policy):
+    remote = [f"{PREFIX}a", f"{PREFIX}c"]
+    snapshot = {i: compute_regulation_digest(build_regulation(i)) for i in remote}
+    SnapshotStore("co_test", "fake", base_dir=tmp_path).save(snapshot)
     api = _RecordingApi()
-    frame = measure_rows([f"{PREFIX}a", f"{PREFIX}b"])
-    integration = _build_integration(monkeypatch, tmp_path, frame, [], api=api)
+    frame = measure_rows([f"{PREFIX}a", f"{PREFIX}b", f"{PREFIX}c"])
+    integration = _build_integration(
+        monkeypatch,
+        tmp_path,
+        frame,
+        remote,
+        api=api,
+        identifier_prefix=PREFIX,
+        update_changed=True,
+        **{missing_policy: True},
+    )
 
-    integration.integrate_regulations(limit_to=[f"{PREFIX}b"])
+    outcome = integration.integrate_regulations(limit_to=[f"{PREFIX}b"])
 
     assert api.posted == [f"{PREFIX}b"]
+    assert (api.put, api.deleted) == ([], [])
+    assert outcome.planned == {"create": 1, "update": 0, "delete": 0}
+    assert _snapshot(tmp_path) == snapshot
 
 
 def test_the_update_flag_overrides_the_organization_setting(monkeypatch, tmp_path):

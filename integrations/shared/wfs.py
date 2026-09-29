@@ -17,8 +17,7 @@ import polars as pl
 import requests
 from loguru import logger
 
-# Connect timeout, then read timeout: a large layer can weigh tens of megabytes.
-HTTP_TIMEOUT = (10, 600)
+from integrations.shared.download import DOWNLOAD_TIMEOUT
 
 BBox = tuple[float, float, float, float]  # min_lon, min_lat, max_lon, max_lat
 
@@ -38,7 +37,7 @@ def fetch_wfs_features(url: str, layer: str, *, srs: str = "EPSG:4326") -> pl.Da
         "SRSNAME": srs,
     }
     logger.info(f"Downloading WFS layer {layer} from {url}")
-    response = requests.get(url, params=params, timeout=HTTP_TIMEOUT)
+    response = requests.get(url, params=params, timeout=DOWNLOAD_TIMEOUT)
     response.raise_for_status()
     payload = response.json()
 

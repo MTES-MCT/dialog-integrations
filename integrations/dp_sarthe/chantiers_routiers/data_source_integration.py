@@ -13,6 +13,7 @@ from api.dia_log_client.models import (
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_sarthe.chantiers_routiers.schema import SartheChantiersRoutiersSchema
+from integrations.shared.download import DOWNLOAD_TIMEOUT
 from integrations.shared.local_time import end_of_local_day, start_of_local_day
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_chantiers_routiers/exports/parquet"
@@ -28,7 +29,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     def fetch_raw_data(self):
         logger.info(f"Downloading data from {URL}")
 
-        r = requests.get(URL)
+        r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
         r.raise_for_status()
 
         df = pl.read_parquet(io.BytesIO(r.content))

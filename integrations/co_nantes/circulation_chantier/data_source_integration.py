@@ -13,6 +13,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
+from integrations.shared.download import DOWNLOAD_TIMEOUT
 from integrations.shared.local_time import from_epoch_ms
 
 from .schema import NantesCirculationChantierRawDataSchema
@@ -44,7 +45,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
                 "resultRecordCount": page_size,
             }
             logger.info(f"Downloading data from {URL} ({offset}-{page_size})")
-            r = requests.get(URL, params=params).json()
+            r = requests.get(URL, params=params, timeout=DOWNLOAD_TIMEOUT).json()
             features = r.get("features", [])
             all_features.extend(features)
             if len(features) < page_size:

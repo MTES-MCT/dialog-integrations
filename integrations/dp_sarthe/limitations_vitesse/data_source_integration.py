@@ -13,6 +13,7 @@ from api.dia_log_client.models import (
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_sarthe.limitations_vitesse.schema import SartheRawDataSchema
+from integrations.shared.download import DOWNLOAD_TIMEOUT
 from integrations.shared.local_time import start_of_local_day
 
 URL = (
@@ -30,7 +31,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def fetch_raw_data(self) -> pl.DataFrame:
         logger.info(f"Downloading data from {URL}")
-        r = requests.get(URL)
+        r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
         r.raise_for_status()
 
         return pl.read_csv(

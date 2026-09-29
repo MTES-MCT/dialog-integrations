@@ -14,6 +14,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
+from integrations.shared.download import DOWNLOAD_TIMEOUT
 from integrations.shared.local_time import end_of_local_day, start_of_local_day
 
 from .schema import RennesTravauxVoirieRawDataSchema
@@ -37,7 +38,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         if MODE == "remote":
             logger.info(f"Downloading data from {URL}")
 
-            r = requests.get(URL)
+            r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
             r.raise_for_status()
 
             df = pl.read_parquet(io.BytesIO(r.content))
