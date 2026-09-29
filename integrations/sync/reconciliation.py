@@ -112,6 +112,13 @@ class ReconciliationPlan:
         return {batch.operation: batch.size for batch in self.batches}
 
 
+# The pipeline does not redo the API's checks, so a few refusals are expected every
+# night (2026-09-24: 2 at Brest, 2 in Sarthe, 1 at Rennes). Flagged beyond the larger
+# of these; chosen on 2026-09-29.
+REJECTION_ALERT_FLOOR = 10
+REJECTION_ALERT_SHARE = 0.05
+
+
 @dataclass
 class IntegrationOutcome:
     """What one `dialog integrate` run did, and what it plans to do."""
@@ -123,9 +130,10 @@ class IntegrationOutcome:
     deleted: int = 0
     # None for organizations that do not close what left their source.
     closed: int | None = None
-    # Regulations the API refused, one by one. They do not fail the run (D-05): the CI
-    # marks a run failed only when the command itself exits non-zero.
-    errors: int = 0
+    # Outages do not fail the run (D-05): the CI marks a run failed only when the
+    # command itself exits non-zero.
+    error_causes: dict[str, int] = field(default_factory=dict)
+    rejections: dict[str, int] = field(default_factory=dict)
     # Regulations the pipeline itself refused (a zone covering parallel roads): not an
     # API failure, retried every day until the source changes.
     refused: int = 0
@@ -142,7 +150,21 @@ class IntegrationOutcome:
     datasets: list[dict] = field(default_factory=list)
     regulations: int = 0
     measures: int = 0
+    produced: int = 0
+    total_shift: dict | None = None
     report: str = ""
+
+    @property
+    def errors(self) -> int:
+        return sum(self.error_causes.values())
+
+    @property
+    def rejected(self) -> int:
+        return sum(self.rejections.values())
+
+    @property
+    def rejections_alarming(self) -> bool:
+        return self.rejected > max(REJECTION_ALERT_FLOOR, REJECTION_ALERT_SHARE * self.produced)
 
     def to_result(self) -> dict:
         """The JSON payload handed to the CI step and to the Tchap notifier."""
@@ -159,6 +181,15 @@ class IntegrationOutcome:
             result["planned"] = self.planned
         if self.errors:
             result["errors"] = self.errors
+            result["error_causes"] = self.error_causes
+        if self.rejections:
+            result["rejected"] = {
+                "count": self.rejected,
+                "motives": self.rejections,
+                "alert": self.rejections_alarming,
+            }
+        if self.total_shift:
+            result["total_shift"] = self.total_shift
         if self.refused:
             result["refused"] = self.refused
         if self.held:

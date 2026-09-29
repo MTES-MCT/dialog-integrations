@@ -8,6 +8,10 @@ orchestration can count, and keeps the error messages consistent.
 """
 
 import json
+from collections import Counter
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from http import HTTPStatus
 
 from loguru import logger
 
@@ -30,6 +34,7 @@ from api.dia_log_client.api.private.put_api_regulations_publish import (
 from api.dia_log_client.api.private.put_api_regulations_update import (
     sync_detailed as update_regulation,
 )
+from api.dia_log_client.errors import UnexpectedStatus
 from api.dia_log_client.models import PostApiRegulationsAddBody, PutApiRegulationsUpdateBody
 from settings import OrganizationSettings
 
@@ -47,11 +52,98 @@ def build_client(settings: OrganizationSettings) -> Client:
     )
 
 
+OUTAGE_4XX = frozenset(
+    {
+        HTTPStatus.UNAUTHORIZED,
+        HTTPStatus.FORBIDDEN,
+        HTTPStatus.PROXY_AUTHENTICATION_REQUIRED,
+        HTTPStatus.REQUEST_TIMEOUT,
+        HTTPStatus.TOO_MANY_REQUESTS,
+    }
+)
+MAX_MOTIVE_LENGTH = 100
+UNRECORDED_CAUSE = "autre"
+
+
+@dataclass(frozen=True)
+class WriteFailure:
+    """Why a write failed. `status` is None when the call got no answer."""
+
+    status: int | None
+    motive: str
+
+    @property
+    def is_rejection(self) -> bool:
+        return (
+            self.status is not None and 400 <= self.status < 500 and self.status not in OUTAGE_4XX
+        )
+
+    @property
+    def cause(self) -> str:
+        return f"HTTP {self.status}" if self.status is not None else "sans réponse"
+
+
+def api_motive(content: bytes) -> str:
+    """The API's reason for a refusal: the first violation, else the `detail`."""
+    try:
+        body = json.loads(content)
+    except (TypeError, ValueError):
+        return "réponse illisible"
+    text = ""
+    if isinstance(body, dict):
+        violations = body.get("violations")
+        titles = [
+            v["title"]
+            for v in (violations if isinstance(violations, list) else [])
+            if isinstance(v, dict) and isinstance(v.get("title"), str)
+        ]
+        text = titles[0] if titles else str(body.get("detail") or "")
+    first_sentence = text.strip().split(". ")[0].rstrip(".")
+    if len(first_sentence) > MAX_MOTIVE_LENGTH:
+        first_sentence = first_sentence[: MAX_MOTIVE_LENGTH - 1].rstrip() + "…"
+    return first_sentence or "sans motif"
+
+
+def split_failures(
+    identifiers: Iterable[str], failures: Mapping[str, WriteFailure]
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Regulations that were not written: (rejections by motive, outages by cause)."""
+    rejections: Counter[str] = Counter()
+    outages: Counter[str] = Counter()
+    for identifier in identifiers:
+        failure = failures.get(identifier)
+        if failure is None:
+            outages[UNRECORDED_CAUSE] += 1
+        elif failure.is_rejection:
+            rejections[failure.motive] += 1
+        else:
+            outages[failure.cause] += 1
+    return dict(rejections.most_common()), dict(outages.most_common())
+
+
 class DialogApi:
     """The calls the pipeline makes, for one organization's client."""
 
     def __init__(self, client: Client):
         self.client = client
+        self.write_failures: dict[str, WriteFailure] = {}
+
+    def _record_error_answer(self, verb: str, identifier: str, status: int, content: bytes) -> None:
+        failure = WriteFailure(status, api_motive(content))
+        self.write_failures[identifier] = failure
+        log = logger.warning if failure.is_rejection else logger.error
+        log(
+            f"Failed to {verb}: {identifier} - got status {status} - "
+            f"{content.decode('utf-8', errors='replace')}"
+        )
+
+    def _record_no_answer(self, verb: str, identifier: str, error: Exception) -> None:
+        # The generated client raises on any status its spec leaves out, 5xx included.
+        if isinstance(error, UnexpectedStatus):
+            self._record_error_answer(verb, identifier, error.status_code, error.content)
+            return
+        self.write_failures[identifier] = WriteFailure(None, type(error).__name__)
+        logger.error(f"Failed to {verb}: {identifier} - {error}")
 
     def identifiers(self) -> list[str]:
         """Every regulation identifier of the organization. Raises when unreadable."""
@@ -84,11 +176,10 @@ class DialogApi:
         try:
             resp = add_regulation(client=self.client, body=regulation)
         except Exception as e:
-            logger.error(f"Failed to create: {identifier} - {e}")
+            self._record_no_answer("create", identifier, e)
             return self._created_anyway(identifier)
         if resp.status_code != 201:
-            logger.error(f"Failed to create: {identifier} - got status {resp.status_code}")
-            logger.error(json.loads(resp.content))
+            self._record_error_answer("create", identifier, resp.status_code, resp.content)
             return resp.status_code >= 500 and self._created_anyway(identifier)
         return True
 
@@ -104,17 +195,15 @@ class DialogApi:
 
         Not for a regulation holding a zone: the API answers 500 on those (S-14).
         """
+        identifier = str(regulation.identifier)
         body = PutApiRegulationsUpdateBody.from_dict(regulation.to_dict())
         try:
             resp = update_regulation(client=self.client, body=body)
         except Exception as e:
-            logger.error(f"Failed to update: {regulation.identifier} - {e}")
+            self._record_no_answer("update", identifier, e)
             return False
         if resp.status_code not in (200, 201, 204):
-            logger.error(
-                f"Failed to update: {regulation.identifier} - got status {resp.status_code}"
-            )
-            logger.error(json.loads(resp.content))
+            self._record_error_answer("update", identifier, resp.status_code, resp.content)
             return False
         return True
 
@@ -127,14 +216,14 @@ class DialogApi:
         try:
             resp = delete_regulation(identifier=identifier, client=self.client)
         except Exception as e:
-            logger.error(f"Failed to delete: {identifier} - {e}")
+            self._record_no_answer("delete", identifier, e)
             return False
         if resp.status_code == 204:
             return True
         if resp.status_code == 404 and missing_is_gone:
             logger.warning(f"{identifier} was already absent from DiaLog (404)")
             return True
-        logger.error(f"Failed to delete: {identifier} - got status {resp.status_code}")
+        self._record_error_answer("delete", identifier, resp.status_code, resp.content)
         return False
 
     def publish(self, identifier: str) -> bool:

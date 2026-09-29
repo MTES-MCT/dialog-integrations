@@ -628,3 +628,75 @@ def test_a_dated_regulation_is_updated_without_reading_anything(monkeypatch, tmp
     outcome = integration.integrate_regulations()
 
     assert outcome.updated == 1 and api.put == [f"{PREFIX}a"] and api.read == []
+
+
+# --- What could not be written, and the organization's total ------------------------
+
+from integrations.api import WriteFailure  # noqa: E402
+from integrations.sync.totals import Totals, TotalsStore  # noqa: E402
+from notifications.notifier import Notifier  # noqa: E402
+
+
+class _RefusingApi(_RecordingApi):
+    def __init__(self, refused: set[str], broken: set[str]):
+        super().__init__()
+        self.refused, self.broken = refused, broken
+        self.write_failures: dict[str, WriteFailure] = {}
+
+    def add(self, regulation):
+        identifier = str(regulation.identifier)
+        self.posted.append(identifier)
+        if identifier in self.refused:
+            self.write_failures[identifier] = WriteFailure(400, "hors compétence")
+            return False
+        if identifier in self.broken:
+            self.write_failures[identifier] = WriteFailure(502, "réponse illisible")
+            return False
+        return True
+
+
+def test_a_refused_content_is_not_an_error_and_an_outage_is(monkeypatch, tmp_path):
+    api = _RefusingApi(refused={f"{PREFIX}a", f"{PREFIX}b"}, broken={f"{PREFIX}c"})
+    integration = _build_integration(
+        monkeypatch,
+        tmp_path,
+        measure_rows([f"{PREFIX}a", f"{PREFIX}b", f"{PREFIX}c", f"{PREFIX}d"]),
+        [],
+        api=api,
+        identifier_prefix=PREFIX,
+    )
+
+    outcome = integration.integrate_regulations()
+
+    assert outcome.created == 1
+    assert (outcome.errors, outcome.error_causes) == (1, {"HTTP 502": 1})
+    assert outcome.to_result()["rejected"] == {
+        "count": 2,
+        "motives": {"hors compétence": 2},
+        "alert": False,
+    }
+
+
+def test_the_total_in_dialog_is_compared_with_the_previous_run(monkeypatch, tmp_path):
+    store = TotalsStore("co_test", base_dir=tmp_path)
+    store.save(Totals(dialog_in_prefix=4, produced=4))
+    integration = _build_integration(
+        monkeypatch,
+        tmp_path,
+        measure_rows([f"{PREFIX}new{i}" for i in range(4)]),
+        [f"{PREFIX}old{i}" for i in range(4)] + ["OTHER-CHANNEL-1"],
+        identifier_prefix=PREFIX,
+    )
+
+    outcome = integration.integrate_regulations()
+
+    assert Notifier.format_alerts(outcome.to_result()) == [
+        "⚠️ changement important du nombre total d'arrêtés de l'organisation dans DiaLog : "
+        "4 → 8 (produits par la pipeline : 4 → 4)"
+    ]
+    assert store.load() == Totals(dialog_in_prefix=8, produced=4)
+
+    limited = integration.integrate_regulations(limit_to=[f"{PREFIX}new0"])
+
+    assert limited.total_shift is None
+    assert store.load() == Totals(dialog_in_prefix=8, produced=4)

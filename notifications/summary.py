@@ -38,6 +38,9 @@ def render_summary(
             lines += [f"🧪 Simulation, rien n'a été écrit. Prévu : {planned or 'rien'}", ""]
         else:
             lines += [f"✅ {counts}", ""]
+            alerts = Notifier.format_alerts(outcome.to_result())
+            if alerts:
+                lines += [f"- {alert}" for alert in alerts] + [""]
         lines += _datasets_table(outcome.datasets)
         lines += [
             "<details><summary>Rapport de synchronisation</summary>",
