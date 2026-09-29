@@ -16,6 +16,7 @@ from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_sarthe.restrictions_gabarits.schema import (
     SartheRestrictionGabaritsRawDataSchema,
 )
+from integrations.shared.download import DOWNLOAD_TIMEOUT
 from integrations.shared.local_time import start_of_local_day
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_restrictions_gabarits/exports/csv?lang=fr&timezone=Europe%2FLondon&use_labels=true&delimiter=%3B"
@@ -29,7 +30,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def fetch_raw_data(self) -> pl.DataFrame:
         logger.info(f"Downloading data from {URL}")
-        r = requests.get(URL)
+        r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
         r.raise_for_status()
 
         df = pl.read_csv(io.BytesIO(r.content), separator=";", encoding="utf8", ignore_errors=True)

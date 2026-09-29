@@ -21,6 +21,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from integrations.base_data_source_integration import BaseDataSourceIntegration
+from integrations.shared.download import DOWNLOAD_TIMEOUT
 from integrations.shared.local_time import start_of_local_day
 from integrations.shared.time_slots import _clock, to_iso_slots
 
@@ -125,7 +126,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_path = Path(tmpdir) / "data.zip"
 
-            r = requests.get(URL, timeout=(10, 120))
+            r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
             r.raise_for_status()
             zip_path.write_bytes(r.content)
             logger.info(f"Downloaded zip file to {zip_path}")

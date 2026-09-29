@@ -11,6 +11,7 @@ import json
 
 import polars as pl
 import pytest
+from shapely.geometry import box
 
 from integrations.base_integration import BaseIntegration
 from integrations.co_lyon.chaussees_trottoirs.data_source_integration import (
@@ -29,6 +30,7 @@ from integrations.co_lyon.chaussees_trottoirs.regulation_key import (
     order_number,
 )
 from integrations.co_lyon.integration import Integration
+from integrations.shared.perimeter import Perimeter
 
 FIXTURE = "tests/co_lyon/chaussees_trottoirs.csv"
 
@@ -45,9 +47,17 @@ def measures_of(regulation) -> list:
     return regulation.measures
 
 
+def offline_source() -> DataSourceIntegration:
+    source = DataSourceIntegration.__new__(DataSourceIntegration)
+    # The Métropole's bounding box: every fixture segment lies inside the real perimeter,
+    # so the result matches the downloaded one without calling geo.api.gouv.fr.
+    source.perimeter = Perimeter.build("epci", "200046977", [box(4.69, 45.55, 5.07, 45.94)])
+    return source
+
+
 @pytest.fixture
 def clean_data() -> pl.DataFrame:
-    source = DataSourceIntegration.__new__(DataSourceIntegration)
+    source = offline_source()
     raw = pl.read_csv(FIXTURE)
     validated = source.validate_raw_data(raw)
     return source.select_regulation_measure_fields(source.compute_clean_data(validated))
@@ -215,7 +225,7 @@ def test_a_number_already_published_by_another_channel_is_not_created_again():
     Our reading of 2022-080 steps aside for the metropolitan regulations of its measures,
     which keep their generic titles (P-04).
     """
-    source = DataSourceIntegration.__new__(DataSourceIntegration)
+    source = offline_source()
     source.foreign_order_keys = foreign_order_keys(
         ["ALBIGNY-SUR-SAONE_2022-080", "TASSIN_2019_145"], "MGL-"
     )

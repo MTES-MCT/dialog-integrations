@@ -17,6 +17,7 @@ from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.dp_aveyron.limitations_vitesse.schema import (
     AveyronLimitationsVitesseRawDataSchema,
 )
+from integrations.shared.download import DOWNLOAD_TIMEOUT
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/limitations-de-vitesse-du-departement-aveyron/exports/parquet"
 
@@ -44,7 +45,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     def fetch_raw_data(self):
         logger.info(f"Downloading data from {URL}")
 
-        r = requests.get(URL)
+        r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
         r.raise_for_status()
 
         df = pl.read_parquet(io.BytesIO(r.content))

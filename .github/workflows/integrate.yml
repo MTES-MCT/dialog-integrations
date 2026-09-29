@@ -5,9 +5,18 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch:
 
+# A second run waits for the first: both would read the identifiers before either
+# creates, and post the same regulations twice.
+concurrency:
+  group: integrate
+  cancel-in-progress: false
+
 jobs:
   integrate:
     runs-on: ubuntu-latest
+    # Twice the longest job seen (31 min, dp_aveyron, September 2026). The default is six
+    # hours, and with two jobs at a time a hung one holds back the whole matrix.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       # Two organizations at a time: at midnight the staging jobs all fetched their

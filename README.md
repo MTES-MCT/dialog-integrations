@@ -68,7 +68,7 @@ dialog --help
 
 `dialog --help` et `dialog <commande> --help` donnent les options à jour.
 
-* `dialog integrate ORGANISATION` : `--env` (`dev` par défaut, ou `prod`), `--identifiers` (liste séparée par des virgules), `--update-existing`, `--dry-run`, `--force-deletions`, `--json`, `--summary FICHIER` ;
+* `dialog integrate ORGANISATION` : `--env` (`dev` par défaut, ou `prod`), `--identifiers` (liste séparée par des virgules ; ce run ne supprime ni ne clôt rien et laisse l'instantané intact), `--update-existing`, `--dry-run`, `--force-deletions`, `--json`, `--summary FICHIER` ;
 * `dialog publish ORGANISATION` : publie tous les arrêtés de l'organisation ;
 * `dialog notify --results JSON [--dry-run]` : poste le rapport de la nuit dans Tchap.
 

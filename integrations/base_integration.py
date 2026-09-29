@@ -132,6 +132,9 @@ class BaseIntegration:
         to DiaLog nor to the snapshot.
         """
         outcome = IntegrationOutcome(organization=self.organization, dry_run=dry_run)
+        # With `--identifiers`, the rest of the prefix is filtered out, not gone from the
+        # source: nothing is deleted or closed, and the snapshot is left as it was.
+        whole_organization = not limit_to
 
         # Must raise on failure: falling back to "this organization holds nothing"
         # would re-create the whole corpus as duplicates.
@@ -150,7 +153,7 @@ class BaseIntegration:
             source = data_source(self.organization_settings, self.client)
             clean_data, raw_rows = self._compute_clean_data(source)
 
-            if limit_to and len(limit_to) > 0:
+            if not whole_organization:
                 logger.info(f"Limiting processing to following ids : {limit_to}")
                 clean_data = clean_data.filter(pl.col("regulation_identifier").is_in(limit_to))
 
@@ -219,8 +222,8 @@ class BaseIntegration:
             snapshot,
             identifier_prefix=self.identifier_prefix,
             update_mode=update_mode,
-            delete_missing=self.delete_missing,
-            close_missing=self.close_missing,
+            delete_missing=self.delete_missing and whole_organization,
+            close_missing=self.close_missing and whole_organization,
             closed_at=closed_at,
             max_creations=self.max_creations_per_run,
             max_updates=self.max_updates_per_run,
@@ -287,7 +290,7 @@ class BaseIntegration:
         outcome.measures -= sum(len(regulations[i].measures or []) for i in not_integrated)
         outcome.datasets = self._dataset_summaries(funnels, regulations, source_of, not_integrated)
 
-        if self.update_changed or self.close_missing:
+        if whole_organization and (self.update_changed or self.close_missing):
             # Closed today, or missing from the source and still in DiaLog: these stay
             # in the snapshot so tomorrow knows they have ended (or retries a closure
             # that failed or was held).
@@ -315,7 +318,6 @@ class BaseIntegration:
                 snapshot_by_source=snapshot_by_source,
             )
 
-        whole_organization = not limit_to
         if whole_organization:
             totals = TotalsStore(self.organization)
             current = Totals(
