@@ -147,16 +147,14 @@ class Notifier:
             return ""
         if all(part.startswith("0 ") for part in parts):
             return "aucun changement"
-
-        errors = result.get("errors")
-        if isinstance(errors, int) and errors > 0:
-            parts.append(f"{errors} en échec")
         return ", ".join(parts)
 
+    MAX_MOTIVES = 3
+
     @classmethod
-    def _format_details(cls, result: dict) -> list[str]:
-        """Held batches and source volumes, on their own lines."""
-        details = []
+    def format_alerts(cls, result: dict) -> list[str]:
+        """One line per thing to look at or left out; shared with the GitHub summary."""
+        lines = []
 
         held = result.get("held")
         if isinstance(held, dict) and held:
@@ -164,7 +162,51 @@ class Notifier:
                 f"{count} {cls.HELD_LABELS.get(operation, operation)}"
                 for operation, count in sorted(held.items())
             )
-            details.append(f"⚠️ lot retenu (plafond dépassé) : {rendered} - à revoir manuellement")
+            lines.append(f"⚠️ lot retenu (plafond dépassé) : {rendered} - à revoir manuellement")
+
+        errors = result.get("errors")
+        if isinstance(errors, int) and not isinstance(errors, bool) and errors > 0:
+            line = f"⚠️ Attention : {errors} erreur{'s' if errors > 1 else ''} lors des écritures"
+            causes = result.get("error_causes")
+            if isinstance(causes, dict) and causes:
+                line += " (" + ", ".join(f"{c} : {n}" for c, n in causes.items()) + ")"
+            lines.append(line)
+
+        shift = result.get("total_shift")
+        if isinstance(shift, dict) and shift:
+            dialog, produced = shift.get("dialog") or [], shift.get("produced") or []
+            line = "⚠️ changement important du nombre total d'arrêtés de l'organisation dans DiaLog"
+            if len(dialog) == 2 and len(produced) == 2:
+                line += (
+                    f" : {dialog[0]} → {dialog[1]}"
+                    f" (produits par la pipeline : {produced[0]} → {produced[1]})"
+                )
+            lines.append(line)
+
+        rejected = result.get("rejected")
+        if isinstance(rejected, dict) and rejected.get("count"):
+            count = rejected["count"]
+            line = f"{count} refusé{'s' if count > 1 else ''} par DiaLog"
+            if rejected.get("alert"):
+                line = f"⚠️ {line}, au-delà du seuil habituel"
+            motives = rejected.get("motives")
+            if isinstance(motives, dict) and motives:
+                shown = list(motives.items())[: cls.MAX_MOTIVES]
+                line += " : " + ", ".join(f"{motive} ({n})" for motive, n in shown)
+                if len(motives) > cls.MAX_MOTIVES:
+                    line += ", …"
+            lines.append(line)
+
+        refused = result.get("refused")
+        if isinstance(refused, int) and not isinstance(refused, bool) and refused > 0:
+            lines.append(f"{refused} écarté{'s' if refused > 1 else ''} par la pipeline")
+
+        return lines
+
+    @classmethod
+    def _format_details(cls, result: dict) -> list[str]:
+        """Held batches and source volumes, on their own lines."""
+        details = cls.format_alerts(result)
 
         # One line per dataset (permanent, temporaire), or the organization's total for
         # results from before datasets were reported apart. Raw row counts mean

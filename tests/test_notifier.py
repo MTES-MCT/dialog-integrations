@@ -97,12 +97,65 @@ def test_source_volumes_are_reported_when_given(notifier):
     assert "Volumétries source : arrêtés du périmètre : 5297, mesures : 11230" in body
 
 
-def test_failed_writes_are_counted_next_to_the_successes(notifier):
-    body, _ = notifier.format_message(
-        {"result_co_rennes": '{"success":true,"created":5,"updated":0,"deleted":0,"errors":2}'}
+def test_an_outage_is_flagged_from_the_first_error_with_its_causes(notifier):
+    body, formatted_body = notifier.format_message(
+        {
+            "result_co_rennes": (
+                '{"success":true,"created":5,"updated":0,"deleted":0,"errors":3,'
+                '"error_causes":{"HTTP 500":2,"sans réponse":1}}'
+            )
+        }
     )
 
-    assert "5 créés, 0 mis à jour, 0 supprimé, 2 en échec" in body
+    assert "5 créés, 0 mis à jour, 0 supprimé\n" in body
+    assert "⚠️ Attention : 3 erreurs lors des écritures (HTTP 500 : 2, sans réponse : 1)" in body
+    assert "⚠️ Attention : 3 erreurs" in formatted_body
+
+
+def test_errors_are_not_hidden_behind_no_change(notifier):
+    body, _ = notifier.format_message(
+        {
+            "result_co_brest": (
+                '{"success":true,"created":0,"updated":0,"deleted":0,"errors":1,'
+                '"error_causes":{"HTTP 500":1},"rejected":{"count":2,'
+                '"motives":{"L\'organisation ne semble pas avoir les compétences":2},'
+                '"alert":false}}'
+            )
+        }
+    )
+
+    assert "✅ co_brest : Importé avec succès - aucun changement" in body
+    assert "⚠️ Attention : 1 erreur lors des écritures (HTTP 500 : 1)" in body
+    assert "2 refusés par DiaLog : L'organisation ne semble pas avoir les compétences (2)" in body
+
+
+def test_refusals_are_neutral_below_the_threshold_and_flagged_beyond(notifier):
+    below = '{"success":true,"rejected":{"count":1,"motives":{"Gabarit manquant":1},"alert":false}}'
+    beyond = (
+        '{"success":true,"rejected":{"count":40,"motives":'
+        '{"a":20,"b":10,"c":5,"d":5},"alert":true}}'
+    )
+
+    body, _ = notifier.format_message({"result_dp_sarthe": below, "result_co_lyon": beyond})
+
+    assert "    1 refusé par DiaLog : Gabarit manquant (1)" in body
+    assert "⚠️ 40 refusés par DiaLog, au-delà du seuil habituel : a (20), b (10), c (5), …" in body
+
+
+def test_a_shift_of_the_total_in_dialog_is_flagged(notifier):
+    body, _ = notifier.format_message(
+        {
+            "result_co_nantes": (
+                '{"success":true,"created":808,"updated":0,"deleted":0,'
+                '"total_shift":{"dialog":[1534,2342],"produced":[774,808]}}'
+            )
+        }
+    )
+
+    assert (
+        "⚠️ changement important du nombre total d'arrêtés de l'organisation dans DiaLog : "
+        "1534 → 2342 (produits par la pipeline : 774 → 808)"
+    ) in body
 
 
 def test_the_corpus_size_is_shown_under_the_organization(notifier):
@@ -205,7 +258,7 @@ def test_several_staging_hosts_are_named_per_organization(notifier):
     assert "co_rennes [staging-b.example.org]" in body
 
 
-def test_closures_are_counted_and_refusals_are_not(notifier):
+def test_closures_are_counted_and_pipeline_refusals_have_their_own_line(notifier):
     body, _ = notifier.format_message(
         {
             "result_co_lyon": (
@@ -214,8 +267,8 @@ def test_closures_are_counted_and_refusals_are_not(notifier):
         }
     )
 
-    assert "0 créé, 0 mis à jour, 0 supprimé, 2 clos" in body
-    assert "refus" not in body
+    assert "0 créé, 0 mis à jour, 0 supprimé, 2 clos\n" in body
+    assert "    3 écartés par la pipeline" in body
 
 
 def test_a_closing_organization_that_changed_nothing_says_so(notifier):

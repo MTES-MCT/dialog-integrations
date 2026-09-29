@@ -23,7 +23,7 @@ from api.dia_log_client.models import (
     SaveVehicleSetDTO,
 )
 from integrations import payloads
-from integrations.api import DialogApi, build_client
+from integrations.api import DialogApi, build_client, split_failures
 from integrations.base_data_source_integration import BaseDataSourceIntegration, RegulationMeasure
 from integrations.shared.zone_sections import MAX_SECTIONS_PER_LENGTH, MIN_SECTION_LENGTH_M
 from integrations.sync.closure import (
@@ -36,8 +36,12 @@ from integrations.sync.dating import date_creation, date_update, has_undated_per
 from integrations.sync.reconciliation import IntegrationOutcome, UpdateMode, reconcile
 from integrations.sync.report import SourceFunnel, render_report
 from integrations.sync.state import Digest, SnapshotStore, compute_regulation_digest
+from integrations.sync.totals import Totals, TotalsStore, total_shift
 from integrations.zone_flow import create_zone_regulation, has_zone
 from settings import OrganizationSettings
+
+# A zone regulation is updated by DELETE then POST: when the POST fails, it is gone.
+LOST_ON_UPDATE = "arrêté supprimé, nouvelle version non créée"
 
 
 class BaseIntegration:
@@ -226,7 +230,7 @@ class BaseIntegration:
         )
         outcome.planned = plan.planned
         outcome.held = plan.held
-        outcome.regulations = len(regulations)
+        outcome.regulations = outcome.produced = len(regulations)
         outcome.measures = sum(len(r.measures or []) for r in regulations.values())
         counted = [funnel.raw_rows for funnel in funnels if funnel.raw_rows is not None]
         outcome.raw_rows = sum(counted) if counted else None
@@ -252,7 +256,7 @@ class BaseIntegration:
         created, refused = self._integrate_regulations_add(
             [regulations[identifier] for identifier in plan.creations.applicable]
         )
-        updated = self._integrate_regulations_update(
+        updated, lost = self._integrate_regulations_update(
             [regulations[identifier] for identifier in plan.updates.applicable]
         )
         deleted = self._delete_regulations(plan.deletions.applicable)
@@ -265,20 +269,18 @@ class BaseIntegration:
         outcome.updated = len(updated)
         outcome.deleted = len(deleted)
         outcome.refused = len(refused)
-        attempted = (
-            len(plan.creations.applicable)
-            + len(plan.updates.applicable)
-            + len(plan.deletions.applicable)
-            + (len(plan.closures.applicable) if plan.closures is not None else 0)
+        failed = (
+            (set(plan.creations.applicable) - set(created) - set(refused))
+            | (set(plan.updates.applicable) - set(updated) - set(lost))
+            | (set(plan.deletions.applicable) - set(deleted))
         )
-        outcome.errors = (
-            attempted
-            - outcome.created
-            - outcome.updated
-            - outcome.deleted
-            - (outcome.closed or 0)
-            - outcome.refused
+        if plan.closures is not None:
+            failed |= set(plan.closures.applicable) - set(closed_digests)
+        outcome.rejections, outcome.error_causes = split_failures(
+            sorted(failed), getattr(self.api, "write_failures", {})
         )
+        if lost:
+            outcome.error_causes[LOST_ON_UPDATE] = len(lost)
         # Not in DiaLog after the run: the creations that were held, refused or failed.
         not_integrated = set(plan.creations.identifiers) - set(created)
         outcome.regulations -= len(not_integrated)
@@ -312,6 +314,18 @@ class BaseIntegration:
                 carried=carried,
                 snapshot_by_source=snapshot_by_source,
             )
+
+        whole_organization = not limit_to
+        if whole_organization:
+            totals = TotalsStore(self.organization)
+            current = Totals(
+                dialog_in_prefix=plan.remote_in_prefix + outcome.created - outcome.deleted,
+                produced=len(regulations),
+            )
+            outcome.total_shift = total_shift(totals.load(), current)
+            if outcome.total_shift:
+                logger.warning(f"DiaLog total moved without production: {outcome.total_shift}")
+            totals.save(current)
 
         return outcome
 
@@ -564,8 +578,8 @@ class BaseIntegration:
 
     def _integrate_regulations_update(
         self, regulations: list[PostApiRegulationsAddBody]
-    ) -> list[str]:
-        """Replace every regulation; return the identifiers actually updated.
+    ) -> tuple[list[str], list[str]]:
+        """Replace every regulation; return (updated, deleted without their new version).
 
         `PUT /api/regulations` replaces the regulation as a whole; DELETE-then-POST
         would lose it when the POST fails (D-06).
@@ -576,6 +590,7 @@ class BaseIntegration:
         deleted and recreated through the zone flow.
         """
         updated: list[str] = []
+        lost: list[str] = []
         day = run_day()
         for index, regulation in enumerate(regulations):
             identifier = str(regulation.identifier)
@@ -596,15 +611,20 @@ class BaseIntegration:
                 date_update(regulation, read, day)
 
             if self.resolve_zones_to_sections and has_zone(regulation):
-                if self.api.delete(identifier) and self._create_regulation(regulation) == "created":
+                if not self.api.delete(identifier):
+                    continue
+                if self._create_regulation(regulation) == "created":
                     updated.append(identifier)
+                else:
+                    logger.error(f"{identifier} deleted for its update, new version not created")
+                    lost.append(identifier)
             elif self.api.update(regulation):
                 updated.append(identifier)
 
         logger.success(
             f"Finished updating {len(updated)}/{len(regulations)} regulations successfully"
         )
-        return updated
+        return updated, lost
 
     def _close_regulations(
         self, identifiers: Sequence[str], closed_at: datetime

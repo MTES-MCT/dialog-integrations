@@ -196,6 +196,8 @@ def test_a_regulation_without_zone_is_posted_once_whatever_the_flag(integration)
 def test_updating_a_zone_regulation_deletes_it_and_runs_the_flow_again(integration):
     """PUT answers 500 on any regulation holding a zone, and the sections must be recomputed."""
     integration.resolve_zones_to_sections = True
-    updated = integration._integrate_regulations_update([zone_regulation()])
-    assert updated == ["MGL-CHP-1"]
+    assert integration._integrate_regulations_update([zone_regulation()]) == (["MGL-CHP-1"], [])
     assert integration.api.calls == ["delete", "post", "get", "delete", "post"]
+
+    integration.api.refuse_all = True
+    assert integration._integrate_regulations_update([zone_regulation()]) == ([], ["MGL-CHP-1"])
