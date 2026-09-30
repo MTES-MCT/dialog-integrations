@@ -5,6 +5,7 @@ import pytest
 from integrations.sync.reconciliation import (
     DeletionsWithoutPrefixError,
     IdentifierOutsidePrefixError,
+    IntegrationOutcome,
     assert_identifiers_in_prefix,
     reconcile,
 )
@@ -306,3 +307,16 @@ def test_an_organization_that_does_not_close_has_no_closure_batch():
     )
     assert plan.closures is None
     assert "close" not in plan.planned
+
+
+@pytest.mark.parametrize(
+    ("rejections", "produced", "alert"),
+    [(10, 100, False), (11, 100, True), (15, 300, False), (16, 300, True)],
+)
+def test_refusals_are_flagged_beyond_ten_or_five_percent_of_what_is_produced(
+    rejections, produced, alert
+):
+    result = IntegrationOutcome("co_test", rejections=rejections, produced=produced).to_result()
+
+    assert result["rejected"] == rejections
+    assert result.get("rejected_alert", False) is alert

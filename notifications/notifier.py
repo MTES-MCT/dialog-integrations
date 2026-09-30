@@ -149,7 +149,10 @@ class Notifier:
             return "aucun changement"
         return ", ".join(parts)
 
-    MAX_MOTIVES = 3
+    @staticmethod
+    def _count(value) -> int:
+        """A counter read from a result; anything but a positive integer counts as 0."""
+        return value if isinstance(value, int) and value > 0 else 0
 
     @classmethod
     def format_alerts(cls, result: dict) -> list[str]:
@@ -164,8 +167,7 @@ class Notifier:
             )
             lines.append(f"⚠️ lot retenu (plafond dépassé) : {rendered} - à revoir manuellement")
 
-        errors = result.get("errors")
-        if isinstance(errors, int) and not isinstance(errors, bool) and errors > 0:
+        if errors := cls._count(result.get("errors")):
             line = f"⚠️ Attention : {errors} erreur{'s' if errors > 1 else ''} lors des écritures"
             causes = result.get("error_causes")
             if isinstance(causes, dict) and causes:
@@ -183,23 +185,16 @@ class Notifier:
                 )
             lines.append(line)
 
-        rejected = result.get("rejected")
-        if isinstance(rejected, dict) and rejected.get("count"):
-            count = rejected["count"]
-            line = f"{count} refusé{'s' if count > 1 else ''} par DiaLog"
-            if rejected.get("alert"):
-                line = f"⚠️ {line}, au-delà du seuil habituel"
-            motives = rejected.get("motives")
-            if isinstance(motives, dict) and motives:
-                shown = list(motives.items())[: cls.MAX_MOTIVES]
-                line += " : " + ", ".join(f"{motive} ({n})" for motive, n in shown)
-                if len(motives) > cls.MAX_MOTIVES:
-                    line += ", …"
-            lines.append(line)
-
-        refused = result.get("refused")
-        if isinstance(refused, int) and not isinstance(refused, bool) and refused > 0:
-            lines.append(f"{refused} écarté{'s' if refused > 1 else ''} par la pipeline")
+        # Counts only: the motives are in the run's log (team decision, 2026-10-01).
+        left_out = []
+        if rejected := cls._count(result.get("rejected")):
+            left_out.append(f"{rejected} refusé{'s' if rejected > 1 else ''} par DiaLog")
+            if result.get("rejected_alert"):
+                left_out[-1] = f"⚠️ {left_out[-1]} (au-delà du seuil habituel)"
+        if refused := cls._count(result.get("refused")):
+            left_out.append(f"{refused} écarté{'s' if refused > 1 else ''} par la pipeline")
+        if left_out:
+            lines.append(", ".join(left_out))
 
         return lines
 

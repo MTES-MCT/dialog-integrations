@@ -133,7 +133,7 @@ class IntegrationOutcome:
     # Outages do not fail the run (D-05): the CI marks a run failed only when the
     # command itself exits non-zero.
     error_causes: dict[str, int] = field(default_factory=dict)
-    rejections: dict[str, int] = field(default_factory=dict)
+    rejections: int = 0
     # Regulations the pipeline itself refused (a zone covering parallel roads): not an
     # API failure, retried every day until the source changes.
     refused: int = 0
@@ -159,12 +159,8 @@ class IntegrationOutcome:
         return sum(self.error_causes.values())
 
     @property
-    def rejected(self) -> int:
-        return sum(self.rejections.values())
-
-    @property
     def rejections_alarming(self) -> bool:
-        return self.rejected > max(REJECTION_ALERT_FLOOR, REJECTION_ALERT_SHARE * self.produced)
+        return self.rejections > max(REJECTION_ALERT_FLOOR, REJECTION_ALERT_SHARE * self.produced)
 
     def to_result(self) -> dict:
         """The JSON payload handed to the CI step and to the Tchap notifier."""
@@ -183,11 +179,9 @@ class IntegrationOutcome:
             result["errors"] = self.errors
             result["error_causes"] = self.error_causes
         if self.rejections:
-            result["rejected"] = {
-                "count": self.rejected,
-                "motives": self.rejections,
-                "alert": self.rejections_alarming,
-            }
+            result["rejected"] = self.rejections
+        if self.rejections_alarming:
+            result["rejected_alert"] = True
         if self.total_shift:
             result["total_shift"] = self.total_shift
         if self.refused:

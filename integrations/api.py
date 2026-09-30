@@ -67,7 +67,6 @@ OUTAGE_4XX = frozenset(
         HTTPStatus.TOO_MANY_REQUESTS,
     }
 )
-MAX_MOTIVE_LENGTH = 100
 UNRECORDED_CAUSE = "autre"
 
 
@@ -76,7 +75,6 @@ class WriteFailure:
     """Why a write failed. `status` is None when the call got no answer."""
 
     status: int | None
-    motive: str
 
     @property
     def is_rejection(self) -> bool:
@@ -89,42 +87,24 @@ class WriteFailure:
         return f"HTTP {self.status}" if self.status is not None else "sans réponse"
 
 
-def api_motive(content: bytes) -> str:
-    """The API's reason for a refusal: the first violation, else the `detail`."""
-    try:
-        body = json.loads(content)
-    except (TypeError, ValueError):
-        return "réponse illisible"
-    text = ""
-    if isinstance(body, dict):
-        violations = body.get("violations")
-        titles = [
-            v["title"]
-            for v in (violations if isinstance(violations, list) else [])
-            if isinstance(v, dict) and isinstance(v.get("title"), str)
-        ]
-        text = titles[0] if titles else str(body.get("detail") or "")
-    first_sentence = text.strip().split(". ")[0].rstrip(".")
-    if len(first_sentence) > MAX_MOTIVE_LENGTH:
-        first_sentence = first_sentence[: MAX_MOTIVE_LENGTH - 1].rstrip() + "…"
-    return first_sentence or "sans motif"
-
-
 def split_failures(
     identifiers: Iterable[str], failures: Mapping[str, WriteFailure]
-) -> tuple[dict[str, int], dict[str, int]]:
-    """Regulations that were not written: (rejections by motive, outages by cause)."""
-    rejections: Counter[str] = Counter()
+) -> tuple[int, dict[str, int]]:
+    """Regulations that were not written: (rejections, outages by cause).
+
+    A refusal's motive is only in the log, which keeps the API's whole answer.
+    """
+    rejections = 0
     outages: Counter[str] = Counter()
     for identifier in identifiers:
         failure = failures.get(identifier)
         if failure is None:
             outages[UNRECORDED_CAUSE] += 1
         elif failure.is_rejection:
-            rejections[failure.motive] += 1
+            rejections += 1
         else:
             outages[failure.cause] += 1
-    return dict(rejections.most_common()), dict(outages.most_common())
+    return rejections, dict(outages.most_common())
 
 
 class DialogApi:
@@ -135,7 +115,7 @@ class DialogApi:
         self.write_failures: dict[str, WriteFailure] = {}
 
     def _record_error_answer(self, verb: str, identifier: str, status: int, content: bytes) -> None:
-        failure = WriteFailure(status, api_motive(content))
+        failure = WriteFailure(status)
         self.write_failures[identifier] = failure
         log = logger.warning if failure.is_rejection else logger.error
         log(
@@ -148,7 +128,7 @@ class DialogApi:
         if isinstance(error, UnexpectedStatus):
             self._record_error_answer(verb, identifier, error.status_code, error.content)
             return
-        self.write_failures[identifier] = WriteFailure(None, type(error).__name__)
+        self.write_failures[identifier] = WriteFailure(None)
         logger.error(f"Failed to {verb}: {identifier} - {error}")
 
     def identifiers(self) -> list[str]:

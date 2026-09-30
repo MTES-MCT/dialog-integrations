@@ -117,29 +117,26 @@ def test_errors_are_not_hidden_behind_no_change(notifier):
         {
             "result_co_brest": (
                 '{"success":true,"created":0,"updated":0,"deleted":0,"errors":1,'
-                '"error_causes":{"HTTP 500":1},"rejected":{"count":2,'
-                '"motives":{"L\'organisation ne semble pas avoir les compétences":2},'
-                '"alert":false}}'
+                '"error_causes":{"HTTP 500":1},"rejected":2,"refused":3}'
             )
         }
     )
 
     assert "✅ co_brest : Importé avec succès - aucun changement" in body
     assert "⚠️ Attention : 1 erreur lors des écritures (HTTP 500 : 1)" in body
-    assert "2 refusés par DiaLog : L'organisation ne semble pas avoir les compétences (2)" in body
+    assert "    2 refusés par DiaLog, 3 écartés par la pipeline\n" in body + "\n"
 
 
 def test_refusals_are_neutral_below_the_threshold_and_flagged_beyond(notifier):
-    below = '{"success":true,"rejected":{"count":1,"motives":{"Gabarit manquant":1},"alert":false}}'
-    beyond = (
-        '{"success":true,"rejected":{"count":40,"motives":'
-        '{"a":20,"b":10,"c":5,"d":5},"alert":true}}'
+    body, _ = notifier.format_message(
+        {
+            "result_dp_sarthe": '{"success":true,"rejected":1}',
+            "result_co_lyon": '{"success":true,"rejected":40,"rejected_alert":true}',
+        }
     )
 
-    body, _ = notifier.format_message({"result_dp_sarthe": below, "result_co_lyon": beyond})
-
-    assert "    1 refusé par DiaLog : Gabarit manquant (1)" in body
-    assert "⚠️ 40 refusés par DiaLog, au-delà du seuil habituel : a (20), b (10), c (5), …" in body
+    assert "    1 refusé par DiaLog\n" in body + "\n"
+    assert "    ⚠️ 40 refusés par DiaLog (au-delà du seuil habituel)\n" in body
 
 
 def test_a_shift_of_the_total_in_dialog_is_flagged(notifier):

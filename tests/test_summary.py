@@ -85,7 +85,7 @@ def test_the_alerts_of_the_tchap_report_are_repeated_on_the_run_page():
     markdown = render_summary(
         "co_test",
         "h",
-        _outcome(error_causes={"HTTP 500": 1}, rejections={"gabarit": 2}),
+        _outcome(error_causes={"HTTP 500": 1}, rejections=2),
         [],
     )
 
@@ -93,4 +93,4 @@ def test_the_alerts_of_the_tchap_report_are_repeated_on_the_run_page():
         "✅ aucun changement\n\n- ⚠️ Attention : 1 erreur lors des écritures (HTTP 500 : 1)"
         in markdown
     )
-    assert "- 2 refusés par DiaLog : gabarit (2)" in markdown
+    assert "- 2 refusés par DiaLog\n" in markdown

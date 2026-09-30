@@ -663,10 +663,10 @@ class _RefusingApi(_RecordingApi):
         identifier = str(regulation.identifier)
         self.posted.append(identifier)
         if identifier in self.refused:
-            self.write_failures[identifier] = WriteFailure(400, "hors compétence")
+            self.write_failures[identifier] = WriteFailure(400)
             return False
         if identifier in self.broken:
-            self.write_failures[identifier] = WriteFailure(502, "réponse illisible")
+            self.write_failures[identifier] = WriteFailure(502)
             return False
         return True
 
@@ -685,12 +685,10 @@ def test_a_refused_content_is_not_an_error_and_an_outage_is(monkeypatch, tmp_pat
     outcome = integration.integrate_regulations()
 
     assert outcome.created == 1
-    assert (outcome.errors, outcome.error_causes) == (1, {"HTTP 502": 1})
-    assert outcome.to_result()["rejected"] == {
-        "count": 2,
-        "motives": {"hors compétence": 2},
-        "alert": False,
-    }
+    assert Notifier.format_alerts(outcome.to_result()) == [
+        "⚠️ Attention : 1 erreur lors des écritures (HTTP 502 : 1)",
+        "2 refusés par DiaLog",
+    ]
 
 
 def test_the_total_in_dialog_is_compared_with_the_previous_run(monkeypatch, tmp_path):
