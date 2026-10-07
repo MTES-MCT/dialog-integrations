@@ -25,6 +25,8 @@ URL = (
     "/FeatureServer/5/query"
 )
 
+IDENTIFIER_PREFIX = "NM-CC-"
+
 
 class DataSourceIntegration(BaseDataSourceIntegration):
     raw_data_schema = NantesCirculationChantierRawDataSchema
@@ -118,11 +120,21 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
-    return df.with_columns(
+    """One regulation per `numero_chantier`, one measure per street it covers.
+
+    `gid` and `objectid` cannot identify a regulation: the producer reloads the layer
+    every working day and renumbers both, so the whole source came back under new
+    identifiers each time (3 907 regulations on staging for 793 produced, 2026-09-29).
+    `numero_chantier` is the order number and survives the reload. Measured on
+    2026-10-07: 547 numbers for 818 retained rows, with the same dates, motive and
+    constraint on every row of a number; `(numero_chantier, voie, commune)` is unique.
+
+    Rows are sorted so that the measures, and the title read on the first row, come out
+    in the same order whatever order the layer is served in.
+    """
+    return df.sort(["numero_chantier", "commune", "voie"], nulls_last=True).with_columns(
         [
-            (pl.lit("44/") + pl.col("gid").cast(pl.Utf8) + pl.lit("/TRAVAUX")).alias(
-                "regulation_identifier"
-            ),
+            (pl.lit(IDENTIFIER_PREFIX) + pl.col("numero_chantier")).alias("regulation_identifier"),
             pl.lit(PostApiRegulationsAddBodyCategory.TEMPORARYREGULATION.value).alias(
                 "regulation_category"
             ),
