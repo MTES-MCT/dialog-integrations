@@ -28,7 +28,7 @@ Known gaps, all measured and all deliberate:
   first two can be expressed, so a row is published only when its description is read
   in full (R-78, `description.py`).
 
-Volumes dropped per motive: `ai/docs/vers-l-equipe.md`.
+Volumes dropped per motive are logged at each run.
 """
 
 import datetime
@@ -64,6 +64,7 @@ MEASURE_TYPE_BY_PERTURBATION = {
     "Circulation interdite de nuit": MeasureTypeEnum.NOENTRY.value,
     "Circulation alternée": MeasureTypeEnum.ALTERNATEROAD.value,
     "Circulation alternée de jour": MeasureTypeEnum.ALTERNATEROAD.value,
+    "Circulation alternée de nuit": MeasureTypeEnum.ALTERNATEROAD.value,
     # "Circulation réduite*" is a narrowed carriageway: no DiaLog type covers it
     # (R-32 bis). "Circulation sens unique" would need a direction the layer does
     # not carry (R-32). Both are dropped and counted.
@@ -142,16 +143,19 @@ def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
     DiaLog can express two of those nuances: daily hours and a resident exemption. A
     row is kept only when nothing else is written there — the rest (a direction, a
     weekend reopening, 15-minute closures…) would otherwise be published as a stronger
-    restriction than stated. Four checks, each counted:
+    restriction than stated. Three checks, each counted:
 
     1. the type says "de jour" / "de nuit" but no hours can be read: the restriction
        is *known* to be partial, publishing it around the clock overstates it;
     2. a clock reading is left out of a pair (`de 7h à 17h, réouverture à 18h`): the
        hours were not read in full;
     3. once hours and `sauf riverains` are removed, more than a few connector
-       characters remain: the description says something we cannot express;
-    4. the type contradicts the hours: "de jour" with a window crossing midnight, or
-       "de nuit" with one that does not.
+       characters remain: the description says something we cannot express.
+
+    Hours read in full are published as read, whatever the type says: "de jour" / "de
+    nuit" only tells that hours exist, the description tells which. Until 2026-10-10 a
+    night type had to cross midnight, which dropped `de nuit` + `De 1h30 à 4h30`
+    (decision of Thibaut: a clear reading is enough, no theoretical night window).
 
     A type without "de jour" / "de nuit" and no description stays around the clock,
     which is the legitimate default. If such a description states hours anyway, they
@@ -165,7 +169,6 @@ def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
             "time_slot_clocks": pl.List(clock_slots),
             "hours_fully_paired": pl.Boolean,
             "fully_read": pl.Boolean,
-            "crosses_midnight": pl.Boolean,
         }
     )
 
@@ -175,7 +178,6 @@ def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
             "time_slot_clocks": [{"start": start, "end": end} for start, end in r.slots],
             "hours_fully_paired": r.hours_fully_paired,
             "fully_read": r.fully_read,
-            "crosses_midnight": r.crosses_midnight,
         }
 
     df = df.with_columns(
@@ -201,10 +203,6 @@ def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
         f"(direction, weekend, exceptions…; residual > {RESIDUAL_MAX_CHARS} characters)": ~pl.col(
             "fully_read"
         ),
-        "type contradicts the hours (day type crossing midnight, or night type not)": (
-            (declares_day & pl.col("crosses_midnight"))
-            | (declares_night & has_slots & ~pl.col("crosses_midnight"))
-        ),
     }
     for reason, unusable in checks.items():
         n_unusable = df.select(unusable.sum()).item()
@@ -224,7 +222,7 @@ def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
     n_slots = df.select(has_slots.sum()).item()
     logger.info(f"{n_slots}/{df.height} measures carry daily time slots")
 
-    return df.drop(["hours_fully_paired", "fully_read", "crosses_midnight"])
+    return df.drop(["hours_fully_paired", "fully_read"])
 
 
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:

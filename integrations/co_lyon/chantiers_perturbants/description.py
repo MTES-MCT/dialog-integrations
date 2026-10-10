@@ -43,10 +43,6 @@ class DescriptionReading:
     def fully_read(self) -> bool:
         return len(self.residual) <= RESIDUAL_MAX_CHARS
 
-    @property
-    def crosses_midnight(self) -> bool:
-        return any(start > end for start, end in self.slots)
-
 
 def read_description(text: str | None) -> DescriptionReading:
     text = text or ""

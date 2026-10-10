@@ -87,6 +87,7 @@ def warnings():
         ("Circulation interdite de nuit", "noEntry"),
         ("Circulation alternée", "alternateRoad"),
         ("Circulation alternée de jour", "alternateRoad"),
+        ("Circulation alternée de nuit", "alternateRoad"),
     ],
 )
 def test_maps_known_perturbations(perturbation, expected):
@@ -217,16 +218,20 @@ def test_drops_partial_day_restrictions_without_hours(warnings):
 
 
 @pytest.mark.parametrize(
-    "perturbation,description",
+    "perturbation,description,expected",
     [
-        ("Circulation interdite de jour", "de 21h à 5h"),
-        ("Circulation interdite de nuit", "de 8h à 17h"),
+        # D-27: a night closure that does not cross midnight is still a night closure.
+        ("Circulation interdite de nuit", "De 1h30 à 4h30", [("01:30", "04:30")]),
+        ("Circulation alternée de nuit", "De 21h à 5h", [("21:00", "05:00")]),
+        # The type only says hours exist; hours read in full are published as read.
+        ("Circulation interdite de jour", "de 21h à 5h", [("21:00", "05:00")]),
     ],
 )
-def test_drops_rows_whose_type_contradicts_their_hours(perturbation, description, warnings):
+def test_hours_read_in_full_win_over_the_day_or_night_label(perturbation, description, expected):
     result = timed(row(typeperturbation=perturbation, descripchantierinternet=description))
-    assert result.height == 0
-    assert any("contradicts" in message for message in warnings)
+    assert result.height == 1
+    slots = result.get_column("time_slot_clocks")[0].to_list()
+    assert [(slot["start"], slot["end"]) for slot in slots] == expected
 
 
 def test_a_night_window_on_a_plain_closure_is_not_a_contradiction():

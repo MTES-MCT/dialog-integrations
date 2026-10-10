@@ -241,9 +241,10 @@ def test_a_number_already_published_by_another_channel_is_not_created_again():
 
 
 def test_rows_without_an_order_number_group_by_measure_across_the_metropolis(clean_data):
-    """Four segments, four municipalities, one 30 km/h regulation."""
+    """Five segments, one 30 km/h regulation: four without an order, plus Rue Mercière,
+    whose ZTL order does not carry a 30 km/h on all its segments."""
     fallback = clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-V30")
-    assert fallback.height == 4
+    assert fallback.height == 5
     assert fallback["measure_group_key"].n_unique() == 1
     assert fallback["regulation_title"][0] == "Limitation de vitesse à 30 km/h – Métropole de Lyon"
 
@@ -412,7 +413,7 @@ def test_a_regulation_above_the_ceiling_is_split_into_ordered_slices(clean_data,
     slices = sorted(
         identifier_of(r) for r in regulations if identifier_of(r).startswith("MGL-CT-V30-")
     )
-    assert slices == ["MGL-CT-V30-01", "MGL-CT-V30-02"]
+    assert slices == ["MGL-CT-V30-01", "MGL-CT-V30-02", "MGL-CT-V30-03"]
     for regulation in regulations:
         assert sum(len(m.locations) for m in measures_of(regulation)) <= 2
 
@@ -546,17 +547,21 @@ def test_a_ztl_is_a_ban_with_a_local_access_exemption(clean_data):
     assert set(ztl["regulation_identifier"]) == {"MGL-CT-2025ZTL001"}
 
 
-def test_the_ztl_replaces_the_speed_the_source_files_for_it(clean_data):
-    """The source files the Presqu'île at 5, 20 or 30 km/h — how one drives inside it.
+def test_the_ztl_publishes_its_speed_beside_the_ban(clean_data):
+    """The source files the Presqu'île at 5, 20 or 30 km/h — how one drives once let in.
 
-    That is not what the sign at the entrance says, and publishing both would put two
-    measures on one segment — a redundant `noEntry` for the ones filed at 5 km/h.
+    Published beside the ban, like the walking pace of a pedestrian area (R-72). At
+    5 km/h it stays a speed limit: the ZTL already bans entry, a second `noEntry` as a
+    pedestrian area would say it twice.
     """
     labels = clean_data.filter(pl.col("measure_group_key") == "V30")["location_label"]
-    assert not any("Mercière" in label for label in labels)
+    assert any("Mercière" in label for label in labels)
 
-    areas = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")
-    assert not any("Tupin" in label for label in areas["location_label"])
+    tupin = clean_data.filter(pl.col("location_label").str.contains("Tupin"))
+    assert set(tupin["measure_group_key"]) == {"ZTL", "V5"}
+    assert tupin.filter(pl.col("measure_group_key") == "V5")["measure_type_"].to_list() == [
+        "speedLimitation"
+    ]
 
 
 def test_a_ztl_measure_reaches_the_api_with_its_exemption(regulations):
@@ -618,12 +623,14 @@ def test_five_kilometres_per_hour_alone_is_not_a_pedestrian_area(clean_data):
 def test_an_unlabelled_five_kilometre_segment_is_not_published_as_a_speed_limit(clean_data):
     """Dropping the ban must not turn it into a "5 km/h" advisory instead.
 
-    The walking-pace limit is the twin of a published ban, never of a dropped one.
+    The walking-pace limit is the twin of a published ban, never of a dropped one; the
+    only plain 5 km/h is the speed of a ZTL, next to its ban.
     """
-    assert "V5" not in set(clean_data["measure_group_key"])
+    fives = clean_data.filter(pl.col("measure_group_key") == "V5")["location_label"]
+    assert all("Tupin" in label for label in fives)
     assert not any("Tilleuls" in label for label in clean_data["location_label"])
     fives = clean_data.filter(pl.col("measure_max_speed") == 5)
-    assert set(fives["measure_group_key"]) == {"AIRE_PIETONNE_V5"}
+    assert set(fives["measure_group_key"]) == {"AIRE_PIETONNE_V5", "V5"}
     assert not any("Fernand Rude" in label for label in fives["location_label"])
 
 
@@ -667,6 +674,89 @@ def _qualified_measures(df: pl.DataFrame) -> pl.DataFrame:
         .pipe(explode_into_measures)
         .pipe(compute_measure_fields)
     )
+
+
+# --- What the free text and the road manager say (D-26, R-73, R-78) -----------------
+
+
+def clean_with(**overrides) -> pl.DataFrame:
+    """What the pipeline publishes on one extra segment: 20 km/h and 3.5 t, like Rue
+    Germain, on a street of its own, with the given fields."""
+    raw = pl.read_csv(FIXTURE)
+    fields = {"codetroncon": "X001", "nomvoie1": "Rue Témoin", "precisionreglementation": None}
+    fields.update(overrides)
+    extra = raw.filter(pl.col("codetroncon") == "T021").with_columns(
+        pl.lit(value, dtype=pl.String).alias(column) for column, value in fields.items()
+    )
+    source = offline_source()
+    validated = source.validate_raw_data(pl.concat([raw, extra], how="vertical_relaxed"))
+    clean = source.select_regulation_measure_fields(source.compute_clean_data(validated))
+    return clean.filter(pl.col("location_label").str.contains("Rue Témoin"))
+
+
+FEYZIN = "Arrêté N°0_AR_2018.0018 du 11/09/2019 sauf service public"
+
+
+def test_a_public_service_exemption_in_the_text_reaches_the_tonnage_limit():
+    """D-26: Feyzin's 3.5 t order exempts public services; publishing it without the
+    exemption bans more vehicles than the source does."""
+    clean = clean_with(precisionreglementation=FEYZIN)
+    tonnage = clean.filter(pl.col("measure_group_key") == "GABARIT_T3_5_SAUF_SP")
+
+    assert tonnage.height == 1
+    assert tonnage["vehicle_exempted_types"].to_list() == [["other"]]
+    assert tonnage["vehicle_other_exempted_type_text"].to_list() == ["Services publics"]
+    assert tonnage["regulation_title"].to_list() == [
+        "Restriction de gabarit 3.5 t, sauf services publics – Métropole de Lyon"
+    ]
+
+
+def test_a_public_service_exemption_leaves_the_speed_of_the_segment_alone():
+    clean = clean_with(precisionreglementation=FEYZIN)
+    speed = clean.filter(pl.col("measure_type_") == "speedLimitation")
+
+    assert speed["vehicle_exempted_types"].to_list() == [None]
+    assert speed["vehicle_other_exempted_type_text"].to_list() == [None]
+
+
+def test_the_exemption_reaches_the_api_next_to_other():
+    clean = clean_with(precisionreglementation=FEYZIN)
+    integration = Integration.__new__(Integration)
+    regulation = next(
+        r
+        for r in integration.create_regulations(clean, DataSourceIntegration)
+        if r.identifier == "MGL-CT-GABARIT_T3_5_SAUF_SP"
+    )
+    vehicle_set = measures_of(regulation)[0].vehicle_set.to_dict()
+
+    assert vehicle_set["exemptedTypes"] == ["other"]
+    assert vehicle_set["otherExemptedTypeText"] == "Services publics"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "ZCA : 2020 sens NS - Arrêté N°APC-2019-014 le 07/01/20",
+        "ZCA : 2019 - Arrêté N°PM19-16 le 07/06/19 - vitesse reglementée à 50km/h dans le sens SN",
+        "ZCA : Entre n°88 et n°70, Arrêté n°252-2023 du 25/04/23",
+        "ZCA : 2026 - zone de rencontre du n° 67 à rue Jean Macé - Arrêté N° ODP26-PERM-04",
+    ],
+)
+def test_a_direction_or_a_part_of_the_segment_in_the_text_drops_the_segment(text):
+    """R-78: a speed published both ways and end to end would state more than this."""
+    assert clean_with(precisionreglementation=text).height == 0
+
+
+@pytest.mark.parametrize("manager", ["État", "Métropole gestion tiers public"])
+def test_a_road_of_another_manager_is_not_published(manager):
+    """R-73: the State's motorways are not the Métropole's to regulate."""
+    assert clean_with(domanialite=manager).height == 0
+
+
+@pytest.mark.parametrize("manager", ["Conseil Général", "Privé", "Commune", "En attente"])
+def test_the_departement_private_and_municipal_roads_are_kept(manager):
+    """Within the Métropole the département is nearly the same authority (2026-10-10)."""
+    assert set(clean_with(domanialite=manager)["measure_group_key"]) == {"V20", "GABARIT_T3_5"}
 
 
 # --- perimeter (competence check rebuilt upstream) ---------------------------------
