@@ -64,6 +64,7 @@ class OrganizationSettings:
     base_url: str | None = None
     client_id: str | None = None
     client_secret: str | None = None
+    extra: dict[str, str]
 
     # Every organization must carry these to talk to the DiaLog API.
     REQUIRED_VALUES = ("base_url", "client_id", "client_secret")
@@ -78,6 +79,9 @@ class OrganizationSettings:
         self.base_url = settings.base_url
         self.client_id = settings.client_id
         self.client_secret = settings.client_secret
+        # The other `DIALOG_*` entries of the organization's .env file, prefix stripped
+        # and lower-cased: an integration's own settings (`litteralis_enabled_orgs`).
+        self.extra = {key.lower(): value for key, value in (settings.model_extra or {}).items()}
 
         missing_values = [name for name in self.REQUIRED_VALUES if getattr(self, name) is None]
         if missing_values:

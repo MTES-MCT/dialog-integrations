@@ -191,6 +191,30 @@ co_maville
 * `schema.py` : schéma du fichier d'entrée attendu par le script d'intégration au format [Pandera](https://pandera.readthedocs.io/).
 * `data_source_integration.py` : fichier d'intégration pour 1 data-source donnée.
 
+### L'exception : `integrations/dialog/` (import Litteralis)
+
+L'import Litteralis du back (`app:litteralis:import` et `app:litteralis:import-communication`) porté à l'identique, **bugs compris**, pour pouvoir comparer les deux implémentations. Il ne suit pas la pipeline des autres organisations (pas de schéma Pandera ni de pivot, pas d'instantané) : ses règles et sa synchronisation sont celles du back — supprimer ce qu'il a importé et qui n'est pas terminé, puis tout recréer.
+
+Configuration, dans l'environnement ou dans `.env.dialog.{env}` :
+
+```text
+DIALOG_LITTERALIS_ENABLED_ORGS='["mel"]'                 # flux standard
+DIALOG_LITTERALIS_COMMUNICATION_ENABLED_ORGS='[]'        # flux « Communication »
+DIALOG_LITTERALIS_ORG_MEL_CREDENTIALS='utilisateur:mot_de_passe'
+DIALOG_LITTERALIS_ORG_MEL_CLIENT_ID=… / _CLIENT_SECRET=… # facultatif : l'organisation DiaLog cible
+DIALOG_LITTERALIS_SIMULATION=chemin/vers/features.json   # facultatif : WFS simulé, sans identifiants
+```
+
+Sans identifiants Sogelink, le WFS simulé sert un jeu de features local en évaluant le filtre CQL et la pagination comme GeoServer :
+
+```shell
+uv run python -c "import json; from tests.dialog.litteralis.simulated_cases import layers; json.dump(layers(), open('/tmp/litteralis.json', 'w'))"
+DIALOG_LITTERALIS_SIMULATION=/tmp/litteralis.json DIALOG_LITTERALIS_ENABLED_ORGS='["simulee"]' \
+  uv run dialog integrate dialog --dry-run
+```
+
+`tests/dialog/litteralis/php_oracle.json.gz` est la sortie du code PHP du back sur les cas simulés ; les tests vérifient que le portage la reproduit valeur pour valeur.
+
 
 ## CI et qualité
 

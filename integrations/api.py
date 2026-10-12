@@ -29,6 +29,9 @@ from api.dia_log_client.api.private.get_api_regulations_get import (
 from api.dia_log_client.api.private.post_api_regulations_add import (
     sync_detailed as add_regulation,
 )
+from api.dia_log_client.api.private.post_api_regulations_add_storage import (
+    sync_detailed as add_storage,
+)
 from api.dia_log_client.api.private.put_api_regulations_publish import (
     sync_detailed as publish_regulation,
 )
@@ -36,7 +39,11 @@ from api.dia_log_client.api.private.put_api_regulations_update import (
     sync_detailed as update_regulation,
 )
 from api.dia_log_client.errors import UnexpectedStatus
-from api.dia_log_client.models import PostApiRegulationsAddBody, PutApiRegulationsUpdateBody
+from api.dia_log_client.models import (
+    PostApiRegulationsAddBody,
+    PostApiRegulationsAddStorageBody,
+    PutApiRegulationsUpdateBody,
+)
 from settings import OrganizationSettings
 
 # The router answers 504 after 60 s, so a read past that means a silent server: without a
@@ -211,6 +218,19 @@ class DialogApi:
             return True
         self._record_error_answer("delete", identifier, resp.status_code, resp.content)
         return False
+
+    def attach_url(self, identifier: str, url: str, title: str) -> bool:
+        """Attach a document URL to a regulation; True when the API answered 200 or 201."""
+        body = PostApiRegulationsAddStorageBody(url=url, title=title)
+        try:
+            resp = add_storage(identifier=identifier, client=self.client, body=body)
+        except Exception as e:
+            self._record_no_answer("attach document", identifier, e)
+            return False
+        if resp.status_code not in (200, 201):
+            self._record_error_answer("attach document", identifier, resp.status_code, resp.content)
+            return False
+        return True
 
     def publish(self, identifier: str) -> bool:
         """Publish a draft; True unless the call raised.
