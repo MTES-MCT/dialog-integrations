@@ -164,6 +164,68 @@ def test_city_code(district, expected):
     assert city_code(district) == expected
 
 
+# -- arrondissement from the street referential ---------------------------------------
+
+
+def city_codes_of(*rows: dict) -> list[str | None]:
+    return compute_location_fields(frame(*rows))["location_city_code"].to_list()
+
+
+def test_a_missing_arrondissement_is_the_only_one_of_its_street():
+    """Rue Dulong has addresses in the 17th only: a gap filled, not a guess (R-06)."""
+    assert city_codes_of(point("4", l_district=None)) == ["75117"]
+
+
+def test_a_missing_arrondissement_is_read_on_the_house_number():
+    """Boulevard Saint-Michel: odd numbers in the 5th, even ones in the 6th."""
+    assert city_codes_of(
+        point("20", l_district=None, l_road_name="Boulevard Saint-Michel"),
+        point("21", l_district=None, l_road_name="Boulevard Saint-Michel"),
+    ) == ["75106", "75105"]
+
+
+def test_bounds_falling_in_two_arrondissements_settle_nothing():
+    row = section(
+        l_road_name="Boulevard Saint-Michel",
+        l_district=None,
+        l_from_house_number="20",
+        l_to_house_number="21",
+    )
+    assert compute_location_fields(frame(row)).height == 0
+
+
+def test_a_street_on_two_arrondissements_takes_the_one_of_its_numbers():
+    """Rue de Vaugirard, 6th up to n° 111 / 132, 15th beyond: not the first cited."""
+    row = section(
+        l_road_name="Rue de Vaugirard",
+        l_district="6ème arrondissement ; 15ème arrondissement",
+        l_from_house_number="200",
+        l_to_house_number="250",
+    )
+    assert city_codes_of(row) == ["75115"]
+
+
+def test_a_street_on_two_arrondissements_without_numbers_keeps_the_first_cited():
+    row = section(
+        l_road_name="Rue de Vaugirard",
+        l_district="15ème arrondissement ; 6ème arrondissement",
+        l_from_road_name="Rue de Rennes",
+        l_to_road_name="Rue d'Assas",
+    )
+    assert city_codes_of(row) == ["75115"]
+
+
+def test_numbers_pointing_outside_the_cited_arrondissements_keep_the_first_cited():
+    """The source is not overruled: n° 200–250 are in the 15th, which is not cited."""
+    row = section(
+        l_road_name="Rue de Vaugirard",
+        l_district="6ème arrondissement ; 7ème arrondissement",
+        l_from_house_number="200",
+        l_to_house_number="250",
+    )
+    assert city_codes_of(row) == ["75106"]
+
+
 # -- shapes ----------------------------------------------------------------------------
 
 
@@ -299,7 +361,9 @@ def test_withdrawn_missing_road_and_absent_locations_are_dropped():
             point("4", l_status="Retiré"),
             point("4", l_status="Supprimé"),
             point("4", l_road_name=""),
-            point("4", l_district=None),  # DiaLog refuses Paris as a whole (75056)
+            # No arrondissement, on a street the referential does not know: DiaLog
+            # refuses Paris as a whole (75056).
+            point("4", l_district=None, l_road_name="Rue Imaginaire"),
             {"l_file_id": None},  # a measure without any location
         )
     )
@@ -334,7 +398,8 @@ def test_a_location_limited_to_one_direction_is_dropped(label):
 
 
 def test_every_location_column_is_a_pivot_key():
-    produced = {name for name in locations.LOCATION_COLUMNS if name != "location_rejection"}
+    working = {"location_rejection", "location_district_source"}
+    produced = {name for name in locations.LOCATION_COLUMNS if name not in working}
     assert produced <= set(RegulationMeasure.__annotations__)
 
 
