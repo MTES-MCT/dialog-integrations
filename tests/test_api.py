@@ -137,3 +137,30 @@ def test_failures_split_into_refusals_and_outages_by_cause():
 
     assert rejections == 2
     assert outages == {"HTTP 500": 1, "sans réponse": 1, "autre": 1}
+
+
+def test_public_identifiers_read_every_page_of_a_municipality(api, monkeypatch):
+    pages = {
+        1: b'{"metadata": {"lastPage": 2}, "regulations": '
+        b'[{"identifier": "Paris_1", "organization": {"name": "Paris (pr\\u00e9fecture)"}}]}',
+        2: b'{"metadata": {"lastPage": 2}, "regulations": '
+        b'[{"identifier": "2", "organization": {"name": "Paris"}}]}',
+    }
+    calls = []
+
+    def fake(client, status, insee_code, page, page_size):
+        calls.append((insee_code, page, status.value))
+        return response(200, pages[page])
+
+    monkeypatch.setattr(api_module, "get_public_regulations", fake)
+    assert api.public_identifiers("75104") == [
+        ("Paris_1", "Paris (préfecture)"),
+        ("2", "Paris"),
+    ]
+    assert calls == [("75104", 1, "all"), ("75104", 2, "all")]
+
+
+def test_public_identifiers_raise_on_an_unreadable_page(api, monkeypatch):
+    monkeypatch.setattr(api_module, "get_public_regulations", lambda **kwargs: response(504))
+    with pytest.raises(Exception, match="public export of 75104, page 1"):
+        api.public_identifiers("75104")

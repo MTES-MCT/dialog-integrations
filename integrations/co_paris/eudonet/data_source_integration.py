@@ -17,6 +17,7 @@ import json
 import os
 import re
 from collections import Counter
+from collections.abc import Iterable
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -33,11 +34,12 @@ from api.dia_log_client.models import (
 from api.dia_log_client.models import (
     PostApiRegulationsAddBodyMeasuresItemVehicleSetType0ExemptedTypesType0Item as VehicleExemptedTypeEnum,  # noqa: E501
 )
+from integrations.api import DialogApi
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.shared.local_time import end_of_local_day, start_of_local_day
 
 from .client import EQUALS, GREATER_OR_EQUAL, EudonetClient, EudonetError, all_of, any_of, criterion
-from .locations import compute_location_fields
+from .locations import CITY_CODE_BY_DISTRICT, compute_location_fields
 from .schema import EudonetRawDataSchema
 from .vocabulary import (
     ACCEPTED_STATE_LABELS,
@@ -207,6 +209,21 @@ DB_DATE_FORMATS = ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d")
 
 # Synchronisation prefix (plan §8, journal of 2026-09-08). See `compute_regulation_fields`.
 IDENTIFIER_PREFIX = "PARIS-EUDO-"
+
+# The other channels writing Paris acts into DiaLog (R-80). On the prod export of
+# 2026-09-08: "Paris (préfecture)" holds `Paris_{1101}` (78 of our numbers, pedestrian areas
+# of the City), the former PHP channel posts the bare `1101` into "Paris" (2).
+#
+# The bare numbers are read live from the public export, the only route that sees another
+# organization, municipality by municipality (~30 s): the commune code, then the twenty
+# arrondissements our own locations are sent with. The `Paris_` ones carry raw geometries
+# with no municipality, which that filter never returns, and reading the whole export takes
+# ~1 h (38 s a page, one page answering 500, staging of 2026-10-17). They are frozen in
+# `published_elsewhere.json` instead: 100 permanent pedestrian areas, the same on the prod
+# of 2026-09-08 and the staging of 2026-10-17. A `Paris_` regulation added since is missed.
+OTHER_CHANNEL_PREFIX = re.compile(r"^paris_", re.IGNORECASE)  # 5 of the 100 are `paris_`
+PUBLIC_EXPORT_CITY_CODES = ("75056", *CITY_CODE_BY_DISTRICT.values())
+FROZEN_ELSEWHERE_PATH = Path(__file__).with_name("published_elsewhere.json")
 
 TITLE_MAX_LENGTH = 255
 TITLE_ELLIPSIS = "..."
@@ -415,6 +432,9 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
     metrics: dict[str, int]
+    # `1101` numbers another channel already published, each with where it was found.
+    # None until `fetch_raw_data` reads them: tests that skip it hold nothing back.
+    numbers_published_elsewhere: dict[str, str] | None = None
 
     def fetch_raw_data(self) -> pl.DataFrame:
         """Read the perimeter from Eudonet, or from the fixture when one is pointed at."""
@@ -446,7 +466,36 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             "mesures d'arrêtés illisibles pour le compte": unreadable,
             "localisations": len(tables.get(str(TABLE_LOCATIONS), [])),
         }
+        self.numbers_published_elsewhere = self.fetch_numbers_published_elsewhere()
         return build_raw_dataframe(tables)
+
+    def fetch_numbers_published_elsewhere(self) -> dict[str, str]:
+        """Read the public export and keep the Eudonet numbers other channels published.
+
+        The live read is a courtesy to the other channels, not a condition of the run, as
+        for Lyon: offline or when the export is unreadable, the pipeline goes on with the
+        frozen list alone and says so.
+        """
+        frozen = [
+            (identifier, organization) for identifier, organization in load_frozen_elsewhere()
+        ]
+        try:
+            api = DialogApi(self.client)
+            live = [
+                found for code in PUBLIC_EXPORT_CITY_CODES for found in api.public_identifiers(code)
+            ]
+        except Exception as error:
+            logger.warning(
+                f"R-80 live check skipped: the public export could not be read ({error!r}) — "
+                f"only the {len(frozen)} frozen identifiers of the other channels are held back"
+            )
+            live = []
+        numbers = numbers_published_elsewhere([*frozen, *live])
+        logger.info(
+            f"{len(numbers)} numbers published by another channel: {len(frozen)} frozen "
+            f"identifiers, {len(live)} regulations of the public export in Paris"
+        )
+        return numbers
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         """The transformations, piped in the order their filters depend on.
@@ -460,6 +509,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         return (
             raw_data.pipe(discard_police_prefecture)
             .pipe(compute_regulation_fields)
+            .pipe(discard_published_elsewhere, self.numbers_published_elsewhere)
             .pipe(compute_measure_fields)
             .pipe(compute_vehicle_fields)
             .pipe(compute_period_fields)
@@ -651,6 +701,52 @@ def discard_police_prefecture(df: pl.DataFrame, publish: bool | None = None) -> 
     return df.filter(~is_prefecture)
 
 
+def load_frozen_elsewhere(path: Path = FROZEN_ELSEWHERE_PATH) -> list[list[str]]:
+    """The (identifier, organization) pairs the live read cannot see, frozen in the repo."""
+    return json.loads(path.read_text(encoding="utf-8"))["regulations"]
+
+
+def numbers_published_elsewhere(identifiers: Iterable[tuple[str, str]]) -> dict[str, str]:
+    """`1101` numbers behind the identifiers of other channels → "organization: identifier".
+
+    `Paris_2024P12345` or `paris_2024P12345` gives `2024P12345`; a bare identifier is taken
+    whole, since the former PHP channel posts `1101` as is. Ours (`PARIS-EUDO-`) are
+    skipped. No other normalisation, for the reason `compute_regulation_fields` gives:
+    `1101` is unique as is.
+    """
+    numbers: dict[str, str] = {}
+    for identifier, organization in identifiers:
+        if identifier.startswith(IDENTIFIER_PREFIX):
+            continue
+        number = OTHER_CHANNEL_PREFIX.sub("", identifier, count=1)
+        numbers.setdefault(number, f"{organization}: {identifier}")
+    return numbers
+
+
+def discard_published_elsewhere(
+    df: pl.DataFrame, numbers: dict[str, str] | None = None
+) -> pl.DataFrame:
+    """Drop the regulations whose `1101` number another channel already published (R-80).
+
+    One act, one entry in DiaLog: the regulation already in place stays, ours is not
+    created next to it, whichever organization holds it (decision of 2026-10-15). Each
+    regulation held back is logged with the identifier and organization it collides with.
+    """
+    if not numbers:
+        return df
+    published = pl.col("a_identifier").is_in(list(numbers))
+    held_back = df.filter(published)
+    if held_back.height:
+        collisions = sorted(
+            f"{number} ({numbers[number]})" for number in held_back["a_identifier"].unique()
+        )
+        logger.warning(
+            f"Dropping {held_back.height} rows of {len(collisions)} regulations already "
+            f"published by another channel (R-80): {collisions}"
+        )
+    return df.filter(~published)
+
+
 def compute_regulation_fields(df: pl.DataFrame, today: date | None = None) -> pl.DataFrame:
     """The regulation half of the pivot, and the perimeter filter that goes with it.
 
@@ -678,7 +774,9 @@ def compute_regulation_fields(df: pl.DataFrame, today: date | None = None) -> pl
 
     The `PARIS-EUDO-` prefix keeps this channel apart from the two that already write into
     the same DiaLog organizations: the historical PHP channel posts the bare `1101`
-    (`2023T15201`), and the police prefecture posts `Paris_2024P12345`. A hyphen rather than
+    (`2023T15201`), and the organization "Paris (préfecture)" holds `Paris_2024P12345`.
+    A number either of them already published is not created again
+    (`discard_published_elsewhere`). A hyphen rather than
     a slash, because a slash in an identifier has already bitten the pipeline (review I-7).
     The result stays well inside the 60 characters the API allows.
 

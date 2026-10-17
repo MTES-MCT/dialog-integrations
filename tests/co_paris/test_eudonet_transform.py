@@ -5,6 +5,7 @@ filters are deterministic, and small hand-built frames for the cases the fixture
 carry (an unknown catalog value, a start after an end, a permanent without a start date).
 """
 
+import re
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,10 @@ from integrations.co_paris.eudonet.data_source_integration import (
     compute_regulation_fields,
     compute_vehicle_fields,
     discard_police_prefecture,
+    discard_published_elsewhere,
     load_fixture,
+    load_frozen_elsewhere,
+    numbers_published_elsewhere,
 )
 from integrations.co_paris.eudonet.vocabulary import (
     MEASURE_TYPE_BY_LABEL,
@@ -422,6 +426,47 @@ def test_the_police_prefecture_is_published_only_behind_its_constant(publish, ke
         make_row(), make_row(a_identifier="2024P10002", a_service="Préfecture de Police")
     )
     assert discard_police_prefecture(df, publish).height == kept
+
+
+def test_the_number_behind_another_channel_identifier_is_read_without_normalising():
+    """`Paris_` is cut, a bare number is taken whole, ours are skipped (R-80)."""
+    numbers = numbers_published_elsewhere(
+        [
+            ("Paris_2024P12345", "Paris (préfecture)"),
+            ("paris_2025P12924", "Paris (préfecture)"),
+            ("2024T11570", "Paris"),
+            (f"{IDENTIFIER_PREFIX}2024T10001", "Paris"),
+        ]
+    )
+    assert numbers == {
+        "2024P12345": "Paris (préfecture): Paris_2024P12345",
+        "2025P12924": "Paris (préfecture): paris_2025P12924",
+        "2024T11570": "Paris: 2024T11570",
+    }
+
+
+def test_the_frozen_identifiers_of_the_prefecture_channel_are_readable():
+    """The live read cannot see them (raw geometries, no municipality): frozen in the repo."""
+    frozen = load_frozen_elsewhere()
+    numbers = numbers_published_elsewhere([(i, o) for i, o in frozen])
+    assert len(numbers) == len(frozen) == 100
+    assert all(re.fullmatch(r"\d{4}P\d+", number) for number in numbers)
+
+
+def test_a_number_another_channel_published_is_not_created_again():
+    """One act, one entry in DiaLog: the regulation already in place stays (R-80)."""
+    df = make_frame(
+        make_row(),
+        make_row(a_identifier="2024T11570"),
+        make_row(a_identifier="2024P12345"),
+    )
+    numbers = numbers_published_elsewhere(
+        [("Paris_2024P12345", "Paris (préfecture)"), ("2024T11570", "Paris")]
+    )
+    kept = discard_published_elsewhere(df, numbers)
+    assert set(kept["a_identifier"]) == set(df["a_identifier"]) - {"2024T11570", "2024P12345"}
+    # Unreadable export: nothing is held back.
+    assert discard_published_elsewhere(df, None).height == df.height
 
 
 # ---------------------------------------------------------------------------
