@@ -246,6 +246,15 @@ PERIOD_START_SOURCE = "_period_start_source"
 # Paris agrees.
 PUBLISH_POLICE_PREFECTURE = True
 
+# DiaLog refuses a whole regulation when it cannot geocode one of its locations (13 % of
+# the regulations sent to the staging on 2026-09-23), and its answer does not say which.
+# `refused_locations.json` lists the locations a probe of the staging isolated, by their
+# Eudonet `FileId`, with the motive DiaLog gave: they are dropped before sending, and the
+# regulation goes with its other locations (decision of 2026-10-15). Its volume is logged
+# at each run; a location fixed in Eudonet keeps its `FileId` and stays dropped until the
+# list is probed again.
+REFUSED_LOCATIONS_PATH = Path(__file__).with_name("refused_locations.json")
+
 # Ceiling on the locations of one POST (R-76, same margin as Lyon). The largest Paris act
 # carries ~600 locations: a guard, not a cut that happens today.
 MAX_LOCATIONS_PER_REGULATION = 1000
@@ -514,6 +523,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_vehicle_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
+            .pipe(discard_refused_locations)
             .pipe(add_pedestrian_area_speed)
         )
 
@@ -1232,6 +1242,36 @@ def compute_period_fields(df: pl.DataFrame, today: date | None = None) -> pl.Dat
             is_permanent.alias("period_is_permanent"),
         ]
     ).drop(PERIOD_START_SOURCE)
+
+
+def load_refused_locations(path: Path = REFUSED_LOCATIONS_PATH) -> dict[int, str]:
+    """Eudonet location `FileId` → the motive DiaLog gave when it refused it alone."""
+    entries = json.loads(path.read_text(encoding="utf-8"))["locations"]
+    return {entry["l_file_id"]: entry["motive"] for entry in entries}
+
+
+def discard_refused_locations(
+    df: pl.DataFrame, refused: dict[int, str] | None = None
+) -> pl.DataFrame:
+    """Drop the locations DiaLog refuses to geocode, so that their regulation goes through.
+
+    Counted by motive. A regulation whose every location is listed goes away with them.
+    """
+    refused = load_refused_locations() if refused is None else refused
+    if not refused:
+        return df
+    listed = pl.col("l_file_id").is_in(list(refused))
+    dropped = df.filter(listed)
+    if dropped.height:
+        motives = Counter(refused[file_id] for file_id in dropped["l_file_id"])
+        kept = set(df.filter(~listed)["a_identifier"])
+        emptied = set(dropped["a_identifier"]) - kept
+        logger.warning(
+            f"Dropping {dropped.height} locations DiaLog refuses to geocode (blacklist): "
+            f"{dict(motives.most_common())}; {dropped['a_identifier'].n_unique()} regulations "
+            f"published without them, {len(emptied)} left with no location"
+        )
+    return df.filter(~listed)
 
 
 def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:

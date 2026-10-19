@@ -36,8 +36,10 @@ from integrations.co_paris.eudonet.data_source_integration import (
     compute_vehicle_fields,
     discard_police_prefecture,
     discard_published_elsewhere,
+    discard_refused_locations,
     load_fixture,
     load_frozen_elsewhere,
+    load_refused_locations,
     numbers_published_elsewhere,
 )
 from integrations.co_paris.eudonet.vocabulary import (
@@ -467,6 +469,24 @@ def test_a_number_another_channel_published_is_not_created_again():
     assert set(kept["a_identifier"]) == set(df["a_identifier"]) - {"2024T11570", "2024P12345"}
     # Unreadable export: nothing is held back.
     assert discard_published_elsewhere(df, None).height == df.height
+
+
+def test_a_refused_location_is_dropped_and_its_regulation_goes_with_the_others():
+    """The blacklist removes the location DiaLog cannot geocode, not the regulation."""
+    df = make_frame(
+        make_row(l_file_id=10),
+        make_row(l_file_id=11),
+        make_row(a_identifier="2024P10002", l_file_id=20),
+    )
+    refused = {11: "Cette adresse n'est pas reconnue", 20: "Les deux rues ne se croisent pas"}
+    kept = discard_refused_locations(df, refused)
+    assert kept["l_file_id"].to_list() == [10]
+    assert set(kept["a_identifier"]) == {"2024P10001"}
+    assert discard_refused_locations(df, {}).height == df.height
+
+
+def test_the_versioned_blacklist_is_readable():
+    assert isinstance(load_refused_locations(), dict)
 
 
 # ---------------------------------------------------------------------------
