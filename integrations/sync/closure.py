@@ -25,6 +25,7 @@ PARIS = ZoneInfo("Europe/Paris")
 
 ROAD_TYPE_RAW_GEOJSON = "rawGeoJSON"
 ROAD_TYPE_ZONE = "zone"
+ROAD_TYPE_LANE = "lane"
 NUMBERED_ROAD_KEYS = {"departmentalRoad": "departmentalRoad", "nationalRoad": "nationalRoad"}
 
 
@@ -173,9 +174,13 @@ def _period_from_read(period: Mapping[str, Any]) -> dict:
 
 
 def _location_from_read(location: Mapping[str, Any]) -> dict:
-    """Locations keep their type, except a `zone`: DiaLog already turned it into
-    street sections, and `PUT` answers 500 on a zone (S-14), so the sections are sent
-    as `rawGeoJSON` — the effective geometry does not change."""
+    """Locations keep their type, except a `zone` and a named street, sent back as the
+    geometry DiaLog computed for them — the effective geometry does not change.
+
+    A zone: DiaLog already turned it into street sections, and `PUT` answers 500 on a
+    zone (S-14). A named street (read as `lane`): the read leaves out the city code,
+    the direction and the bound types the write needs (staging, 2026-10-19), and
+    sending it as a street again would have DiaLog geocode it a second time."""
     road_type = location.get("roadType")
     geometry = location.get("geometry")
     if road_type == ROAD_TYPE_RAW_GEOJSON:
@@ -189,14 +194,30 @@ def _location_from_read(location: Mapping[str, Any]) -> dict:
             "roadType": ROAD_TYPE_RAW_GEOJSON,
             "rawGeoJSON": {"label": label, "geometry": geometry},
         }
-    if road_type == "namedStreet" and isinstance(location.get("namedStreet"), Mapping):
-        return {"roadType": road_type, "namedStreet": dict(location["namedStreet"])}
+    if road_type == ROAD_TYPE_LANE and isinstance(location.get("namedStreet"), Mapping):
+        if not geometry:
+            raise ClosureNotRebuildable("a street without computed geometry cannot be rebuilt")
+        return {
+            "roadType": ROAD_TYPE_RAW_GEOJSON,
+            "rawGeoJSON": {"label": _street_label(location["namedStreet"]), "geometry": geometry},
+        }
     if road_type in NUMBERED_ROAD_KEYS and isinstance(location.get("numberedRoad"), Mapping):
         return {
             "roadType": road_type,
             NUMBERED_ROAD_KEYS[road_type]: dict(location["numberedRoad"]),
         }
     raise ClosureNotRebuildable(f"location of type {road_type!r} cannot be rebuilt")
+
+
+def _street_label(street: Mapping[str, Any]) -> str:
+    """`Rue Letort, 77 à Rue Championnet – Paris`: the street and its bounds, as read."""
+    start = street.get("fromHouseNumber") or street.get("fromRoadName")
+    end = street.get("toHouseNumber") or street.get("toRoadName")
+    label = str(street.get("roadName") or "")
+    if start and end:
+        label += f", {start}" if start == end else f", {start} à {end}"
+    city = street.get("cityLabel")
+    return f"{label} – {city}" if city else label
 
 
 def _parse(text: Any) -> datetime | None:

@@ -127,36 +127,68 @@ def test_a_zone_is_written_back_as_its_computed_sections():
     }
 
 
-@pytest.mark.parametrize(
-    "read_location, written_location",
-    [
-        (
-            {
-                "roadType": "namedStreet",
-                "namedStreet": {"roadName": "Rue Gentil", "cityCode": "69382"},
-            },
-            {
-                "roadType": "namedStreet",
-                "namedStreet": {"roadName": "Rue Gentil", "cityCode": "69382"},
-            },
-        ),
-        (
-            {
-                "roadType": "departmentalRoad",
-                "numberedRoad": {"administrator": "Aveyron", "roadNumber": "D911"},
-            },
-            {
-                "roadType": "departmentalRoad",
-                "departmentalRoad": {"administrator": "Aveyron", "roadNumber": "D911"},
-            },
-        ),
-    ],
-)
-def test_streets_and_numbered_roads_are_written_back_as_read(read_location, written_location):
+def test_a_numbered_road_is_written_back_under_its_own_type():
     """A numbered road is read under `numberedRoad` and written under its own type."""
     read = {**READ, "measures": [dict(READ["measures"][0])]}
-    read["measures"][0]["locations"] = [{**read_location, "geometry": "{}"}]
-    assert save_payload_from_read(read)["measures"][0]["locations"] == [written_location]
+    read["measures"][0]["locations"] = [
+        {
+            "roadType": "departmentalRoad",
+            "numberedRoad": {"administrator": "Aveyron", "roadNumber": "D911"},
+            "geometry": "{}",
+        }
+    ]
+    assert save_payload_from_read(read)["measures"][0]["locations"] == [
+        {
+            "roadType": "departmentalRoad",
+            "departmentalRoad": {"administrator": "Aveyron", "roadNumber": "D911"},
+        }
+    ]
+
+
+# What GET returned on staging for a Paris street (PARIS-EUDO-2026T18963, 2026-10-19): no
+# city code, no direction, no bound types — not enough to write it back as a street.
+LANE = {
+    "roadType": "lane",
+    "namedStreet": {
+        "cityLabel": "Paris",
+        "roadName": "Rue des Périchaux",
+        "fromHouseNumber": "8",
+        "fromRoadName": None,
+        "toHouseNumber": None,
+        "toRoadName": "Rue Gerbert",
+    },
+    "rawGeoJSON": None,
+    "geometry": '{"type":"MultiLineString","coordinates":[[[2.30,48.83],[2.31,48.83]]]}',
+}
+
+
+def test_a_street_is_written_back_as_its_computed_geometry():
+    """No second geocoding: the closed regulation keeps the sections DiaLog applied."""
+    read = {**READ, "measures": [dict(READ["measures"][0])]}
+    read["measures"][0]["locations"] = [LANE]
+    location = save_payload_from_read(read)["measures"][0]["locations"][0]
+    assert location == {
+        "roadType": "rawGeoJSON",
+        "rawGeoJSON": {
+            "label": "Rue des Périchaux, 8 à Rue Gerbert – Paris",
+            "geometry": LANE["geometry"],
+        },
+    }
+
+
+def test_a_street_on_one_house_number_is_labelled_once():
+    read = {**READ, "measures": [dict(READ["measures"][0])]}
+    street = {**LANE["namedStreet"], "fromHouseNumber": "8", "toHouseNumber": "8"}
+    read["measures"][0]["locations"] = [{**LANE, "namedStreet": street}]
+    location = save_payload_from_read(read)["measures"][0]["locations"][0]
+    assert location["rawGeoJSON"]["label"] == "Rue des Périchaux, 8 – Paris"
+
+
+def test_a_street_without_computed_geometry_is_refused():
+    read = {**READ, "measures": [dict(READ["measures"][0])]}
+    read["measures"][0]["locations"] = [{**LANE, "geometry": None}]
+    with pytest.raises(ClosureNotRebuildable):
+        save_payload_from_read(read)
 
 
 @pytest.mark.parametrize(
