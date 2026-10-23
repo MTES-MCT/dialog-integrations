@@ -20,8 +20,9 @@ street that crosses a boundary. `street_districts.json` says where each official
 lies, from the same street referential joined to the "Adresses" one (`c_ar`), both taken on
 2026-09-08: one INSEE code for a street within one arrondissement, otherwise the runs of
 consecutive house numbers of one parity that fall in each. A missing arrondissement is a
-gap, not an error, and the referential fills it without ambiguity (a translation, R-06);
-whatever the table cannot settle stays dropped. Rebuilt as, for each `l_longmin`, the `c_ar`
+gap, not an error, and the referential fills it without ambiguity (a translation, R-06).
+What the table cannot settle stays dropped when the source cites no arrondissement, and
+goes to the first one cited when it cites several. Rebuilt as, for each `l_longmin`, the `c_ar`
 of its addresses (`n_sq_vo`), as runs of `n_voie` by parity when there are several.
 """
 
@@ -29,6 +30,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from functools import cache
 from pathlib import Path
 
@@ -63,6 +65,16 @@ CITY_CODE_BY_DISTRICT = {
 # "circulation générale" ones included (relative to the traffic, not to the segment),
 # says nothing about the segment: BOTH.
 ONE_DIRECTION_LABELS = ("du début vers la fin du segment", "de la fin vers le début du segment")
+# `2712` "côté" values that limit a location to one side of the street, which the DiaLog
+# write API cannot carry (2026-10-23): dropped rather than widened to both sides.
+ONE_SIDE_LABELS = ("côté pair", "côté impair")
+
+# A numbered label naming another street than the location's ("28 Place Saint-Ferdinand" on
+# rue Brunel) is the corner building on the crossing street: where along that street the
+# measure starts cannot be told, so the location is dropped. On the 2026-09-08 extraction,
+# spellings of the same street score 0.95 or more ("VILLA PATRICE BOUDARD" / "Boudart"),
+# other streets 0.79 or less: 11 locations dropped, whatever the threshold in between.
+SAME_STREET_MIN_RATIO = 0.9
 
 STREET_NAMES_FILE = Path(__file__).with_name("street_names.json")
 STREET_DISTRICTS_FILE = Path(__file__).with_name("street_districts.json")
@@ -74,9 +86,8 @@ DISTRICT_FIRST_CITED = "first cited"
 
 _NUMBER = re.compile(r"(\d+)\s*(bis|ter|quater|[a-zA-Z])?(?![\w])", re.IGNORECASE)
 _LEADING_NUMBER = re.compile(r"^\s*(\d+)\s*(bis|ter|quater|[a-zA-Z])?\s+\S", re.IGNORECASE)
-_HAS_SUFFIX = re.compile(
-    r"\d\s*(bis|ter|quater|[a-zA-Z])\b", re.IGNORECASE
-)  # Polars: no look-ahead
+# Read by Polars, whose regex engine has no look-ahead: the flag goes inline.
+_HAS_SUFFIX = r"(?i)\d\s*(bis|ter|quater|[a-z])\b"
 
 LOCATION_COLUMNS = {
     "location_road_type": pl.Utf8,
@@ -99,6 +110,7 @@ _INPUT_COLUMNS = [
     "l_scope",
     "l_road_name",
     "l_district",
+    "l_side",
     "l_direction",
     "l_status",
     "l_from_house_number",
@@ -175,7 +187,8 @@ def parse_bound(
 
 
 def city_codes(district: str | None) -> list[str]:
-    """Every arrondissement cited, in order: "6ème ; 15ème" → ["75106", "75115"]."""
+    """Every arrondissement cited, in order:
+    "6ème arrondissement ; 15ème arrondissement" → ["75106", "75115"]."""
     if not district:
         return []
     codes = (CITY_CODE_BY_DISTRICT.get(part.strip()) for part in district.split(";"))
@@ -253,6 +266,16 @@ def official_street_name(label: str) -> str:
     return official_street_names().get(street_key(label), label)
 
 
+def names_another_street(label: str | None, road_name: str) -> bool:
+    """True when `label` starts with a house number followed by another street's name."""
+    match = _LEADING_NUMBER.match(label or "")
+    if not match or label is None:
+        return False
+    street = street_key(label[match.end() - 1 :])
+    similarity = SequenceMatcher(None, street, street_key(road_name)).ratio()
+    return similarity < SAME_STREET_MIN_RATIO
+
+
 def resolve_location(row: dict) -> dict:
     """The `location_*` fields of one raw row, or a rejection reason."""
     fields: dict = {name: None for name in LOCATION_COLUMNS}
@@ -266,6 +289,8 @@ def resolve_location(row: dict) -> dict:
         return {**fields, "location_rejection": "no road name"}
     if row["l_direction"] in ONE_DIRECTION_LABELS:
         return {**fields, "location_rejection": "one direction only (R-32 freeze)"}
+    if row["l_side"] in ONE_SIDE_LABELS:
+        return {**fields, "location_rejection": "one side of the street only"}
 
     scope = row["l_scope"]
     if scope == SCOPE_POINT:
@@ -278,6 +303,8 @@ def resolve_location(row: dict) -> dict:
                 numbers = (number, number)
         if numbers is None:
             return {**fields, "location_rejection": "point without house number"}
+        if names_another_street(row["l_point_address_label"], road_name):
+            return {**fields, "location_rejection": "bound numbered on another street"}
         start = Bound(POINT_TYPE_HOUSE_NUMBER, house_number=numbers[0])
         end = Bound(POINT_TYPE_HOUSE_NUMBER, house_number=numbers[1])
     elif scope == SCOPE_SECTION:
@@ -291,6 +318,14 @@ def resolve_location(row: dict) -> dict:
             return {**fields, "location_rejection": "section without bounds"}
         if start is None or end is None:
             return {**fields, "location_rejection": "section with a single bound"}
+        bound_labels = (
+            "l_from_address_label",
+            "l_from_road_name",
+            "l_to_address_label",
+            "l_to_road_name",
+        )
+        if any(names_another_street(row[column], road_name) for column in bound_labels):
+            return {**fields, "location_rejection": "bound numbered on another street"}
     elif scope == SCOPE_WHOLE_STREET:
         start = end = None
     elif scope in (SCOPE_ZONE, SCOPE_AXIS):
@@ -333,10 +368,7 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     number_columns = ["l_from_house_number", "l_to_house_number", "l_point_house_number"]
     suffixed = df.select(
         pl.any_horizontal(
-            [
-                pl.col(name).fill_null("").str.contains(_HAS_SUFFIX.pattern)
-                for name in number_columns
-            ]
+            [pl.col(name).fill_null("").str.contains(_HAS_SUFFIX) for name in number_columns]
         ).sum()
     ).item()
     if suffixed:
@@ -357,7 +389,7 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
         reasons = dict(
             rejected.get_column("location_rejection").value_counts(sort=True).iter_rows()
         )
-        logger.warning(f"Dropping {rejected.height} locations DiaLog cannot geocode: {reasons}")
+        logger.warning(f"Dropping {rejected.height} locations DiaLog cannot take: {reasons}")
     df = df.filter(pl.col("location_rejection").is_null()).drop("location_rejection")
 
     deduced = df.filter(pl.col("location_district_source") != DISTRICT_FROM_SOURCE)

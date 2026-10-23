@@ -471,7 +471,7 @@ def test_the_number_behind_another_channel_identifier_is_read_without_normalisin
 
 def test_the_frozen_identifiers_of_the_prefecture_channel_are_readable():
     frozen = load_frozen_elsewhere()
-    numbers = numbers_published_elsewhere([(i, o) for i, o in frozen])
+    numbers = numbers_published_elsewhere(frozen)
     assert len(numbers) == len(frozen) == 100
     assert all(re.fullmatch(r"\d{4}P\d+", number) for number in numbers)
 
@@ -738,6 +738,19 @@ def test_a_dropped_time_slot_is_counted(captured_logs):
     )
     pipeline(row)
     assert any("Jours et Horaires" in line for line in captured_logs)
+
+
+def test_a_filled_parameter_of_an_unknown_name_is_counted(captured_logs):
+    row = make_row(
+        m_params=[
+            ["véhicule concerné (3)", "à tous les véhicules"],
+            ["caractère aggravant", "gênant"],
+            ["Alinéa", "sauf le dimanche"],
+        ]
+    )
+    pipeline(row)
+    assert any("unknown name" in line and "Alinéa" in line for line in captured_logs)
+    assert not any("caractère aggravant" in line for line in captured_logs)
 
 
 def test_a_temporary_period_spans_whole_local_days():

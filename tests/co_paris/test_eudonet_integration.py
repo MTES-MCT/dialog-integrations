@@ -1,9 +1,12 @@
+from datetime import date
+
 import httpx
 import pytest
 
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
 from integrations.api import DialogApi
 from integrations.base_integration import BaseIntegration
+from integrations.co_paris.eudonet import data_source_integration
 from integrations.co_paris.eudonet.data_source_integration import (
     FIXTURE_ENV_VAR,
     DataSourceIntegration,
@@ -36,7 +39,6 @@ def integration(monkeypatch, captured_regulations):
 
     monkeypatch.setattr(integration, "_integrate_regulations_add", capture)
     monkeypatch.setattr(integration, "fetch_regulation_ids", lambda: [])
-    monkeypatch.setattr(DialogApi, "public_identifiers", lambda self, insee_code: [])
     return integration
 
 
@@ -123,3 +125,48 @@ def test_the_whole_integration_runs_offline(integration, captured_regulations):
                 assert vehicle_set.get("otherExemptedTypeText")
             if body["type"] == "speedLimitation":
                 assert body["maxSpeed"] > 0
+
+
+def _street(city_code, road_name, start=None, end=None):
+    bounds = {}
+    for side, bound in (("from", start), ("to", end)):
+        number = bound if bound and bound[0].isdigit() else None
+        crossing = bound if bound and not number else None
+        bounds |= {
+            f"{side}PointType": "houseNumber" if number else "intersection" if crossing else None,
+            f"{side}HouseNumber": number,
+            f"{side}RoadName": crossing,
+        }
+    return {
+        "roadType": "lane",
+        "namedStreet": {
+            "cityCode": city_code,
+            "cityLabel": "Paris",
+            "roadName": road_name,
+            "direction": "BOTH",
+            **bounds,
+        },
+    }
+
+
+def test_the_fixture_locations_reach_the_api_field_by_field(
+    integration, captured_regulations, monkeypatch
+):
+    monkeypatch.setattr(data_source_integration, "today_in_paris", lambda: date(2026, 10, 23))
+    integration.integrate_regulations()
+    locations = {
+        regulation.identifier: [
+            location
+            for measure in regulation.to_dict()["measures"]
+            for location in measure["locations"]
+        ]
+        for regulation in captured_regulations
+    }
+
+    assert locations["PARIS-EUDO-2024T16585"] == [_street("75108", "Rue du Boccador", "12", "12")]
+    assert locations["PARIS-EUDO-2026T11821"] == [
+        _street("75104", "Rue du Cloître Notre-Dame", "8", "Rue Chanoinesse")
+    ]
+    assert locations["PARIS-EUDO-2005-154"] == [
+        _street("75104", "Rue Saint-Merri", "Rue du Renard", "Rue du Temple")
+    ]

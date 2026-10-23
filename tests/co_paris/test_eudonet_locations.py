@@ -26,6 +26,7 @@ INPUT_COLUMNS = {
     "l_scope": pl.Utf8,
     "l_road_name": pl.Utf8,
     "l_district": pl.Utf8,
+    "l_side": pl.Utf8,
     "l_direction": pl.Utf8,
     "l_status": pl.Utf8,
     "l_from_house_number": pl.Utf8,
@@ -230,7 +231,14 @@ def test_point_with_a_range_of_numbers():
 
 def test_point_numbered_only_in_its_address_label():
     row = compute_location_fields(
-        frame(point(None, l_point_address_label="1B PASSAGE TURQUETIL"))
+        frame(
+            point(
+                None,
+                l_road_name="Passage Turquetil",
+                l_district="11ème arrondissement",
+                l_point_address_label="1B PASSAGE TURQUETIL",
+            )
+        )
     ).row(0, named=True)
     assert (row["location_from_house_number"], row["location_to_house_number"]) == ("1", "1")
 
@@ -272,6 +280,8 @@ def test_section_from_the_2017_migration():
     row = compute_location_fields(
         frame(
             section(
+                l_road_name="Quai de la Gare",
+                l_district="13ème arrondissement",
                 l_from_address_label="117 QUAI DE LA GARE",
                 l_to_address_label="BOULEVARD VINCENT AURIOL",
             )
@@ -344,20 +354,57 @@ def test_kept_rows_keep_their_other_columns_and_lose_the_rejection_column():
 
 
 @pytest.mark.parametrize(
-    "label",
-    ["dans les deux sens", "dans le sens de la circulation générale", None],
+    "column, label",
+    [
+        ("l_direction", "dans les deux sens"),
+        ("l_direction", "dans le sens de la circulation générale"),
+        ("l_direction", None),
+        ("l_side", "côté pair et impair"),
+        ("l_side", "dans l'axe de la chaussée"),
+    ],
 )
-def test_a_location_not_limited_to_one_direction_goes_both_ways(label):
-    row = compute_location_fields(frame(point("4", l_direction=label))).row(0, named=True)
+def test_a_location_not_limited_to_one_direction_goes_both_ways(column, label):
+    row = compute_location_fields(frame(point("4", **{column: label}))).row(0, named=True)
     assert row["location_direction"] == "BOTH"
 
 
 @pytest.mark.parametrize(
-    "label", ["du début vers la fin du segment", "de la fin vers le début du segment"]
+    "column, label",
+    [
+        ("l_direction", "du début vers la fin du segment"),
+        ("l_direction", "de la fin vers le début du segment"),
+        ("l_side", "côté pair"),
+        ("l_side", "côté impair"),
+    ],
 )
-def test_a_location_limited_to_one_direction_is_dropped(label):
-    """R-32 freeze: never widened to both directions, never published one way."""
-    assert compute_location_fields(frame(point("4", l_direction=label))).height == 0
+def test_a_location_limited_to_one_direction_or_one_side_is_dropped(column, label):
+    """Never widened to both directions or both sides, never published on one."""
+    assert compute_location_fields(frame(point("4", **{column: label}))).height == 0
+
+
+def test_a_bound_numbered_on_the_crossing_street_drops_the_location():
+    corner = {
+        "l_road_name": "Rue Brunel",
+        "l_district": "17ème arrondissement",
+        "l_from_house_number": "28",
+        "l_from_address_label": "28 Place Saint-Ferdinand",
+        "l_to_house_number": "1",
+        "l_to_address_label": "1 Avenue de la Grande Armée",
+    }
+    misspelt = {
+        "l_road_name": "Villa Patrice Boudart",
+        "l_district": "14ème arrondissement",
+        "l_from_address_label": "4 VILLA PATRICE BOUDARD",
+        "l_to_address_label": "12 VILLA PATRICE BOUDARD",
+    }
+    out = compute_location_fields(
+        frame(
+            section(**corner),
+            section(**misspelt),
+            point("8", l_point_address_label="8 Rue de la Paix"),
+        )
+    )
+    assert out["location_road_name"].to_list() == ["Villa Patrice Boudart"]
 
 
 def test_every_location_column_is_a_pivot_key():

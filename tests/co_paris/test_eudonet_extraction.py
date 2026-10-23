@@ -98,6 +98,11 @@ def test_every_location_row_carries_its_own_measure_and_regulation(raw, tables):
         assert row["a_file_id"] == regulation_of_measure[row["m_file_id"]]
 
 
+def test_the_rows_do_not_depend_on_the_order_eudonet_serves_them(raw, tables):
+    reversed_tables = {table: rows[::-1] for table, rows in tables.items()}
+    assert build_raw_dataframe(reversed_tables).equals(raw)
+
+
 def test_the_fixture_validates_against_the_pandera_schema(source, raw):
     validated = source.validate_raw_data(raw)
 

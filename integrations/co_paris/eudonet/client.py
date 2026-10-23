@@ -17,13 +17,8 @@ DEFAULT_BASE_URL = "https://eudonet-partage.apps.paris.fr/EudoAPI"
 
 # Criteria operators, as accepted in `WhereCustom.Criteria.Operator`.
 EQUALS = 0
-GREATER_THAN = 3
 GREATER_OR_EQUAL = 4
 IN_LIST = 8  # value is a ";"-separated list
-CONTAINS = 9
-IS_EMPTY = 10
-IS_TRUE = 11
-IS_NOT_EMPTY = 17
 
 INTER_AND = 1
 INTER_OR = 2
@@ -59,8 +54,8 @@ class EudonetError(Exception):
 def criterion(field: int | str, operator: int, value: Any = "") -> Criterion:
     """A single leaf of the criteria tree.
 
-    `field` is a descId; catalog fields compare on their `DBValue` with `EQUALS`, and on
-    their label with `CONTAINS`. Dates go in as `YYYY/MM/DD`.
+    `field` is a descId; catalog fields compare on their `DBValue` with `EQUALS`. Dates go
+    in as `YYYY/MM/DD`.
     """
     return {
         "WhereCustoms": None,

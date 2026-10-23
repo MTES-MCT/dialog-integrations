@@ -235,6 +235,9 @@ FREE_TEXT_SEPARATOR = " ; "
 
 SUBJECT_OTHER = PostApiRegulationsAddBodySubject.OTHER.value
 SPEED_PARAMETER = "valeur de la vitesse"
+PARAMETERS_READ_ELSEWHERE = (
+    IGNORED_PARAMETERS | TIME_SLOT_PARAMETERS | LANE_PARAMETERS | {SPEED_PARAMETER}
+)
 
 PERIOD_START_SOURCE = "_period_start_source"
 
@@ -412,7 +415,11 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
     if measures_without_location:
         logger.warning(f"{measures_without_location} measures have no location")
 
-    return pl.DataFrame(rows, schema=RAW_COLUMNS)
+    # Eudonet pages in no stated order; the snapshot digest keeps measures and locations
+    # in row order, so the rows are put in a fixed one.
+    return pl.DataFrame(rows, schema=RAW_COLUMNS).sort(
+        "a_file_id", "m_file_id", "l_file_id", nulls_last=True
+    )
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
@@ -433,9 +440,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
                 "instead of calling the Eudonet API"
             )
             tables = load_fixture(Path(fixture))
+            # Offline: nothing is read from DiaLog, nothing written to the state directory.
+            self.numbers_published_elsewhere = numbers_published_elsewhere(load_frozen_elsewhere())
         else:
             client = EudonetClient(self._credentials())
             tables = extract_tables(client, today_in_paris())
+            self.numbers_published_elsewhere = self.fetch_numbers_published_elsewhere()
         regulations = tables.get(str(TABLE_REGULATIONS), [])
         measures = tables.get(str(TABLE_MEASURES), [])
         known = {row["FileId"] for row in regulations}
@@ -451,7 +461,6 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             "mesures d'arrêtés illisibles pour le compte": unreadable,
             "localisations": len(tables.get(str(TABLE_LOCATIONS), [])),
         }
-        self.numbers_published_elsewhere = self.fetch_numbers_published_elsewhere()
         return build_raw_dataframe(tables)
 
     def fetch_numbers_published_elsewhere(self) -> dict[str, str]:
@@ -459,9 +468,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
         A municipality the export cannot serve falls back on its last successful read.
         """
-        frozen = [
-            (identifier, organization) for identifier, organization in load_frozen_elsewhere()
-        ]
+        frozen = load_frozen_elsewhere()
         path = state_dir() / self.organization_settings.organization / ELSEWHERE_STATE_FILE
         last_read = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
         api = DialogApi(self.client)
@@ -510,8 +517,9 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         )
 
     def _credentials(self) -> dict[str, Any]:
-        raw = getattr(self.organization_settings, "eudonet_paris_credentials", None)
-        raw = raw or os.environ.get(CREDENTIALS_ENV_VAR)
+        raw = self.organization_settings.eudonet_paris_credentials or os.environ.get(
+            CREDENTIALS_ENV_VAR
+        )
         if not raw:
             raise EudonetError(
                 f"{CREDENTIALS_ENV_VAR} is not set: either provide the Eudonet credentials "
@@ -683,9 +691,10 @@ def discard_police_prefecture(df: pl.DataFrame, publish: bool | None = None) -> 
     return df.filter(~is_prefecture)
 
 
-def load_frozen_elsewhere(path: Path = FROZEN_ELSEWHERE_PATH) -> list[list[str]]:
+def load_frozen_elsewhere(path: Path = FROZEN_ELSEWHERE_PATH) -> list[tuple[str, str]]:
     """The (identifier, organization) pairs the live read cannot see, frozen in the repo."""
-    return json.loads(path.read_text(encoding="utf-8"))["regulations"]
+    entries = json.loads(path.read_text(encoding="utf-8"))["regulations"]
+    return [(identifier, organization) for identifier, organization in entries]
 
 
 def numbers_published_elsewhere(identifiers: Iterable[tuple[str, str]]) -> dict[str, str]:
@@ -903,16 +912,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
         )
     df = df.filter(~speedless)
 
-    has_time_slot = pl.Series(
-        [
-            any(
-                len(pair) == 2 and pair[0].strip() in TIME_SLOT_PARAMETERS and pair[1].strip()
-                for pair in params or []
-            )
-            for params in df.get_column("m_params").to_list()
-        ],
-        dtype=pl.Boolean,
-    )
+    has_time_slot = _has_filled_parameter(df, TIME_SLOT_PARAMETERS)
     dropped = df.filter(has_time_slot)
     if dropped.height:
         logger.warning(
@@ -922,16 +922,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
         )
     df = df.filter(~has_time_slot)
 
-    has_lane = pl.Series(
-        [
-            any(
-                len(pair) == 2 and pair[0].strip() in LANE_PARAMETERS and pair[1].strip()
-                for pair in params or []
-            )
-            for params in df.get_column("m_params").to_list()
-        ],
-        dtype=pl.Boolean,
-    )
+    has_lane = _has_filled_parameter(df, LANE_PARAMETERS)
     dropped = df.filter(has_lane)
     if dropped.height:
         logger.warning(
@@ -942,6 +933,19 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     df = df.filter(~has_lane)
 
     return df.with_columns(pl.col("m_file_id").cast(pl.Utf8).alias("measure_group_key"))
+
+
+def _has_filled_parameter(df: pl.DataFrame, names: frozenset[str]) -> pl.Series:
+    return pl.Series(
+        [
+            any(
+                len(pair) == 2 and pair[0].strip() in names and pair[1].strip()
+                for pair in params or []
+            )
+            for params in df.get_column("m_params").to_list()
+        ],
+        dtype=pl.Boolean,
+    )
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
@@ -963,6 +967,7 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     unknown_restrictions: Counter[str] = Counter()
     unknown_exemptions: Counter[str] = Counter()
+    unknown_parameters: Counter[str] = Counter()
     unreadable_limit: list[bool] = []
 
     for measure_label, params in zip(df.get_column("m_type"), df.get_column("m_params").to_list()):
@@ -976,9 +981,9 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
             if len(pair) != 2:
                 continue
             name = pair[0].strip()
-            if name in IGNORED_PARAMETERS or name in TIME_SLOT_PARAMETERS:
-                continue
             if name not in RESTRICTION_PARAMETERS and name not in EXEMPTION_PARAMETERS:
+                if name not in PARAMETERS_READ_ELSEWHERE and pair[1].strip():
+                    unknown_parameters[name] += 1
                 continue
             for part in pair[1].split(MULTI_VALUE_SEPARATOR):
                 label = part.strip()
@@ -1040,6 +1045,11 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
         logger.warning(
             f"{sum(unknown_exemptions.values())} exemption values outside the DiaLog "
             f"enumeration, kept as 'other' + free text: {dict(unknown_exemptions)}"
+        )
+    if unknown_parameters:
+        logger.warning(
+            f"{sum(unknown_parameters.values())} filled parameters of an unknown name, "
+            f"ignored: {dict(unknown_parameters)}"
         )
     unreadable = pl.Series(unreadable_limit, dtype=pl.Boolean)
     dropped = df.filter(unreadable)
