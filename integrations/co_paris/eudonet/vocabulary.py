@@ -143,6 +143,25 @@ IGNORED_PARAMETERS = frozenset({"caractère aggravant"})
 # holidays, which DiaLog cannot express.
 TIME_SLOT_PARAMETERS = frozenset({"Jours et Horaires"})
 
+# The lane a measure applies to. A filled one drops the measure (R-78): it narrows the
+# measure to one lane of the street ("sur la voie unidirectionnelle réservée aux véhicules
+# de transports en commun"), and DiaLog would close the whole street. 19 filled values on
+# the extraction of 2026-09-08, all naming a single lane.
+LANE_PARAMETERS = frozenset({"voie concernée"})
+
+# Location complements (fields `2742`, `2760`, `2766`) that only say "the whole location",
+# read in full, punctuation stripped and lower-cased (R-81). Any other complement longer than
+# a connector drops the location: "sur 2 places", "dans la contre-allée", a date, an hour.
+WHOLE_LOCATION_COMPLEMENTS = frozenset(
+    {
+        "sur toute la longueur",
+        "sur toute la longueur de la voie",
+        "sur toutes les places",
+        "sur tout le stationnement",
+        "et jusqu'à",
+    }
+)
+
 # The only value that means "no restriction at all" (R-34).
 ALL_VEHICLES_LABELS = frozenset({"à tous les véhicules"})
 

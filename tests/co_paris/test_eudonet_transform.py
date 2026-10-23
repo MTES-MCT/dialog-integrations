@@ -34,6 +34,7 @@ from integrations.co_paris.eudonet.data_source_integration import (
     compute_period_fields,
     compute_regulation_fields,
     compute_vehicle_fields,
+    discard_location_complements,
     discard_police_prefecture,
     discard_published_elsewhere,
     discard_refused_locations,
@@ -387,6 +388,26 @@ def test_an_empty_time_slot_is_no_time_slot():
     assert pipeline(make_row(m_params=[["Jours et Horaires", ""]])).height == 1
 
 
+def test_a_filled_lane_drops_the_measure(captured_logs):
+    """R-78: a closure of the bus lane alone must not close the whole street."""
+    row = make_row(
+        m_type="circulation interdite",
+        m_params=[
+            ["véhicule concerné (3)", "à tous les véhicules"],
+            [
+                "voie concernée",
+                "sur la voie unidirectionnelle réservée aux véhicules de transports en commun",
+            ],
+        ],
+    )
+    assert pipeline(row).height == 0
+    assert any("'voie concernée'" in line for line in captured_logs)
+
+
+def test_an_empty_lane_is_no_lane():
+    assert pipeline(make_row(m_params=[["voie concernée", ""]])).height == 1
+
+
 def test_every_location_of_a_measure_shares_its_group_key():
     """R-76: one Eudonet measure is one DiaLog measure, whatever its number of locations."""
     df = pipeline(make_row(l_file_id=1), make_row(l_file_id=2), make_row(m_file_id=11))
@@ -483,6 +504,41 @@ def test_a_refused_location_is_dropped_and_its_regulation_goes_with_the_others()
     assert kept["l_file_id"].to_list() == [10]
     assert set(kept["a_identifier"]) == {"2024P10001"}
     assert discard_refused_locations(df, {}).height == df.height
+
+
+def test_a_location_complement_that_narrows_the_measure_drops_the_location(captured_logs):
+    """R-81: "sur 2 places" or a day and an hour is not read, so the location goes."""
+    df = make_frame(
+        make_row(l_file_id=10),
+        make_row(l_file_id=11, l_point_location_complement="sur 2 places.,"),
+        make_row(l_file_id=12, l_from_location_complement="<p>les mardis de 14h30 à 16h30</p>"),
+        make_row(
+            a_identifier="2024P10002", l_file_id=20, l_to_location_complement="dans la contre-allée"
+        ),
+    )
+    kept = discard_location_complements(df)
+    assert kept["l_file_id"].to_list() == [10]
+    assert set(kept["a_identifier"]) == {"2024P10001"}
+    assert any(
+        "complement narrows" in line and "1 left with no location" in line for line in captured_logs
+    )
+
+
+@pytest.mark.parametrize(
+    "complement",
+    [
+        None,
+        "",
+        "Bis,",
+        ", BIS",
+        "et jusqu'à",
+        "sur toute la longueur de la voie.",
+        "Sur toutes les places.",
+    ],
+)
+def test_a_location_complement_that_says_nothing_keeps_the_location(complement):
+    df = make_frame(make_row(l_point_location_complement=complement))
+    assert discard_location_complements(df).height == 1
 
 
 def test_the_versioned_blacklist_is_readable():

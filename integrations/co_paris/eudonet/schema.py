@@ -51,6 +51,10 @@ class EudonetRawDataSchema(pa.DataFrameModel):
     l_point_house_number: str | None = pa.Field(nullable=True)
     l_point_address_label: str | None = pa.Field(nullable=True)
     l_point_complement: str | None = pa.Field(nullable=True)
+    # Free text of the location (fields 2742, 2760, 2766), read by `discard_location_complements`.
+    l_from_location_complement: str | None = pa.Field(nullable=True)
+    l_to_location_complement: str | None = pa.Field(nullable=True)
+    l_point_location_complement: str | None = pa.Field(nullable=True)
     l_axis_name: str | None = pa.Field(nullable=True)
     l_modified_at: datetime | None = pa.Field(nullable=True)
 

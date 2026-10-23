@@ -53,6 +53,7 @@ from .vocabulary import (
     LABEL_DIMENSION_LIMIT,
     LABEL_PEDESTRIAN_AREA,
     LABEL_SPEED_LIMIT,
+    LANE_PARAMETERS,
     MEASURE_TYPE_BY_LABEL,
     MULTI_VALUE_SEPARATOR,
     PEDESTRIAN_AREA_SPEED,
@@ -67,6 +68,7 @@ from .vocabulary import (
     TYPE_PERMANENT_LABEL,
     TYPE_TEMPORARY_LABEL,
     UNKNOWN_REASON_TEXT,
+    WHOLE_LOCATION_COMPLEMENTS,
 )
 
 PARIS = ZoneInfo("Europe/Paris")
@@ -148,6 +150,9 @@ LOCATION_COLUMNS = [
     2721,
     2731,
     2749,
+    2742,
+    2760,
+    2766,
     2796,
 ]
 
@@ -200,6 +205,9 @@ RAW_COLUMNS: dict[str, Any] = {
     "l_point_house_number": pl.Utf8,
     "l_point_address_label": pl.Utf8,
     "l_point_complement": pl.Utf8,
+    "l_from_location_complement": pl.Utf8,
+    "l_to_location_complement": pl.Utf8,
+    "l_point_location_complement": pl.Utf8,
     "l_axis_name": pl.Utf8,
     "l_modified_at": pl.Datetime("us"),
 }
@@ -522,6 +530,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_measure_fields)
             .pipe(compute_vehicle_fields)
             .pipe(compute_period_fields)
+            .pipe(discard_location_complements)
             .pipe(compute_location_fields)
             .pipe(discard_refused_locations)
             .pipe(add_pedestrian_area_speed)
@@ -639,6 +648,9 @@ def _location_fields(row: dict[str, Any] | None) -> dict[str, Any]:
         "l_point_house_number": _text(row, 2755),
         "l_point_address_label": _text(row, 2754),
         "l_point_complement": _text(row, 2749),
+        "l_from_location_complement": _text(row, 2742),
+        "l_to_location_complement": _text(row, 2760),
+        "l_point_location_complement": _text(row, 2766),
         "l_axis_name": _text(row, 2717),
         "l_modified_at": _db_datetime(row, 2796),
     }
@@ -908,7 +920,9 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     * `limitation de vitesse` without a readable "valeur de la vitesse" parameter: a speed
       limitation with no speed says nothing, and 30 or 50 is not ours to pick (R-02, R-35);
     * measures with a filled "Jours et Horaires" parameter: the text has to be read in full
-      or the measure goes (R-78), and none read so far is expressible in DiaLog.
+      or the measure goes (R-78), and none read so far is expressible in DiaLog;
+    * measures with a filled "voie concernée" parameter: they cover one lane of the street,
+      and DiaLog has no lane (R-78).
 
     Produces `measure_group_key` too: the Eudonet measure, so that its locations collapse
     into one DiaLog measure (R-76).
@@ -999,6 +1013,25 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
             f"{_count_by(dropped, 'm_type')}"
         )
     df = df.filter(~has_time_slot)
+
+    has_lane = pl.Series(
+        [
+            any(
+                len(pair) == 2 and pair[0].strip() in LANE_PARAMETERS and pair[1].strip()
+                for pair in params or []
+            )
+            for params in df.get_column("m_params").to_list()
+        ],
+        dtype=pl.Boolean,
+    )
+    dropped = df.filter(has_lane)
+    if dropped.height:
+        logger.warning(
+            f"Dropping {dropped.height} rows of {dropped['m_file_id'].n_unique()} measures "
+            "narrowed to one lane by 'voie concernée', which DiaLog would apply to the whole "
+            f"street (R-78): {_count_by(dropped, 'm_type')}"
+        )
+    df = df.filter(~has_lane)
 
     return df.with_columns(pl.col("m_file_id").cast(pl.Utf8).alias("measure_group_key"))
 
@@ -1248,6 +1281,59 @@ def load_refused_locations(path: Path = REFUSED_LOCATIONS_PATH) -> dict[int, str
     """Eudonet location `FileId` → the motive DiaLog gave when it refused it alone."""
     entries = json.loads(path.read_text(encoding="utf-8"))["locations"]
     return {entry["l_file_id"]: entry["motive"] for entry in entries}
+
+
+LOCATION_COMPLEMENT_COLUMNS = (
+    "l_from_location_complement",
+    "l_to_location_complement",
+    "l_point_location_complement",
+)
+# What a complement may hold, beyond the whole-location phrases, and still say nothing: a
+# connector or a "bis" (R-78, ≤ 8 characters).
+CONNECTOR_MAX_LENGTH = 8
+
+
+def _complement_says_nothing(text: str | None) -> bool:
+    """True for an empty complement, a connector, or a phrase meaning "the whole location"."""
+    if not text:
+        return True
+    plain = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", text)))
+    plain = re.sub(r"[\s,.;:()]+$|^[\s,.;:()]+", "", plain).lower()
+    if plain in WHOLE_LOCATION_COMPLEMENTS:
+        return True
+    return len(re.sub(r"[\s,.;:()]", "", plain)) <= CONNECTOR_MAX_LENGTH
+
+
+def discard_location_complements(df: pl.DataFrame) -> pl.DataFrame:
+    """Drop the locations whose free-text complement narrows or qualifies the measure (R-81).
+
+    The complement ("Complément de localisation", début / fin / point) is read in full or the
+    location goes: "sur 2 places", "dans la contre-allée", "dans le couloir de bus", a day
+    and an hour. Published as is, the measure would cover the whole section, every day.
+    Kept: an empty complement, a connector or a "bis" (≤ 8 characters), and the phrases of
+    `WHOLE_LOCATION_COMPLEMENTS`. Counted by the first words of the text. A regulation whose
+    every location goes, goes with them.
+    """
+    says_more = ~pl.all_horizontal(
+        pl.col(column)
+        .map_elements(_complement_says_nothing, return_dtype=pl.Boolean)
+        .fill_null(True)
+        for column in LOCATION_COMPLEMENT_COLUMNS
+    )
+    dropped = df.filter(says_more)
+    if dropped.height:
+        heads: Counter[str] = Counter()
+        for row in dropped.select(LOCATION_COMPLEMENT_COLUMNS).iter_rows():
+            text = next(t for t in row if not _complement_says_nothing(t))
+            heads[" ".join(re.sub(r"<[^>]+>", " ", text).split()[:3]).lower()] += 1
+        kept = set(df.filter(~says_more)["a_identifier"])
+        emptied = set(dropped["a_identifier"]) - kept
+        logger.warning(
+            f"Dropping {dropped.height} locations whose complement narrows the measure (R-81): "
+            f"{dict(heads.most_common(10))}; {dropped['a_identifier'].n_unique()} regulations "
+            f"published without them, {len(emptied)} left with no location"
+        )
+    return df.filter(~says_more)
 
 
 def discard_refused_locations(
