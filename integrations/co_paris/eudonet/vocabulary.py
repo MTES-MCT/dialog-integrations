@@ -3,8 +3,8 @@
 Eudonet describes a measure with catalogued labels, not codes we can rely on: a measure
 name (catalog `1202`), and up to nine (parameter name, parameter value) pairs whose names
 come from catalogs `1218`/`1221` and whose values come from `1219`/`1222`. Everything this
-module holds was read from `explorations/co_paris/data/eudonet_2026-09-08/catalogs.json`
-and cross-checked against the 26 325 measures of the same dump.
+module holds was read from the catalogs as the API served them on 2026-09-08
+(`GET /Catalog/{descId}`), and cross-checked against the 26 325 measures extracted that day.
 
 Two different contracts live here, on purpose:
 
@@ -31,9 +31,14 @@ REGULATION_CATEGORY_BY_LABEL: dict[str, str] = {
     TYPE_TEMPORARY_LABEL: PostApiRegulationsAddBodyCategory.TEMPORARYREGULATION.value,
 }
 
-# `1107` État. Eudonet recomputes it every night at 00:30. An act that is not signed is not
-# enforceable; `Périmé` and `Abrogé` have left the perimeter (plan §1).
-ACCEPTED_STATE_LABELS = ("En vigueur", "Publié", "Signé")
+# `1107` État, by `1108` Type. Eudonet recomputes it every night at 00:30. An act that is not
+# signed is not enforceable; `Périmé` and `Abrogé` have left the perimeter (plan §1). A
+# permanent is kept only "En vigueur": "Signé" may carry no date of effect, so it is not
+# known to apply yet. Same perimeter as the Eudonet query (`perimeter_criteria`).
+ACCEPTED_STATE_LABELS_BY_TYPE: dict[str, tuple[str, ...]] = {
+    TYPE_PERMANENT_LABEL: ("En vigueur",),
+    TYPE_TEMPORARY_LABEL: ("En vigueur", "Publié", "Signé"),
+}
 
 # `1202` Nom de la mesure — the 32 values of the catalog, none omitted.
 # `None` means "outside the five DiaLog types" (R-30): the measure is dropped and counted,

@@ -42,7 +42,7 @@ from .client import EQUALS, GREATER_OR_EQUAL, EudonetClient, EudonetError, all_o
 from .locations import CITY_CODE_BY_DISTRICT, compute_location_fields
 from .schema import EudonetRawDataSchema
 from .vocabulary import (
-    ACCEPTED_STATE_LABELS,
+    ACCEPTED_STATE_LABELS_BY_TYPE,
     ALL_VEHICLES_LABELS,
     EXEMPTED_OTHER,
     EXEMPTION_BY_LABEL,
@@ -813,7 +813,12 @@ def compute_regulation_fields(df: pl.DataFrame, today: date | None = None) -> pl
     """
     today = today or today_in_paris()
 
-    kept_state = pl.col("a_state").is_in(ACCEPTED_STATE_LABELS)
+    # An unknown type is kept here so that the check below raises on it.
+    kept_state = ~pl.col("a_type").is_in(list(ACCEPTED_STATE_LABELS_BY_TYPE)).fill_null(False)
+    for type_label, states in ACCEPTED_STATE_LABELS_BY_TYPE.items():
+        kept_state = kept_state | (
+            (pl.col("a_type") == type_label) & pl.col("a_state").is_in(states)
+        ).fill_null(False)
     dropped = df.filter(~kept_state)
     if dropped.height:
         logger.warning(

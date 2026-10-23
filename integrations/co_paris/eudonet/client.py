@@ -2,10 +2,11 @@
 
 Eudonet exposes one generic endpoint per table (`POST /Search/{table}`) with a page size
 capped at 50 rows. Everything else — the criteria tree, the catalog values, the parent
-links — is expressed with numeric field identifiers (`descId`), documented in
-`ai/docs/…` and in the exploration dump.
+links — is expressed with numeric field identifiers (`descId`), which the API lists
+itself (`GET /MetaInfos/ListTabs/`, `POST /MetaInfos/`, Swagger under `/eudoapidoc/`).
 
-The account we use has read permissions only: this module never calls `/CUD`.
+This module only reads: it never calls `/CUD` nor `/Annexes`, whatever the account is
+allowed to do.
 """
 
 import time

@@ -143,21 +143,23 @@ def test_the_identifier_is_stable_across_two_runs(raw):
 
 
 @pytest.mark.parametrize(
-    "state, kept",
+    "state, kept_permanent, kept_temporary",
     [
-        ("En vigueur", True),
-        ("Publié", True),
-        ("Signé", True),
-        ("Non signé", False),
-        ("Périmé", False),
-        ("Abrogé", False),
-        ("Abrogation en cours", False),
+        ("En vigueur", True, True),
+        ("Publié", False, True),
+        ("Signé", False, True),
+        ("Non signé", False, False),
+        ("Périmé", False, False),
+        ("Abrogé", False, False),
+        ("Abrogation en cours", False, False),
     ],
 )
-def test_only_enforceable_states_survive(state, kept):
-    """An act that is not signed is not enforceable; a repealed one has left the perimeter."""
-    df = compute_regulation_fields(make_frame(make_row(a_state=state)), TODAY)
-    assert df.height == (1 if kept else 0)
+def test_only_enforceable_states_survive(state, kept_permanent, kept_temporary):
+    """Same perimeter as the Eudonet query: a permanent only in force, a temporary signed."""
+    permanent = make_row(a_state=state)
+    temporary = make_row(a_type="Temporaire", a_state=state, a_end_date=date(2026, 12, 1))
+    assert compute_regulation_fields(make_frame(permanent), TODAY).height == kept_permanent
+    assert compute_regulation_fields(make_frame(temporary), TODAY).height == kept_temporary
 
 
 def test_the_repealed_and_the_expired_of_the_fixture_are_gone(clean):
