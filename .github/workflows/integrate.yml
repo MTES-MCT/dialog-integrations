@@ -19,9 +19,6 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      # Two organizations at a time: at midnight the staging jobs all fetched their
-      # identifiers within the same second, and the review-sized instance answered one
-      # of them 500 (co_rennes, 2026-09-19). The run is not time-critical.
       max-parallel: 2
       # `target` names the DiaLog instance the organization writes to. The GitHub
       # environment holding its secrets is the organization for `prod` (`co_brest`),
@@ -35,7 +32,6 @@ jobs:
           - { organization: dp_aveyron, target: prod }
           # Under review on the staging: never written to production by this workflow.
           - { organization: co_lyon, target: staging }
-          - { organization: co_rennes, target: staging }
           - { organization: co_nantes, target: staging }
           - { organization: co_paris, target: staging }
     environment: ${{ matrix.target == 'prod' && matrix.organization || format('{0}-{1}', matrix.organization, matrix.target) }}
@@ -46,7 +42,6 @@ jobs:
       result_co_issy-les-moulineaux: ${{ steps.integration.outputs['result_co_issy-les-moulineaux'] }}
       result_dp_aveyron: ${{ steps.integration.outputs.result_dp_aveyron }}
       result_co_lyon:    ${{ steps.integration.outputs.result_co_lyon }}
-      result_co_rennes:  ${{ steps.integration.outputs.result_co_rennes }}
       result_co_nantes:  ${{ steps.integration.outputs.result_co_nantes }}
       result_co_paris:   ${{ steps.integration.outputs.result_co_paris }}
 
