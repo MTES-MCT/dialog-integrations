@@ -5,15 +5,6 @@ name (catalog `1202`), and up to nine (parameter name, parameter value) pairs wh
 come from catalogs `1218`/`1221` and whose values come from `1219`/`1222`. Everything this
 module holds was read from the catalogs as the API served them on 2026-09-08
 (`GET /Catalog/{descId}`), and cross-checked against the 26 325 measures extracted that day.
-
-Two different contracts live here, on purpose:
-
-* `MEASURE_TYPE_BY_LABEL` is **strictly closed**. The 32 values of catalog `1202` are all
-  listed; a label that is not in it means Paris enriched the catalog and the mapping has to
-  be decided by a human, not guessed (R-02, Q-05). `compute_measure_fields` raises.
-* the vehicle tables are closed on what the catalogs contain today, with a **documented
-  fallback**: an unknown vehicle label becomes `other` + the label itself as free text
-  (plan §4.2). That is lossless for the reader and invents no threshold (R-35).
 """
 
 from api.dia_log_client.models import (
@@ -31,10 +22,8 @@ REGULATION_CATEGORY_BY_LABEL: dict[str, str] = {
     TYPE_TEMPORARY_LABEL: PostApiRegulationsAddBodyCategory.TEMPORARYREGULATION.value,
 }
 
-# `1107` État, by `1108` Type. Eudonet recomputes it every night at 00:30. An act that is not
-# signed is not enforceable; `Périmé` and `Abrogé` have left the perimeter (plan §1). A
-# permanent is kept only "En vigueur": "Signé" may carry no date of effect, so it is not
-# known to apply yet. Same perimeter as the Eudonet query (`perimeter_criteria`).
+# `1107` État, by `1108` Type, recomputed by Eudonet every night at 00:30. A permanent is kept
+# only "En vigueur": "Signé" may carry no date of effect, so it is not known to apply yet.
 ACCEPTED_STATE_LABELS_BY_TYPE: dict[str, tuple[str, ...]] = {
     TYPE_PERMANENT_LABEL: ("En vigueur",),
     TYPE_TEMPORARY_LABEL: ("En vigueur", "Publié", "Signé"),
@@ -85,20 +74,17 @@ MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
     "zone de rencontre": None,
 }
 
-# Measure labels the transformations single out by name.
 LABEL_SPEED_LIMIT = "limitation de vitesse"
 LABEL_ZONE_30 = "zone 30"
 LABEL_PEDESTRIAN_AREA = "aire piétonne"
 LABEL_DIMENSION_LIMIT = "limitation dimensionnelle"
 LABEL_CATEGORY_LIMIT = "limitation catégorielle"
 
-# `zone 30` carries its speed in its own name; nothing else does.
 IMPLIED_MAX_SPEED_BY_LABEL: dict[str, int] = {LABEL_ZONE_30: 30}
 
 # R-71: a pedestrian area is also a walking-pace limit, published in the same regulation.
 PEDESTRIAN_AREA_SPEED = 5
 
-# `1105` Service: the police prefecture is another authority than the City (R-73 by analogy).
 SERVICE_POLICE_PREFECTURE = "Préfecture de Police"
 
 # `1114` Raison. Everything the catalog holds beyond these lands on `other` + free text
@@ -112,15 +98,10 @@ REGULATION_SUBJECT_BY_REASON: dict[str, str] = {
 PERMANENT_SUBJECT_TEXT = "Réglementation permanente"
 UNKNOWN_REASON_TEXT = "Motif non précisé"
 
-# ---------------------------------------------------------------------------
-# Vehicles (plan §4.2)
-# ---------------------------------------------------------------------------
-
 # A value cell holds several catalog labels joined by "; " ("aux véhicules de secours ;
 # aux véhicules des sapeurs pompiers"): 6 such cells on the perimeter of 2026-09-08.
 MULTI_VALUE_SEPARATOR = ";"
 
-# Parameter names (catalogs `1218`/`1221`) that describe **who the measure applies to**.
 RESTRICTION_PARAMETERS = frozenset(
     {
         "véhicule concerné (1)",
@@ -130,7 +111,6 @@ RESTRICTION_PARAMETERS = frozenset(
     }
 )
 
-# Parameter names that describe **who escapes it**.
 EXEMPTION_PARAMETERS = frozenset(
     {
         "dérogation pour véhicule",
@@ -154,16 +134,19 @@ TIME_SLOT_PARAMETERS = frozenset({"Jours et Horaires"})
 # the extraction of 2026-09-08, all naming a single lane.
 LANE_PARAMETERS = frozenset({"voie concernée"})
 
-# Location complements (fields `2742`, `2760`, `2766`) that only say "the whole location",
-# read in full, punctuation stripped and lower-cased (R-81). Any other complement longer than
-# a connector drops the location: "sur 2 places", "dans la contre-allée", a date, an hour.
 WHOLE_LOCATION_COMPLEMENTS = frozenset(
     {
         "sur toute la longueur",
         "sur toute la longueur de la voie",
         "sur toutes les places",
         "sur tout le stationnement",
-        "et jusqu'à",
+        "sur l'intégralité de la voie",
+    }
+)
+COMPLEMENT_CONNECTORS = frozenset(
+    {
+        *("et", "à", "a", "au", "aux", "du", "des", "le", "la", "les", "jusqu'à", "jusqu'au"),
+        *("n", "n°", "no", "bis", "ter", "quater"),
     }
 )
 
@@ -201,13 +184,13 @@ class VehicleRestriction:
         self.max_width = max_width
 
 
-# `restrictedTypes` values the API accepts (output-api.md § vehicleSet.restrictedTypes).
+# `restrictedTypes` values the DiaLog API accepts.
 RESTRICTED_HEAVY_GOODS = "heavyGoodsVehicle"
 RESTRICTED_DIMENSIONS = "dimensions"
 RESTRICTED_HAZARDOUS = "hazardousMaterials"
 RESTRICTED_OTHER = "other"
 
-# `exemptedTypes` values the API accepts (output-api.md § vehicleSet.exemptedTypes).
+# `exemptedTypes` values the DiaLog API accepts.
 EXEMPTED_EMERGENCY = "emergencyServices"
 EXEMPTED_LOCAL_RESIDENT = "localResident"
 EXEMPTED_ROAD_WORKS = "roadMaintenanceOrConstruction"
@@ -216,14 +199,6 @@ EXEMPTED_COMMERCIAL = "commercial"
 EXEMPTED_TAXI = "taxi"
 EXEMPTED_OTHER = "other"
 
-# Values of catalogs `1219`/`1222` seen under a restriction parameter.
-#
-# ⚠️ "aux véhicules de plus de N mètres" — the label does **not** say which dimension.
-# Checked on the whole 2026-09-08 dump: not one of the 26 325 measures carries a
-# `longueur` / `hauteur` / `largeur` value alongside it, even though catalogs `1219` and
-# `1222` define those three labels. There is therefore nothing to disambiguate it with, and
-# picking `maxLength` would be inventing the dimension. They map to `other` + the label,
-# which keeps the metres readable and restricts nobody by mistake (R-35, plan question 6).
 RESTRICTION_BY_LABEL: dict[str, VehicleRestriction] = {
     "aux véhicules de plus de 3,5 T": VehicleRestriction(RESTRICTED_HEAVY_GOODS, 3.5),
     "aux véhicules de plus de 7,5 T": VehicleRestriction(RESTRICTED_HEAVY_GOODS, 7.5),
@@ -231,7 +206,6 @@ RESTRICTION_BY_LABEL: dict[str, VehicleRestriction] = {
     "aux véhicules transportant des matières dangereuses": VehicleRestriction(RESTRICTED_HAZARDOUS),
 }
 
-# Values of catalogs `1219`/`1222` seen under an exemption parameter.
 EXEMPTION_BY_LABEL: dict[str, str] = {
     "aux véhicules de secours": EXEMPTED_EMERGENCY,
     "aux véhicules des sapeurs pompiers": EXEMPTED_EMERGENCY,

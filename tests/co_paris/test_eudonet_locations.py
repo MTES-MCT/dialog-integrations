@@ -1,10 +1,3 @@
-"""Named-street locations (`roadType = lane`) built from Eudonet's structured description.
-
-The cases mirror what the 2026-09-08 dump actually contains: recent entries with a house
-number or a crossing road, the 2017 migration with its uppercase address labels, and the
-shapes DiaLog cannot geocode (zones, axes, points and sections without bounds).
-"""
-
 from typing import cast
 
 import polars as pl
@@ -21,7 +14,7 @@ from integrations.base_integration import BaseIntegration
 from integrations.co_paris.eudonet import locations
 from integrations.co_paris.eudonet.locations import (
     Bound,
-    city_code,
+    city_codes,
     compute_location_fields,
     parse_bound,
     parse_house_number,
@@ -47,7 +40,6 @@ INPUT_COLUMNS = {
 
 
 def frame(*rows: dict) -> pl.DataFrame:
-    """A raw-shaped frame with one extra column, to check that other columns survive."""
     filled = [
         {**{name: None for name in INPUT_COLUMNS}, "l_file_id": index, **row}
         for index, row in enumerate(rows, start=1)
@@ -73,9 +65,6 @@ def section(**kw):
         "l_district": "5ème arrondissement",
         **kw,
     }
-
-
-# -- parsing ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -121,7 +110,6 @@ def test_bound_then_the_crossing_road():
 
 
 def test_bound_from_a_2017_label_with_a_number_is_a_house_number():
-    """ "117 QUAI DE LA GARE" names the road of the location itself (1 484 cases of 1 502)."""
     assert parse_bound(None, None, "117 QUAI DE LA GARE") == Bound(
         "houseNumber", house_number="117"
     )
@@ -133,7 +121,6 @@ def test_bound_from_a_2017_label_without_a_number_is_an_intersection():
 
 
 def test_a_2017_label_is_respelled_with_the_official_street_name():
-    """Staging of 2026-09-16: "RUE D AUTEUIL" refused, "Rue d'Auteuil" geocoded."""
     assert locations.official_street_name("RUE D AUTEUIL") == "Rue d'Auteuil"
     assert locations.official_street_name("PLACE PAUL PAINLEVE") == "Place Paul Painlevé"
 
@@ -151,20 +138,17 @@ def test_no_bound():
 @pytest.mark.parametrize(
     "district, expected",
     [
-        ("1er arrondissement", "75101"),
-        ("17ème arrondissement", "75117"),
-        ("20ème arrondissement", "75120"),
-        ("1er arrondissement ; 2ème arrondissement", "75101"),
-        ("", None),
-        (None, None),
-        ("21ème arrondissement", None),
+        ("1er arrondissement", ["75101"]),
+        ("17ème arrondissement", ["75117"]),
+        ("20ème arrondissement", ["75120"]),
+        ("1er arrondissement ; 2ème arrondissement", ["75101", "75102"]),
+        ("", []),
+        (None, []),
+        ("21ème arrondissement", []),
     ],
 )
-def test_city_code(district, expected):
-    assert city_code(district) == expected
-
-
-# -- arrondissement from the street referential ---------------------------------------
+def test_city_codes(district, expected):
+    assert city_codes(district) == expected
 
 
 def city_codes_of(*rows: dict) -> list[str | None]:
@@ -177,7 +161,6 @@ def test_a_missing_arrondissement_is_the_only_one_of_its_street():
 
 
 def test_a_missing_arrondissement_is_read_on_the_house_number():
-    """Boulevard Saint-Michel: odd numbers in the 5th, even ones in the 6th."""
     assert city_codes_of(
         point("20", l_district=None, l_road_name="Boulevard Saint-Michel"),
         point("21", l_district=None, l_road_name="Boulevard Saint-Michel"),
@@ -195,7 +178,6 @@ def test_bounds_falling_in_two_arrondissements_settle_nothing():
 
 
 def test_a_street_on_two_arrondissements_takes_the_one_of_its_numbers():
-    """Rue de Vaugirard, 6th up to n° 111 / 132, 15th beyond: not the first cited."""
     row = section(
         l_road_name="Rue de Vaugirard",
         l_district="6ème arrondissement ; 15ème arrondissement",
@@ -216,7 +198,6 @@ def test_a_street_on_two_arrondissements_without_numbers_keeps_the_first_cited()
 
 
 def test_numbers_pointing_outside_the_cited_arrondissements_keep_the_first_cited():
-    """The source is not overruled: n° 200–250 are in the 15th, which is not cited."""
     row = section(
         l_road_name="Rue de Vaugirard",
         l_district="6ème arrondissement ; 7ème arrondissement",
@@ -224,9 +205,6 @@ def test_numbers_pointing_outside_the_cited_arrondissements_keep_the_first_cited
         l_to_house_number="250",
     )
     assert city_codes_of(row) == ["75106"]
-
-
-# -- shapes ----------------------------------------------------------------------------
 
 
 def test_point_with_a_house_number():
@@ -251,7 +229,6 @@ def test_point_with_a_range_of_numbers():
 
 
 def test_point_numbered_only_in_its_address_label():
-    """2017 migration: `2755` empty, the number sits in `2754`."""
     row = compute_location_fields(
         frame(point(None, l_point_address_label="1B PASSAGE TURQUETIL"))
     ).row(0, named=True)
@@ -291,16 +268,7 @@ def test_section_road_to_road():
     assert row["location_from_house_number"] is None
 
 
-def test_section_mixed_number_and_road():
-    row = compute_location_fields(
-        frame(section(l_from_house_number="39", l_to_road_name="Rue des Dames"))
-    ).row(0, named=True)
-    assert row["location_from_point_type"] == "houseNumber"
-    assert row["location_to_point_type"] == "intersection"
-
-
 def test_section_from_the_2017_migration():
-    """Only `Libellé adresse début/fin` are filled, uppercase, accents stripped."""
     row = compute_location_fields(
         frame(
             section(
@@ -361,8 +329,6 @@ def test_withdrawn_missing_road_and_absent_locations_are_dropped():
             point("4", l_status="Retiré"),
             point("4", l_status="Supprimé"),
             point("4", l_road_name=""),
-            # No arrondissement, on a street the referential does not know: DiaLog
-            # refuses Paris as a whole (75056).
             point("4", l_district=None, l_road_name="Rue Imaginaire"),
             {"l_file_id": None},  # a measure without any location
         )
@@ -394,9 +360,6 @@ def test_a_location_limited_to_one_direction_is_dropped(label):
     assert compute_location_fields(frame(point("4", l_direction=label))).height == 0
 
 
-# -- contract with the pivot and the DTO -------------------------------------------------
-
-
 def test_every_location_column_is_a_pivot_key():
     working = {"location_rejection", "location_district_source"}
     produced = {name for name in locations.LOCATION_COLUMNS if name not in working}
@@ -404,7 +367,6 @@ def test_every_location_column_is_a_pivot_key():
 
 
 def test_the_row_builds_a_named_street_dto():
-    """`create_save_location_dto` hands every `location_*` key to `SaveNamedStreetDTO`."""
     row = compute_location_fields(
         frame(section(l_from_house_number="39", l_to_road_name="Rue des Dames"))
     ).row(0, named=True)
@@ -430,7 +392,6 @@ def test_the_row_builds_a_named_street_dto():
 
 
 def test_a_numbered_road_label_is_a_house_number_on_the_road_itself():
-    """2017 migration: `Libellé voie fin` sometimes carries "22 RUE DES REGLISES"."""
     bound = parse_bound(None, "22 RUE DES REGLISES", "22 RUE DES REGLISES")
     assert bound == Bound(locations.POINT_TYPE_HOUSE_NUMBER, house_number="22")
     bound = parse_bound(None, "RUE DU FAUCONNIER", None)

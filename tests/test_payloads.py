@@ -186,11 +186,6 @@ def test_a_regulation_within_the_ceiling_keeps_its_identifier():
 
 
 def test_a_named_street_is_sent_without_geometry():
-    """`lane` carries names, not a line: DiaLog geocodes city + road (+ bounds) itself.
-
-    Paris (Eudonet) describes every section this way: a road name bounded by two house
-    numbers, or by two crossing streets.
-    """
     dto = build_location(
         {  # type: ignore[arg-type]
             "location_road_type": "lane",

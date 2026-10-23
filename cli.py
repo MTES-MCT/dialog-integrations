@@ -1,4 +1,5 @@
 import json
+import sys
 from typing import Annotated
 from urllib.parse import urlparse
 
@@ -11,7 +12,13 @@ from notifications.summary import render_summary
 from notifications.tchap_bot import TchapBot
 from settings import Organization
 
-app = typer.Typer(help="Dialog CLI")
+# By default loguru prints the value of every variable of a failing frame, and Typer the
+# locals of the command: a crash while authenticating at a source would put its
+# credentials in the CI log, which a public repository shows to anyone.
+logger.remove()
+logger.add(sys.stderr, diagnose=False)
+
+app = typer.Typer(help="Dialog CLI", pretty_exceptions_show_locals=False)
 
 
 def comma_list(raw: str) -> list[str]:

@@ -1,5 +1,3 @@
-"""Offline tests of the Paris / Eudonet extraction, on the frozen fixture."""
-
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -7,6 +5,7 @@ from zoneinfo import ZoneInfo
 import polars as pl
 import pytest
 
+from integrations.api import DialogApi
 from integrations.co_paris.eudonet.client import EQUALS, GREATER_OR_EQUAL, EudonetError
 from integrations.co_paris.eudonet.data_source_integration import (
     FIXTURE_ENV_VAR,
@@ -14,6 +13,7 @@ from integrations.co_paris.eudonet.data_source_integration import (
     RAW_COLUMNS,
     DataSourceIntegration,
     build_raw_dataframe,
+    check_extraction_completeness,
     load_fixture,
     needs_locations,
     perimeter_criteria,
@@ -24,8 +24,6 @@ FIXTURE = Path("tests/co_paris/eudonet.json")
 
 
 class StubSettings:
-    """Enough of `OrganizationSettings` to build a data source without any credential."""
-
     organization = "co_paris"
     base_url = "http://offline.invalid"
     client_id = "offline"
@@ -47,10 +45,8 @@ def raw(tables):
 def source(monkeypatch):
     monkeypatch.delenv("EUDONET_PARIS_CREDENTIALS", raising=False)
     monkeypatch.delenv(FIXTURE_ENV_VAR, raising=False)
+    monkeypatch.setattr(DialogApi, "public_identifiers", lambda self, insee_code: [])
     return DataSourceIntegration(StubSettings(), client=None)  # type: ignore[arg-type]
-
-
-# -- perimeter -----------------------------------------------------------------------------
 
 
 def test_the_perimeter_is_permanent_in_force_or_temporary_still_running():
@@ -69,16 +65,12 @@ def test_the_perimeter_is_permanent_in_force_or_temporary_still_running():
     assert [c["Criteria"]["Value"] for c in states["WhereCustoms"]] == ["8640", "13789", "8642"]
 
 
-# -- raw dataframe shape -------------------------------------------------------------------
-
-
 def test_the_raw_dataframe_matches_the_column_contract(raw):
     assert raw.columns == list(RAW_COLUMNS)
     assert dict(raw.schema) == RAW_COLUMNS
 
 
 def test_there_is_one_row_per_location_plus_the_childless_parents(raw, tables):
-    """Out-of-model measures take one row without location, like the online extraction."""
     carried = {m["FileId"] for m in tables["1200"] if needs_locations(m)}
     carried_locations = [row for row in tables["2700"] if row["1202_fid"] in carried]
     measures_with_location = {row["1202_fid"] for row in carried_locations}
@@ -113,9 +105,6 @@ def test_the_fixture_validates_against_the_pandera_schema(source, raw):
     assert set(validated.columns) == set(EudonetRawDataSchema.to_schema().columns)
 
 
-# -- field conversions ---------------------------------------------------------------------
-
-
 def test_dates_come_from_the_database_value_not_the_displayed_one(raw, tables):
     regulation = next(a for a in tables["1100"] if a.get("1109_db"))
     row = raw.filter(pl.col("a_file_id") == regulation["FileId"]).row(0, named=True)
@@ -133,19 +122,14 @@ def test_a_permanent_regulation_has_no_end_date(raw):
 
 
 def test_eudonet_empty_strings_become_nulls(raw, tables):
-    # Points without a house number carry `2755 == ""`, which must not reach the pivot.
     empty = [row for row in tables["2700"] if row.get("2755") == ""]
     assert empty, "the fixture no longer holds a location with an empty 2755"
 
     rows = raw.filter(pl.col("l_file_id").is_in([row["FileId"] for row in empty]))
     assert rows["l_point_house_number"].null_count() == rows.height
-    # No column may hold an empty string anywhere.
     for name, dtype in RAW_COLUMNS.items():
         if dtype == pl.Utf8:
             assert raw.filter(pl.col(name) == "").height == 0, name
-
-
-# -- measure parameters --------------------------------------------------------------------
 
 
 def _pair_count(measure):
@@ -186,7 +170,15 @@ def test_a_regulation_without_measure_gets_null_parameters():
     assert row["l_file_id"] is None
 
 
-# -- fixture mode --------------------------------------------------------------------------
+@pytest.mark.parametrize("located, refused", [(3, False), (2, True)])
+def test_an_extraction_that_lost_its_locations_is_refused(located, refused):
+    measures = [{"FileId": file_id} for file_id in range(1, 5)]
+    locations = [{"1202_fid": file_id} for file_id in range(1, located + 1)]
+    if refused:
+        with pytest.raises(EudonetError, match="looks truncated"):
+            check_extraction_completeness(measures, locations)
+    else:
+        check_extraction_completeness(measures, locations)
 
 
 def test_the_fixture_is_read_when_the_environment_variable_points_at_it(source, monkeypatch):
@@ -225,9 +217,7 @@ def test_credentials_are_read_from_the_organization_settings(source, monkeypatch
 
 
 def test_only_the_measures_dialog_can_carry_need_their_locations():
-    """83 % of the location pages served measures dropped anyway (run of 2026-09-16)."""
     assert needs_locations({"1202": "interdiction de stationnement"})
     assert needs_locations({"1202": "aire piétonne"})
     assert not needs_locations({"1202": "stationnement réservé"})
-    # An unknown label keeps its locations: the transformation has to raise on it.
     assert needs_locations({"1202": "interdiction de klaxonner"})

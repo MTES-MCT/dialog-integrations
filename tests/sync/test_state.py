@@ -14,8 +14,6 @@ from tests.sync_fixtures import build_regulation, geometry
 
 
 def test_an_empty_time_slot_list_is_the_same_as_none_at_all():
-    """`timeSlots: []` appeared with the daily slots: a snapshot built before (Paris) and one
-    built after (Lyon) must both keep matching what is produced today."""
     without = build_regulation("A-1")
     with_empty = build_regulation("A-1")
     with_empty.measures[0].periods[0].time_slots = []  # type: ignore[index]

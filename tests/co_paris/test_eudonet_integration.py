@@ -1,23 +1,19 @@
-"""Offline end-to-end run of the co_paris integration, on the frozen fixture.
-
-Equivalent to `tests/test_integration.py` for the other organizations, except that the raw
-data comes from the fixture pointed at by `EUDONET_PARIS_FIXTURE` rather than a CSV. The
-POST is mocked out: nothing ever reaches DiaLog from a test.
-"""
-
+import httpx
 import pytest
 
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
+from integrations.api import DialogApi
 from integrations.base_integration import BaseIntegration
-from integrations.co_paris.eudonet.data_source_integration import FIXTURE_ENV_VAR
+from integrations.co_paris.eudonet.data_source_integration import (
+    FIXTURE_ENV_VAR,
+    DataSourceIntegration,
+)
 from settings import OrganizationSettings
 
 FIXTURE = "tests/co_paris/eudonet.json"
 
 
 class OfflineSettings:
-    """No credential is needed: the API client is built but never called."""
-
     base_url = "http://offline.invalid"
     client_id = "offline"
     client_secret = "offline"
@@ -25,7 +21,6 @@ class OfflineSettings:
 
 @pytest.fixture
 def captured_regulations():
-    """Whatever the integration would have POSTed. Nothing leaves the process."""
     return []
 
 
@@ -37,16 +32,47 @@ def integration(monkeypatch, captured_regulations):
 
     def capture(regulations):
         captured_regulations.extend(regulations)
-        # The base class reads back (created, refused by the pipeline itself).
         return [regulation.identifier for regulation in regulations], []
 
     monkeypatch.setattr(integration, "_integrate_regulations_add", capture)
     monkeypatch.setattr(integration, "fetch_regulation_ids", lambda: [])
+    monkeypatch.setattr(DialogApi, "public_identifiers", lambda self, insee_code: [])
     return integration
 
 
+def _eudonet_source():
+    settings = OrganizationSettings(OfflineSettings(), "co_paris")  # type: ignore[arg-type]
+    return DataSourceIntegration(settings, BaseIntegration.from_settings(settings).client)
+
+
+def test_a_municipality_the_export_cannot_serve_falls_back_on_its_last_read(monkeypatch):
+    """R-80: a number held back yesterday is not created tonight because of a 504."""
+
+    def first_night(self, insee_code):
+        return [("2024T11570", "Paris")] if insee_code == "75104" else []
+
+    def second_night(self, insee_code):
+        if insee_code == "75104":
+            raise httpx.ReadTimeout("no answer")
+        return []
+
+    monkeypatch.setattr(DialogApi, "public_identifiers", first_night)
+    assert "2024T11570" in _eudonet_source().fetch_numbers_published_elsewhere()
+    monkeypatch.setattr(DialogApi, "public_identifiers", second_night)
+    assert "2024T11570" in _eudonet_source().fetch_numbers_published_elsewhere()
+
+
+def test_an_export_of_another_shape_stops_the_run(monkeypatch):
+
+    def changed_contract(self, insee_code):
+        raise KeyError("metadata")
+
+    monkeypatch.setattr(DialogApi, "public_identifiers", changed_contract)
+    with pytest.raises(KeyError):
+        _eudonet_source().fetch_numbers_published_elsewhere()
+
+
 def test_the_pipeline_runs_from_the_fixture_to_the_pivot(integration):
-    """fetch → validate → clean → select, without touching the network."""
     for data_source in integration.data_sources:
         source = data_source(integration.organization_settings, integration.client)
 
@@ -57,8 +83,6 @@ def test_the_pipeline_runs_from_the_fixture_to_the_pivot(integration):
 
         assert raw.height > 0
         assert validated.height == raw.height
-        # The transformations filter: a location DiaLog cannot geocode, a measure outside
-        # the five types and a date that fails R-38 all leave here.
         assert 0 < clean.height < raw.height
         assert selected.height == clean.height
         assert selected.width > 0
@@ -66,7 +90,6 @@ def test_the_pipeline_runs_from_the_fixture_to_the_pivot(integration):
 
 
 def test_the_whole_integration_runs_offline(integration, captured_regulations):
-    """`integrate_regulations()` end to end: the payloads are built, none is sent."""
     integration.integrate_regulations()
 
     assert captured_regulations, "no regulation reached the (mocked) creation step"

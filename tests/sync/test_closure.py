@@ -163,7 +163,6 @@ LANE = {
 
 
 def test_a_street_is_written_back_as_its_computed_geometry():
-    """No second geocoding: the closed regulation keeps the sections DiaLog applied."""
     read = {**READ, "measures": [dict(READ["measures"][0])]}
     read["measures"][0]["locations"] = [LANE]
     location = save_payload_from_read(read)["measures"][0]["locations"][0]

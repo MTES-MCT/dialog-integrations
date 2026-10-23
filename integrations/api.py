@@ -46,6 +46,11 @@ from api.dia_log_client.models import (
 )
 from settings import OrganizationSettings
 
+
+class PublicExportUnreadable(Exception):
+    """A page of the public export answered something else than 200."""
+
+
 # The public export serves at most 100 regulations a page, whatever `pageSize` asks
 # (measured on the staging, 2026-10-17).
 PUBLIC_PAGE_SIZE = 100
@@ -169,7 +174,7 @@ class DialogApi:
                 page_size=PUBLIC_PAGE_SIZE,
             )
             if resp.status_code != 200:
-                raise Exception(
+                raise PublicExportUnreadable(
                     f"Failed to read the public export of {insee_code}, page {page}: "
                     f"got status {resp.status_code}"
                 )

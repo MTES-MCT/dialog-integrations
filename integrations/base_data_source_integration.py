@@ -1,4 +1,4 @@
-from typing import TypedDict, get_type_hints
+from typing import Literal, TypedDict, get_type_hints
 
 import pandera.polars as pa
 import polars as pl
@@ -33,16 +33,13 @@ class RegulationMeasure(TypedDict):
     location_to_abscissa: int | None
     location_to_side: str | None
     location_direction: str | None
-    # Named street (`location_road_type = lane`): no geometry, DiaLog geocodes the
-    # city and road names itself. `*_point_type` is `houseNumber` or `intersection`,
-    # and picks which of `*_house_number` / `*_road_name` bounds the section.
     location_city_code: str | None
     location_city_label: str | None
     location_road_name: str | None
-    location_from_point_type: str | None
+    location_from_point_type: Literal["houseNumber", "intersection"] | None
     location_from_house_number: str | None
     location_from_road_name: str | None
-    location_to_point_type: str | None
+    location_to_point_type: Literal["houseNumber", "intersection"] | None
     location_to_house_number: str | None
     location_to_road_name: str | None
     # Regulation fields (prefixed with regulation_)

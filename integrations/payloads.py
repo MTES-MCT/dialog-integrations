@@ -224,8 +224,7 @@ def build_location(measure: RegulationMeasure) -> SaveLocationDTO:
             return SaveLocationDTO(road_type=road_type, national_road=numbered)
         return SaveLocationDTO(road_type=road_type, departmental_road=numbered)
     if road_type == RoadTypeEnum.LANE:
-        # A named street: city and road names, bounded by house numbers or crossing
-        # streets. No geometry is sent, DiaLog geocodes it.
+        # No geometry is sent: DiaLog geocodes the street and its bounds.
         return SaveLocationDTO(
             road_type=road_type, named_street=SaveNamedStreetDTO(**location_fields)
         )

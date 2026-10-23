@@ -178,7 +178,7 @@ def _location_from_read(location: Mapping[str, Any]) -> dict:
     geometry DiaLog computed for them — the effective geometry does not change.
 
     A zone: DiaLog already turned it into street sections, and `PUT` answers 500 on a
-    zone (S-14). A named street (read as `lane`): the read leaves out the city code,
+    zone. A named street (read as `lane`): the read leaves out the city code,
     the direction and the bound types the write needs (staging, 2026-10-19), and
     sending it as a street again would have DiaLog geocode it a second time."""
     road_type = location.get("roadType")
@@ -210,7 +210,6 @@ def _location_from_read(location: Mapping[str, Any]) -> dict:
 
 
 def _street_label(street: Mapping[str, Any]) -> str:
-    """`Rue Letort, 77 à Rue Championnet – Paris`: the street and its bounds, as read."""
     start = street.get("fromHouseNumber") or street.get("fromRoadName")
     end = street.get("toHouseNumber") or street.get("toRoadName")
     label = str(street.get("roadName") or "")

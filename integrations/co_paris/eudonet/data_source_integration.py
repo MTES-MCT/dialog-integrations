@@ -3,13 +3,6 @@
 Eudonet holds three nested tables:
 
     1100 Arrêtés  →  1200 Mesures  →  2700 Localisation
-
-`fetch_raw_data` returns **one row per location**, joined to its measure and to its
-regulation (columns prefixed `a_`, `m_`, `l_`). A regulation without any measure, and a
-measure without any location, still produce a row with null children: the funnel has to be
-able to count those losses rather than silently miss them.
-
-Nothing is written back: the Eudonet account is read-only.
 """
 
 import html
@@ -23,9 +16,11 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import httpx
 import polars as pl
 from loguru import logger
 
+from api.dia_log_client.errors import UnexpectedStatus
 from api.dia_log_client.models import (
     MeasureTypeEnum,
     PeriodRecurrenceTypeEnum,
@@ -34,9 +29,10 @@ from api.dia_log_client.models import (
 from api.dia_log_client.models import (
     PostApiRegulationsAddBodyMeasuresItemVehicleSetType0ExemptedTypesType0Item as VehicleExemptedTypeEnum,  # noqa: E501
 )
-from integrations.api import DialogApi
+from integrations.api import DialogApi, PublicExportUnreadable
 from integrations.base_data_source_integration import BaseDataSourceIntegration
 from integrations.shared.local_time import end_of_local_day, start_of_local_day
+from integrations.sync.state import state_dir
 
 from .client import EQUALS, GREATER_OR_EQUAL, EudonetClient, EudonetError, all_of, any_of, criterion
 from .locations import CITY_CODE_BY_DISTRICT, compute_location_fields
@@ -44,6 +40,7 @@ from .schema import EudonetRawDataSchema
 from .vocabulary import (
     ACCEPTED_STATE_LABELS_BY_TYPE,
     ALL_VEHICLES_LABELS,
+    COMPLEMENT_CONNECTORS,
     EXEMPTED_OTHER,
     EXEMPTION_BY_LABEL,
     EXEMPTION_PARAMETERS,
@@ -92,12 +89,11 @@ FILTER_MEASURE_OF_LOCATION = TABLE_MEASURES
 # `1202` on table 1200 is the measure name (catalog), on table 2700 the link to the measure.
 FIELD_MEASURE_NAME = 1202
 
-# Perimeter fields on table 1100.
 FIELD_TYPE = 1108
 FIELD_STATE = 1107
 FIELD_END_DATE = 1110
 
-# Catalog `DBValue`s, taken from the `catalogs.json` of the exploration dump.
+# Catalog `DBValue`s, as `GET /Catalog/{descId}` served them on 2026-09-08.
 TYPE_PERMANENT = "7"
 TYPE_TEMPORARY = "8"
 STATE_PERMANENT_IN_FORCE = "96"
@@ -156,7 +152,6 @@ LOCATION_COLUMNS = [
     2796,
 ]
 
-# The nine (parameter name, parameter value) pairs of a measure, flattened into `m_params`.
 MEASURE_PARAMETER_PAIRS = [
     ("1218", "1219"),
     ("1223", "1224"),
@@ -169,8 +164,6 @@ MEASURE_PARAMETER_PAIRS = [
     ("1246", "1247"),
 ]
 
-# The column contract of the raw dataframe, shared with `schema.py` and with the
-# transformations built on top of it.
 RAW_COLUMNS: dict[str, Any] = {
     "a_file_id": pl.Int64,
     "a_identifier": pl.Utf8,
@@ -212,10 +205,8 @@ RAW_COLUMNS: dict[str, Any] = {
     "l_modified_at": pl.Datetime("us"),
 }
 
-# `DbValue` of a date field, e.g. "2026/09/08 00:00:00".
 DB_DATE_FORMATS = ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d")
 
-# Synchronisation prefix (plan §8, journal of 2026-09-08). See `compute_regulation_fields`.
 IDENTIFIER_PREFIX = "PARIS-EUDO-"
 
 # The other channels writing Paris acts into DiaLog (R-80). On the prod export of
@@ -226,12 +217,13 @@ IDENTIFIER_PREFIX = "PARIS-EUDO-"
 # organization, municipality by municipality (~30 s): the commune code, then the twenty
 # arrondissements our own locations are sent with. The `Paris_` ones carry raw geometries
 # with no municipality, which that filter never returns, and reading the whole export takes
-# ~1 h (38 s a page, one page answering 500, staging of 2026-10-17). They are frozen in
+# ~1 h (~37 s a page, one page answering 500, staging of 2026-10-17). They are frozen in
 # `published_elsewhere.json` instead: 100 permanent pedestrian areas, the same on the prod
 # of 2026-09-08 and the staging of 2026-10-17. A `Paris_` regulation added since is missed.
-OTHER_CHANNEL_PREFIX = re.compile(r"^paris_", re.IGNORECASE)  # 5 of the 100 are `paris_`
+OTHER_CHANNEL_PREFIX = re.compile(r"^paris_", re.IGNORECASE)
 PUBLIC_EXPORT_CITY_CODES = ("75056", *CITY_CODE_BY_DISTRICT.values())
 FROZEN_ELSEWHERE_PATH = Path(__file__).with_name("published_elsewhere.json")
+ELSEWHERE_STATE_FILE = "published_elsewhere_live.json"
 
 TITLE_MAX_LENGTH = 255
 TITLE_ELLIPSIS = "..."
@@ -244,27 +236,21 @@ FREE_TEXT_SEPARATOR = " ; "
 SUBJECT_OTHER = PostApiRegulationsAddBodySubject.OTHER.value
 SPEED_PARAMETER = "valeur de la vitesse"
 
-# Working column: the start date a permanent regulation ends up using (R-39).
 PERIOD_START_SOURCE = "_period_start_source"
 
 # The police prefecture signs about a third of the acts in Eudonet, on Paris streets, under
 # its own authority. R-73 by analogy: another authority is not published under the City's
 # name without the City's agreement. True while co_paris targets staging only (decision of
-# 2026-09-23, question to Paris in the team report); set it to False before prod unless
-# Paris agrees.
+# 2026-09-23, Q-36); set it to False before prod unless Paris agrees.
 PUBLISH_POLICE_PREFECTURE = True
 
 # DiaLog refuses a whole regulation when it cannot geocode one of its locations (13 % of
-# the regulations sent to the staging on 2026-09-23), and its answer does not say which.
-# `refused_locations.json` lists the locations a probe of the staging isolated, by their
-# Eudonet `FileId`, with the motive DiaLog gave: they are dropped before sending, and the
-# regulation goes with its other locations (decision of 2026-10-15). Its volume is logged
-# at each run; a location fixed in Eudonet keeps its `FileId` and stays dropped until the
-# list is probed again.
+# the regulations sent to the staging on 2026-09-23), and its answer does not say which. A
+# location fixed in Eudonet keeps its `FileId` and stays dropped until the list is probed
+# again.
 REFUSED_LOCATIONS_PATH = Path(__file__).with_name("refused_locations.json")
 
-# Ceiling on the locations of one POST (R-76, same margin as Lyon). The largest Paris act
-# carries ~600 locations: a guard, not a cut that happens today.
+# Ceiling on the locations of one POST (R-76).
 MAX_LOCATIONS_PER_REGULATION = 1000
 
 
@@ -274,13 +260,7 @@ def today_in_paris() -> date:
 
 
 def perimeter_criteria(today: date) -> dict[str, Any]:
-    """The regulations DiaLog broadcasts: permanent in force, or temporary still running.
-
-    `(1108 = Permanent AND 1107 = En vigueur)`
-    `OR (1108 = Temporaire AND 1110 >= today AND 1107 IN (En vigueur, Publié, Signé))`
-
-    Catalog fields compare on their `DBValue`; dates go in as `YYYY/MM/DD`.
-    """
+    """The regulations DiaLog broadcasts: permanent in force, or temporary still running."""
     return any_of(
         all_of(
             criterion(FIELD_TYPE, EQUALS, TYPE_PERMANENT),
@@ -298,10 +278,8 @@ def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[st
     """The three tables of the perimeter, as flat rows keyed by table number.
 
     Measures are filtered on their parent's fields, which the API accepts one level up but
-    not two: locations are therefore fetched by batches of measure identifiers — and only
-    for the measures DiaLog can carry. The others are dropped by `compute_measure_fields`
-    whatever their locations; asking for them cost 83 % of the location pages (1 744 pages,
-    ~25 min on the run of 2026-09-16).
+    not two: locations are therefore fetched by batches of measure identifiers, and only
+    for the measures DiaLog can carry.
     """
     where = perimeter_criteria(today)
 
@@ -342,13 +320,8 @@ def needs_locations(measure: dict[str, Any]) -> bool:
 def check_extraction_completeness(
     measures: list[dict[str, Any]], locations: list[dict[str, Any]]
 ) -> None:
-    """Refuse an extraction that lost its locations on the way.
-
-    On the 2026-09-08 dump, 2.2 % of the in-scope measures have no location. The API was
-    seen answering an empty page once (see `EudonetClient.search_by_ids`); a truncated
-    extraction must fail here rather than be mistaken for thousands of withdrawn measures
-    once synchronisation deletes what the source no longer carries.
-    """
+    """Refuse an extraction that lost its locations on the way, rather than close the
+    regulations they belonged to."""
     if not measures:
         raise EudonetError("Eudonet returned no measure at all for the perimeter")
     located = {row.get(f"{FIELD_MEASURE_LINK}_fid") for row in locations}
@@ -449,8 +422,6 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
     metrics: dict[str, int]
-    # `1101` numbers another channel already published, each with where it was found.
-    # None until `fetch_raw_data` reads them: tests that skip it hold nothing back.
     numbers_published_elsewhere: dict[str, str] | None = None
 
     def fetch_raw_data(self) -> pl.DataFrame:
@@ -465,15 +436,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         else:
             client = EudonetClient(self._credentials())
             tables = extract_tables(client, today_in_paris())
-        # Source volumes for the run report and the Tchap message (read by
-        # `BaseIntegration._source_metrics`). Keys are the French labels shown as-is.
         regulations = tables.get(str(TABLE_REGULATIONS), [])
         measures = tables.get(str(TABLE_MEASURES), [])
         known = {row["FileId"] for row in regulations}
         # The API account cannot read every regulation (per-record rights): on the
         # 2026-09-08 dump, 13 % of the in-scope measures (23 % of the active temporary
-        # ones) hang from a regulation that `Search/1100` never returns. Counted here so
-        # the daily report shows the loss; nothing downstream can recover it.
+        # ones) hang from a regulation that `Search/1100` never returns.
         unreadable = sum(
             1 for row in measures if row.get(f"{FIELD_REGULATION_LINK}_fid") not in known
         )
@@ -489,24 +457,36 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     def fetch_numbers_published_elsewhere(self) -> dict[str, str]:
         """Read the public export and keep the Eudonet numbers other channels published.
 
-        The live read is a courtesy to the other channels, not a condition of the run, as
-        for Lyon: offline or when the export is unreadable, the pipeline goes on with the
-        frozen list alone and says so.
+        A municipality the export cannot serve falls back on its last successful read.
         """
         frozen = [
             (identifier, organization) for identifier, organization in load_frozen_elsewhere()
         ]
-        try:
-            api = DialogApi(self.client)
-            live = [
-                found for code in PUBLIC_EXPORT_CITY_CODES for found in api.public_identifiers(code)
-            ]
-        except Exception as error:
+        path = state_dir() / self.organization_settings.organization / ELSEWHERE_STATE_FILE
+        last_read = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        api = DialogApi(self.client)
+        read: dict[str, list[list[str]]] = {}
+        unreadable: dict[str, str] = {}
+        for code in PUBLIC_EXPORT_CITY_CODES:
+            try:
+                read[code] = [list(found) for found in api.public_identifiers(code)]
+            except (httpx.HTTPError, UnexpectedStatus, PublicExportUnreadable) as error:
+                unreadable[code] = repr(error)
+                read[code] = last_read.get(code, [])
+        if unreadable:
             logger.warning(
-                f"R-80 live check skipped: the public export could not be read ({error!r}) — "
-                f"only the {len(frozen)} frozen identifiers of the other channels are held back"
+                f"R-80: the public export could not be read for {len(unreadable)} "
+                f"municipalities, their last successful read is used "
+                f"({sum(len(read[code]) for code in unreadable)} regulations, none for "
+                f"{sorted(code for code in unreadable if code not in last_read)}): {unreadable}"
             )
-            live = []
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(read, ensure_ascii=False), encoding="utf-8")
+        live = [
+            (identifier, organization)
+            for found in read.values()
+            for identifier, organization in found
+        ]
         numbers = numbers_published_elsewhere([*frozen, *live])
         logger.info(
             f"{len(numbers)} numbers published by another channel: {len(frozen)} frozen "
@@ -515,14 +495,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         return numbers
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
-        """The transformations, piped in the order their filters depend on.
-
-        The perimeter filters come first (they remove whole regulations), then the measure
-        type (it decides what a row even is), then the vehicles it restricts, then the
-        dates, then the location. `compute_location_fields` lives in `locations.py`: it
-        owns the `l_*` columns, the `2768` status and the shapes of the borders. The
-        pedestrian areas get their speed twin last, so that it inherits every filter.
-        """
+        """The transformations, piped in the order their filters depend on."""
         return (
             raw_data.pipe(discard_police_prefecture)
             .pipe(compute_regulation_fields)
@@ -538,15 +511,17 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def _credentials(self) -> dict[str, Any]:
         raw = getattr(self.organization_settings, "eudonet_paris_credentials", None)
-        # Offline tools build settings from a duck-typed stand-in that carries no source
-        # credential: fall back on the process environment.
         raw = raw or os.environ.get(CREDENTIALS_ENV_VAR)
         if not raw:
             raise EudonetError(
                 f"{CREDENTIALS_ENV_VAR} is not set: either provide the Eudonet credentials "
                 f"or point {FIXTURE_ENV_VAR} at a frozen extract"
             )
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            # `from None`: the decoding error carries the whole secret as its document.
+            raise EudonetError(f"{CREDENTIALS_ENV_VAR} is not valid JSON") from None
 
 
 def _text(row: dict[str, Any], field: int | str) -> str | None:
@@ -602,11 +577,6 @@ def _regulation_fields(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _measure_parameters(row: dict[str, Any]) -> list[list[str]]:
-    """The named parameters of a measure, in Eudonet's own order.
-
-    A pair whose name is empty is not a parameter; a named parameter with no value keeps
-    an empty value rather than disappearing.
-    """
     pairs = []
     for name_field, value_field in MEASURE_PARAMETER_PAIRS:
         name = _text(row, name_field)
@@ -656,15 +626,6 @@ def _location_fields(row: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Transformations (plan §3, §4)
-#
-# Free functions piped in order by `compute_clean_data`. Each one owns a slice of the
-# pivot, documents the rows it drops, and logs every drop with its volume: what we do not
-# publish has to be countable (R-03).
-# ---------------------------------------------------------------------------
-
-
 class EudonetVocabularyError(Exception):
     """A catalog label the closed tables of `vocabulary.py` do not know.
 
@@ -692,7 +653,6 @@ def _truncate(value: str, limit: int, ellipsis: str = TITLE_ELLIPSIS) -> str:
 
 
 def _count_by(df: pl.DataFrame, column: str) -> dict[str, int]:
-    """Occurrences of a column's values, for a log line that names what was dropped."""
     if not df.height:
         return {}
     counts = df.get_column(column).fill_null("(empty)").value_counts(sort=True)
@@ -733,8 +693,7 @@ def numbers_published_elsewhere(identifiers: Iterable[tuple[str, str]]) -> dict[
 
     `Paris_2024P12345` or `paris_2024P12345` gives `2024P12345`; a bare identifier is taken
     whole, since the former PHP channel posts `1101` as is. Ours (`PARIS-EUDO-`) are
-    skipped. No other normalisation, for the reason `compute_regulation_fields` gives:
-    `1101` is unique as is.
+    skipped.
     """
     numbers: dict[str, str] = {}
     for identifier, organization in identifiers:
@@ -748,12 +707,7 @@ def numbers_published_elsewhere(identifiers: Iterable[tuple[str, str]]) -> dict[
 def discard_published_elsewhere(
     df: pl.DataFrame, numbers: dict[str, str] | None = None
 ) -> pl.DataFrame:
-    """Drop the regulations whose `1101` number another channel already published (R-80).
-
-    One act, one entry in DiaLog: the regulation already in place stays, ours is not
-    created next to it, whichever organization holds it (decision of 2026-10-15). Each
-    regulation held back is logged with the identifier and organization it collides with.
-    """
+    """Drop the regulations whose `1101` number another channel already published (R-80)."""
     if not numbers:
         return df
     published = pl.col("a_identifier").is_in(list(numbers))
@@ -772,53 +726,31 @@ def discard_published_elsewhere(
 def compute_regulation_fields(df: pl.DataFrame, today: date | None = None) -> pl.DataFrame:
     """The regulation half of the pivot, and the perimeter filter that goes with it.
 
-    Produces `regulation_identifier`, `regulation_title`, `regulation_category`,
-    `regulation_subject`, `regulation_other_category_text`, `regulation_document_url`.
+    The perimeter is filtered again here: online the Eudonet query already did it, offline
+    (fixture, frozen dump) nothing did, and both paths have to produce the same thing.
 
-    Drops (each counted in a log line):
-
-    * regulations whose `1107` state is not one of `En vigueur`, `Publié`, `Signé` — an act
-      that is not signed is not enforceable, and `Périmé` / `Abrogé` have left the perimeter;
-    * temporary regulations whose `1110` end date is before today, or missing. Online the
-      Eudonet query already filters them out; offline (fixture, frozen dump) it does not, and
-      the two paths have to produce the same thing.
-
-    **Identifier (R-23).** `regulation_identifier = "PARIS-EUDO-" + 1101`.
-
-    `1101` « N° d'arrêté » is Eudonet's own business key: unique across the base, stable
-    across the life of the act (the nightly state recomputation never touches it), and it is
-    what the PDF, the BOVP and the Paris services all quote. It follows the pattern
-    `AAAA[T|P|E|C]NNNNN` — year, one letter for the nature of the act (T temporary,
-    P permanent, E, C), then a sequence number: `2021T113851`, `2023P111563`. Acts taken over
-    from the pre-2017 tool keep their old number instead, `AAAA-NNNNN` or `AA-NNNNN`:
-    `1996-10345`, `05-00133`. Both shapes are unique, so `1101` is used **as is**, with no
-    normalisation that could make two distinct acts collide.
-
-    The `PARIS-EUDO-` prefix keeps this channel apart from the two that already write into
-    the same DiaLog organizations: the historical PHP channel posts the bare `1101`
-    (`2023T15201`), and the organization "Paris (préfecture)" holds `Paris_2024P12345`.
-    A number either of them already published is not created again
-    (`discard_published_elsewhere`). A hyphen rather than
-    a slash, because a slash in an identifier has already bitten the pipeline (review I-7).
-    The result stays well inside the 60 characters the API allows.
-
-    **Title (R-24).** `"Arrêté n° {1101} — {1102 cleaned}"`, HTML stripped, entities decoded,
-    whitespace collapsed, truncated to 255 characters. An empty `1102` gives
-    `"Arrêté n° {1101}"`: a title is never a reason to drop a regulation, it is built.
-
-    **Subject (R-27).** `Travaux` → `roadMaintenance`; `Evènement`, `Manifestation`,
-    `Cinéma` → `event`; anything else, empty included, → `other` plus the reason itself as
-    `otherCategoryText` (≤ 100 characters). Permanent regulations carry no reason at all in
-    Eudonet and get `other` + "Réglementation permanente" (plan §3).
+    `1101` « N° d'arrêté » is Eudonet's own business key (R-23): unique across the base and
+    stable across the life of the act, in both its shapes (`2021T113851` since 2017,
+    `1996-10345` before). It is used as is, with no normalisation that could make two
+    distinct acts collide.
     """
     today = today or today_in_paris()
 
-    # An unknown type is kept here so that the check below raises on it.
-    kept_state = ~pl.col("a_type").is_in(list(ACCEPTED_STATE_LABELS_BY_TYPE)).fill_null(False)
-    for type_label, states in ACCEPTED_STATE_LABELS_BY_TYPE.items():
-        kept_state = kept_state | (
-            (pl.col("a_type") == type_label) & pl.col("a_state").is_in(states)
-        ).fill_null(False)
+    unknown_types = sorted(
+        repr(label)
+        for label in set(df.get_column("a_type").unique().to_list())
+        - set(REGULATION_CATEGORY_BY_LABEL)
+    )
+    if unknown_types:
+        raise EudonetVocabularyError(
+            f"Unknown Eudonet regulation type(s) in catalog 1108: {unknown_types}. "
+            "The category decides how the periods are built: it cannot be guessed."
+        )
+
+    kept_state = pl.any_horizontal(
+        ((pl.col("a_type") == type_label) & pl.col("a_state").is_in(states)).fill_null(False)
+        for type_label, states in ACCEPTED_STATE_LABELS_BY_TYPE.items()
+    )
     dropped = df.filter(~kept_state)
     if dropped.height:
         logger.warning(
@@ -842,17 +774,6 @@ def compute_regulation_fields(df: pl.DataFrame, today: date | None = None) -> pl
             "regulations without an end date: nothing would ever close them (R-37)"
         )
     df = df.filter(~is_temporary | (pl.col("a_end_date") >= today))
-
-    unknown_types = sorted(
-        repr(label)
-        for label in set(df.get_column("a_type").unique().to_list())
-        - set(REGULATION_CATEGORY_BY_LABEL)
-    )
-    if unknown_types:
-        raise EudonetVocabularyError(
-            f"Unknown Eudonet regulation type(s) in catalog 1108: {unknown_types}. "
-            "The category decides how the periods are built: it cannot be guessed."
-        )
 
     title = pl.Series(
         "regulation_title",
@@ -893,7 +814,7 @@ def compute_regulation_fields(df: pl.DataFrame, today: date | None = None) -> pl
             .otherwise(reason.str.slice(0, OTHER_CATEGORY_TEXT_MAX_LENGTH))
             .alias("regulation_other_category_text"),
             # No durable URL for the signed PDF: the Eudonet attachment link is a one-shot
-            # token, and the BOVP has no per-act permalink we could rebuild (plan §6).
+            # token, and the BOVP has no per-act permalink we could rebuild.
             pl.lit(None, dtype=pl.Utf8).alias("regulation_document_url"),
         ]
     )
@@ -917,29 +838,11 @@ def _measure_parameter_values(params: list[list[str]] | None, wanted: str) -> li
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     """`measure_type_` and `measure_max_speed`, from the closed table of catalog `1202`.
 
-    Drops (each counted in a log line):
-
-    * rows carrying no measure at all (`m_type` null): a regulation whose measures are all
-      out of the perimeter still reaches here, so the funnel can see it;
-    * measures whose type has no DiaLog equivalent, counted **by label** (R-30);
-    * `limitation de vitesse` without a readable "valeur de la vitesse" parameter: a speed
-      limitation with no speed says nothing, and 30 or 50 is not ours to pick (R-02, R-35);
-    * measures with a filled "Jours et Horaires" parameter: the text has to be read in full
-      or the measure goes (R-78), and none read so far is expressible in DiaLog;
-    * measures with a filled "voie concernée" parameter: they cover one lane of the street,
-      and DiaLog has no lane (R-78).
-
     Produces `measure_group_key` too: the Eudonet measure, so that its locations collapse
     into one DiaLog measure (R-76).
 
     Raises `EudonetVocabularyError` on a measure label absent from `MEASURE_TYPE_BY_LABEL`:
     Paris can extend catalog `1202`, and a new value has to be qualified by a human.
-
-    `zone 30` carries its limit in its own name (30 km/h); every other speed comes from the
-    parameter, read as the first integer before `km/h` ("à 30 km/h", "30 km/h").
-
-    `sens interdit` and `mise en impasse` are out of the model on purpose (R-32 freeze,
-    R-02): see `vocabulary.MEASURE_TYPE_BY_LABEL`.
     """
     no_measure = df.filter(pl.col("m_type").is_null())
     if no_measure.height:
@@ -1042,22 +945,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """`vehicleSet`, read from the named parameters of the measure (plan §4.2).
-
-    Produces `vehicle_all_vehicles`, `vehicle_restricted_types`, `vehicle_exempted_types`,
-    `vehicle_heavyweight_max_weight`, `vehicle_max_length` / `_height` / `_width`,
-    `vehicle_other_restricted_type_text`, `vehicle_other_exempted_type_text`.
-    Drops nothing.
-
-    `véhicule concerné (1..3)` and `valeur de la limite` say who is restricted;
-    `dérogation pour véhicule`, `dérogation pour usager` and `Dérogations véhicules` say who
-    is exempted. Values are multi-valued, joined by "; ", and are split before mapping.
-    `caractère aggravant` is skipped (it qualifies the offence, not the vehicle);
-    `Jours et Horaires` has already been handled by `compute_measure_fields`.
-
-    `allVehicles = true` only when nothing restricts (R-34). A pedestrian area also exempts
-    `desserteLocale` (R-71), on top of the exemptions Paris lists. A label the tables do not
-    know becomes `other` + that label: readable, and no threshold invented (R-35).
+    """`vehicleSet`, read from the named parameters of the measure.
 
     Drops, and counts, the `limitation dimensionnelle` and `limitation catégorielle`
     measures with no readable vehicle value: an empty vehicle set would close the road to
@@ -1194,24 +1082,9 @@ def _keep_stricter(current: float | None, candidate: float | None) -> float | No
 def compute_period_fields(df: pl.DataFrame, today: date | None = None) -> pl.DataFrame:
     """`period_*`, from the dates of the regulation — measures carry none of their own.
 
-    Produces `period_start_date`, `period_end_date`, `period_recurrence_type`,
-    `period_is_permanent`. Dates leave as ISO 8601 in French local time with the offset of
-    the day, which is the only shape the API reads correctly.
-
-    Temporary: `1109` at the first instant of its day, `1110` at the last second of its day,
-    `is_permanent = False`. Permanent: no end date, `is_permanent = True`, and a start date
-    taken from `1109`, else the signature date `1111`, else none: the pipeline dates it on
-    first write (R-39, `integrations/sync/dating.py`). Each fallback is counted.
-
-    Drops (each counted in a log line):
-
-    * **the whole regulation**, every row of it, when a date control of R-38 fails —
-      `début > fin`, `année(début) > année(today) + 1`, `année(fin) > année(today) + 5`.
-      A typo on the year leaves the act "En vigueur" in Eudonet until that year comes
-      (`2019T15796` runs to 2109), so the state alone cannot be trusted.
-
-    Temporary regulations lasting more than a year are **kept** and counted: on the
-    2026-09-08 perimeter they are long works sites (tramway, RATP), not mistakes.
+    Drops the whole regulation when a date control of R-38 fails. A typo on the year leaves
+    the act "En vigueur" in Eudonet until that year comes (`2019T15796` runs to 2109), so the
+    state alone cannot be trusted.
     """
     today = today or today_in_paris()
     max_start_year = today.year + 1
@@ -1293,32 +1166,29 @@ LOCATION_COMPLEMENT_COLUMNS = (
     "l_to_location_complement",
     "l_point_location_complement",
 )
-# What a complement may hold, beyond the whole-location phrases, and still say nothing: a
-# connector or a "bis" (R-78, ≤ 8 characters).
-CONNECTOR_MAX_LENGTH = 8
+_SEPARATORS_BUT_SLASH = r"\s,.;:()&\-–"
+_COMPLEMENT_WORD = re.compile(rf"[^{_SEPARATORS_BUT_SLASH}]+")
+_HOUSE_NUMBER_WORD = re.compile(r"(?:n°?|no)?\d+(?:bis|ter|quater|(?!h)[a-z])?")
 
 
 def _complement_says_nothing(text: str | None) -> bool:
-    """True for an empty complement, a connector, or a phrase meaning "the whole location"."""
+    """True for an empty complement, a phrase meaning "the whole location", or connectors
+    and house numbers alone. Anything else is read as narrowing the measure (R-81)."""
     if not text:
         return True
     plain = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", text)))
     plain = re.sub(r"[\s,.;:()]+$|^[\s,.;:()]+", "", plain).lower()
     if plain in WHOLE_LOCATION_COMPLEMENTS:
         return True
-    return len(re.sub(r"[\s,.;:()]", "", plain)) <= CONNECTOR_MAX_LENGTH
+    return all(
+        word in COMPLEMENT_CONNECTORS or _HOUSE_NUMBER_WORD.fullmatch(word)
+        for word in _COMPLEMENT_WORD.findall(plain)
+    )
 
 
 def discard_location_complements(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop the locations whose free-text complement narrows or qualifies the measure (R-81).
-
-    The complement ("Complément de localisation", début / fin / point) is read in full or the
-    location goes: "sur 2 places", "dans la contre-allée", "dans le couloir de bus", a day
-    and an hour. Published as is, the measure would cover the whole section, every day.
-    Kept: an empty complement, a connector or a "bis" (≤ 8 characters), and the phrases of
-    `WHOLE_LOCATION_COMPLEMENTS`. Counted by the first words of the text. A regulation whose
-    every location goes, goes with them.
-    """
+    """Drop the locations whose free-text complement narrows or qualifies the measure (R-81):
+    published as is, the measure would cover the whole section, every day."""
     says_more = ~pl.all_horizontal(
         pl.col(column)
         .map_elements(_complement_says_nothing, return_dtype=pl.Boolean)
@@ -1369,9 +1239,8 @@ def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:
     """Give every published pedestrian area its walking-pace limit, in the same regulation.
 
     R-71 (Code de la route R. 110-2): only the vehicles serving the area may enter, and at
-    walking pace. The limit is a twin of the ban — same locations, same regulation — so it
-    inherits every filter the ban went through. It applies to every vehicle, with no
-    exemption: the ones let in still drive at walking pace. Same rule as Lyon.
+    walking pace. The limit applies to every vehicle, with no exemption: the ones let in
+    still drive at walking pace.
     """
     bans = df.filter(pl.col("m_type") == LABEL_PEDESTRIAN_AREA)
     if not bans.height:

@@ -1,5 +1,3 @@
-"""Unit tests for the Eudonet client. No network: a fake session answers every call."""
-
 import pytest
 
 from integrations.co_paris.eudonet import client as client_module
@@ -54,8 +52,6 @@ class FakeResponse:
 
 
 class FakeSession:
-    """Answers each POST with the next queued payload, and records every call."""
-
     def __init__(self, payloads):
         self.payloads = list(payloads)
         self.calls = []
@@ -81,9 +77,6 @@ def make_client(payloads, **kwargs) -> EudonetClient:
         session=session,  # type: ignore[arg-type]
         **kwargs,
     )
-
-
-# -- criteria ------------------------------------------------------------------------------
 
 
 def test_criterion_stringifies_field_and_value():
@@ -116,9 +109,6 @@ def test_an_empty_group_is_refused():
         all_of()
 
 
-# -- row shape -----------------------------------------------------------------------------
-
-
 def test_flatten_row_keeps_value_db_value_and_parent_file_id():
     row = {
         "FileId": 12,
@@ -138,9 +128,6 @@ def test_flatten_row_keeps_value_db_value_and_parent_file_id():
     }
 
 
-# -- paging --------------------------------------------------------------------------------
-
-
 def test_search_all_reads_every_page_announced_by_the_metadata():
     client = make_client(
         [
@@ -156,17 +143,7 @@ def test_search_all_reads_every_page_announced_by_the_metadata():
     assert [row["FileId"] for row in rows] == [1, 2, 3, 4, 5]
     bodies = client.session.search_bodies  # type: ignore[attr-defined]
     assert [body["NumPage"] for body in bodies] == [1, 2, 3]
-    # Only the first page pays for the metadata.
     assert [body["ShowMetadata"] for body in bodies] == [True, False, False]
-
-
-def test_count_asks_for_a_single_row_and_returns_the_total():
-    client = make_client([token_response(), rows_response([1], total_rows=4021, total_pages=81)])
-
-    assert client.count(1100, criterion(1108, EQUALS, "7")) == 4021
-    body = client.session.search_bodies[0]  # type: ignore[attr-defined]
-    assert body["RowsPerPage"] == 1
-    assert body["ShowMetadata"] is True
 
 
 def test_search_by_ids_splits_the_identifiers_into_batches():
@@ -195,7 +172,14 @@ def test_search_by_ids_splits_the_identifiers_into_batches():
     assert set(operators) == {IN_LIST}
 
 
-# -- robustness ----------------------------------------------------------------------------
+def test_a_large_batch_still_empty_after_a_second_read_stops_the_extraction(monkeypatch):
+    monkeypatch.setattr(client_module.time, "sleep", lambda seconds: None)
+    client = make_client(
+        [token_response(), rows_response([], total_rows=0, total_pages=1)]
+        + [rows_response([], total_rows=0, total_pages=1)]
+    )
+    with pytest.raises(EudonetError, match="still empty for 20 identifiers"):
+        client.search_by_ids(2700, [2705], 1200, list(range(1, 21)))
 
 
 def test_an_expired_token_is_renewed_and_the_call_replayed():
@@ -236,6 +220,7 @@ def test_an_unknown_error_is_raised_immediately():
 
     with pytest.raises(EudonetError, match="204"):
         client.search_all(2700, [2705], criterion(1108, EQUALS, "7"))
+    assert len(client.session.search_bodies) == 1  # type: ignore[attr-defined]
 
 
 def test_a_failed_authentication_never_echoes_the_credentials():
@@ -252,6 +237,5 @@ def test_the_token_is_renewed_before_it_expires(monkeypatch):
     client = make_client([token_response("2000-01-01T00:00:00"), token_response()])
 
     assert client.token == "a-token"
-    # The stored expiration is in the past: the next read must re-authenticate.
     assert client.token == "a-token"
     assert len(client.session.auth_calls) == 2  # type: ignore[attr-defined]

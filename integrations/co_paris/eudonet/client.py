@@ -4,9 +4,6 @@ Eudonet exposes one generic endpoint per table (`POST /Search/{table}`) with a p
 capped at 50 rows. Everything else — the criteria tree, the catalog values, the parent
 links — is expressed with numeric field identifiers (`descId`), which the API lists
 itself (`GET /MetaInfos/ListTabs/`, `POST /MetaInfos/`, Swagger under `/eudoapidoc/`).
-
-This module only reads: it never calls `/CUD` nor `/Annexes`, whatever the account is
-allowed to do.
 """
 
 import time
@@ -22,28 +19,30 @@ DEFAULT_BASE_URL = "https://eudonet-partage.apps.paris.fr/EudoAPI"
 EQUALS = 0
 GREATER_THAN = 3
 GREATER_OR_EQUAL = 4
-IN_LIST = 8  # value is a ";"-separated list, at least 300 entries accepted
+IN_LIST = 8  # value is a ";"-separated list
 CONTAINS = 9
 IS_EMPTY = 10
 IS_TRUE = 11
 IS_NOT_EMPTY = 17
 
-# `InterOperator`, ignored on the first criterion of a group.
 INTER_AND = 1
 INTER_OR = 2
 
-# `ResultInfos.ErrorNumber` values we know how to recover from.
 EXPIRED_TOKEN_ERRORS = (101, 102, 103)
 QUOTA_ERROR = 300
 
 ROWS_PER_PAGE = 50
 QUOTA_PAUSE_SECONDS = 20
 EMPTY_BATCH_PAUSE_SECONDS = 5
+# `IN_LIST` accepted 300 values in one criterion on 2026-09-08.
+IN_LIST_MAX_VALUES = 300
+# A batch this large that stays empty after a second read is a lost answer, not data: 2.2 %
+# of the in-scope measures had no location on the 2026-09-08 dump, so twenty empty together
+# do not happen. Believed, it would amputate their regulations at the next update.
+EMPTY_BATCH_MAX_BELIEVED = 20
 DEFAULT_ATTEMPTS = 6
 DEFAULT_TIMEOUT = (10, 120)
-# Re-authenticate this long before the token actually expires.
 TOKEN_MARGIN = timedelta(minutes=5)
-# Used when the server does not hand back a parsable expiration date.
 FALLBACK_TOKEN_LIFETIME = timedelta(minutes=20)
 
 # `ExpirationDate` has been seen as ISO 8601; the other two are the formats the rest of the
@@ -76,7 +75,7 @@ def _combine(inter_operator: int, criteria: Sequence[Criterion]) -> Criterion:
     members = []
     for index, member in enumerate(criteria):
         member = dict(member)
-        # The operator of the first member is meaningless and must stay 0.
+        # Eudonet ignores the operator of a group's first member, and wants it at 0.
         member["InterOperator"] = 0 if index == 0 else inter_operator
         members.append(member)
     return {"WhereCustoms": members, "Criteria": None, "InterOperator": 0}
@@ -93,7 +92,7 @@ def any_of(*criteria: Criterion) -> Criterion:
 
 
 def flatten_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Turn one API row into the flat shape the exploration dumps use.
+    """Turn one API row into a flat dict.
 
     `{"FileId": 1, "<descId>": Value, "<descId>_db": DbValue, "<descId>_fid": parent FileId}`
     The `_fid` key only appears on link fields; that is how a measure points at its
@@ -130,8 +129,6 @@ class EudonetClient:
         self._token: str | None = None
         self._token_expires_at: datetime | None = None
 
-    # -- authentication ---------------------------------------------------------------
-
     def authenticate(self) -> str:
         """Fetch a fresh token and remember when it expires."""
         response = self.session.post(
@@ -142,14 +139,16 @@ class EudonetClient:
         payload = response.json()
         infos = payload.get("ResultInfos") or {}
         if not infos.get("Success"):
-            # Never log the credentials, only the server's own message.
             raise EudonetError(f"Eudonet authentication failed: {infos.get('ErrorMessage')}")
 
         data = payload["ResultData"]
-        self._token = data["Token"]
+        token = data.get("Token")
+        if not isinstance(token, str) or not token:
+            raise EudonetError("Eudonet authentication answered without a token")
+        self._token = token
         self._token_expires_at = _parse_expiration(data.get("ExpirationDate"))
         logger.debug(f"Eudonet token obtained, expires at {self._token_expires_at}")
-        return self._token  # type: ignore[return-value]
+        return token
 
     @property
     def token(self) -> str:
@@ -161,8 +160,6 @@ class EudonetClient:
         if self._token is None or expired:
             return self.authenticate()
         return self._token
-
-    # -- searching --------------------------------------------------------------------
 
     def search(
         self,
@@ -213,13 +210,14 @@ class EudonetClient:
         columns: Sequence[int],
         id_field: int,
         ids: Iterable[int],
-        chunk: int = 300,
+        chunk: int = IN_LIST_MAX_VALUES,
         label: str = "",
     ) -> list[dict[str, Any]]:
         """Rows whose `id_field` is one of `ids`, queried in chunks (operator `IN_LIST`).
 
-        Used to pull the locations of a known set of measures: the parent table cannot be
-        filtered from two levels down (error 204), but its link field can.
+        Used to pull the locations of a known set of measures, `id_field` being the parent
+        table's number: a location cannot be filtered on its regulation, two levels up
+        (error 204).
         """
         name = label or f"table {table}"
         identifiers = list(ids)
@@ -243,6 +241,11 @@ class EudonetClient:
                 batch_rows = list(
                     self.iter_search(table, columns, where, label=f"{name} batch {index}")
                 )
+                if not batch_rows and len(batch) >= EMPTY_BATCH_MAX_BELIEVED:
+                    raise EudonetError(
+                        f"Eudonet {name} batch {index}: still empty for {len(batch)} "
+                        "identifiers after a second read; the extraction is not complete"
+                    )
             rows.extend(batch_rows)
         logger.info(
             f"Eudonet {name}: {len(rows)} rows for {len(identifiers)} identifiers "
@@ -250,26 +253,7 @@ class EudonetClient:
         )
         return rows
 
-    def count(self, table: int, where: Criterion) -> int:
-        """How many rows match, without reading them.
-
-        The API refuses an empty column list (error 701), so the table's label field
-        (`table + 1`, e.g. 1101 for 1100) is requested on a single row.
-        """
-        body = {
-            "ShowMetadata": True,
-            "RowsPerPage": 1,
-            "NumPage": 1,
-            "ListCols": [table + 1],
-            "WhereCustom": where,
-        }
-        payload = self._post(f"/Search/{table}", body)
-        return (payload.get("ResultMetaData") or {}).get("TotalRows", 0)
-
-    # -- transport --------------------------------------------------------------------
-
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
-        """POST with the retries the API demands: network, expired token, quota."""
         url = f"{self.base_url}{path}"
         last_error: str = "no attempt was made"
 
@@ -305,7 +289,6 @@ class EudonetClient:
 
 
 def _parse_expiration(value: Any) -> datetime | None:
-    """Read `ExpirationDate` as a naive local datetime, whatever shape it comes in."""
     if not value:
         return datetime.now() + FALLBACK_TOKEN_LIFETIME
 

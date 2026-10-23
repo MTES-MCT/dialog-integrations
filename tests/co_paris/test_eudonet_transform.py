@@ -1,10 +1,3 @@
-"""Offline tests of the Paris / Eudonet transformations (plan §3, §4).
-
-Two sources of data: the frozen fixture, replayed on `2026-09-08` so that the perimeter
-filters are deterministic, and small hand-built frames for the cases the fixture does not
-carry (an unknown catalog value, a start after an end, a permanent without a start date).
-"""
-
 import re
 from datetime import date, datetime
 from pathlib import Path
@@ -51,8 +44,7 @@ from integrations.co_paris.eudonet.vocabulary import (
 
 FIXTURE = Path("tests/co_paris/eudonet.json")
 
-# The day the fixture was extracted. Every date control is relative to it.
-TODAY = date(2026, 9, 8)
+FIXTURE_EXTRACTED_ON = date(2026, 9, 8)
 
 
 @pytest.fixture
@@ -62,12 +54,11 @@ def raw():
 
 @pytest.fixture
 def clean(raw):
-    """Everything this step owns, stopping before the locations of the other module."""
     return (
-        raw.pipe(compute_regulation_fields, TODAY)
+        raw.pipe(compute_regulation_fields, FIXTURE_EXTRACTED_ON)
         .pipe(compute_measure_fields)
         .pipe(compute_vehicle_fields)
-        .pipe(compute_period_fields, TODAY)
+        .pipe(compute_period_fields, FIXTURE_EXTRACTED_ON)
     )
 
 
@@ -81,7 +72,6 @@ def captured_logs():
 
 
 def make_row(**overrides: Any) -> dict[str, Any]:
-    """One raw row, defaulted to a plain permanent parking prohibition."""
     row: dict[str, Any] = dict.fromkeys(RAW_COLUMNS)
     row.update(
         a_file_id=1,
@@ -110,7 +100,7 @@ def make_frame(*rows: dict[str, Any]) -> pl.DataFrame:
     return pl.DataFrame(list(rows), schema=RAW_COLUMNS)
 
 
-def pipeline(*rows: dict[str, Any], today: date = TODAY) -> pl.DataFrame:
+def pipeline(*rows: dict[str, Any], today: date = FIXTURE_EXTRACTED_ON) -> pl.DataFrame:
     return (
         make_frame(*rows)
         .pipe(compute_regulation_fields, today)
@@ -120,16 +110,9 @@ def pipeline(*rows: dict[str, Any], today: date = TODAY) -> pl.DataFrame:
     )
 
 
-# ---------------------------------------------------------------------------
-# Regulation
-# ---------------------------------------------------------------------------
-
-
 def test_the_identifier_is_the_eudonet_number_behind_a_stable_prefix(clean):
-    """`1101` goes through untouched: it is the key the whole synchronisation rests on."""
     identifiers = set(clean.get_column("regulation_identifier"))
     assert "PARIS-EUDO-2021T113851" in identifiers
-    # Pre-2017 numbers have another shape and are not normalised either.
     assert "PARIS-EUDO-1979-16282" in identifiers
     assert all(value.startswith(IDENTIFIER_PREFIX) for value in identifiers)
     # 60 characters is the API limit on `identifier`.
@@ -137,8 +120,16 @@ def test_the_identifier_is_the_eudonet_number_behind_a_stable_prefix(clean):
 
 
 def test_the_identifier_is_stable_across_two_runs(raw):
-    first = compute_regulation_fields(raw, TODAY).get_column("regulation_identifier").to_list()
-    second = compute_regulation_fields(raw, TODAY).get_column("regulation_identifier").to_list()
+    first = (
+        compute_regulation_fields(raw, FIXTURE_EXTRACTED_ON)
+        .get_column("regulation_identifier")
+        .to_list()
+    )
+    second = (
+        compute_regulation_fields(raw, FIXTURE_EXTRACTED_ON)
+        .get_column("regulation_identifier")
+        .to_list()
+    )
     assert first == second
 
 
@@ -152,14 +143,20 @@ def test_the_identifier_is_stable_across_two_runs(raw):
         ("Périmé", False, False),
         ("Abrogé", False, False),
         ("Abrogation en cours", False, False),
+        (None, False, False),
     ],
 )
 def test_only_enforceable_states_survive(state, kept_permanent, kept_temporary):
-    """Same perimeter as the Eudonet query: a permanent only in force, a temporary signed."""
     permanent = make_row(a_state=state)
     temporary = make_row(a_type="Temporaire", a_state=state, a_end_date=date(2026, 12, 1))
-    assert compute_regulation_fields(make_frame(permanent), TODAY).height == kept_permanent
-    assert compute_regulation_fields(make_frame(temporary), TODAY).height == kept_temporary
+    assert (
+        compute_regulation_fields(make_frame(permanent), FIXTURE_EXTRACTED_ON).height
+        == kept_permanent
+    )
+    assert (
+        compute_regulation_fields(make_frame(temporary), FIXTURE_EXTRACTED_ON).height
+        == kept_temporary
+    )
 
 
 def test_the_repealed_and_the_expired_of_the_fixture_are_gone(clean):
@@ -169,7 +166,6 @@ def test_the_repealed_and_the_expired_of_the_fixture_are_gone(clean):
 
 
 def test_a_temporary_regulation_still_to_start_is_kept():
-    """Offline, the end date is the filter — a works order announced for next month stays."""
     row = make_row(
         a_type="Temporaire",
         a_reason="Travaux",
@@ -186,13 +182,13 @@ def test_a_temporary_regulation_that_ended_is_dropped():
         a_start_date=date(2026, 1, 1),
         a_end_date=date(2026, 9, 7),
     )
-    assert compute_regulation_fields(make_frame(row), TODAY).height == 0
+    assert compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON).height == 0
 
 
 def test_a_temporary_regulation_without_an_end_date_is_dropped():
     """Nothing would ever close it (R-37); online the Eudonet filter never returns one."""
     row = make_row(a_type="Temporaire", a_reason="Travaux", a_end_date=None)
-    assert compute_regulation_fields(make_frame(row), TODAY).height == 0
+    assert compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON).height == 0
 
 
 def test_the_title_is_stripped_of_its_html(clean):
@@ -208,7 +204,9 @@ def test_the_title_survives_a_word_paste():
     row = make_row(
         a_title_html="<!-- comment --><p style='x'>Réglementant&nbsp;le&nbsp;stationnement</p>"
     )
-    title = compute_regulation_fields(make_frame(row), TODAY).get_column("regulation_title")[0]
+    title = compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON).get_column(
+        "regulation_title"
+    )[0]
     assert title == "Arrêté n° 2024P10001 — Réglementant le stationnement"
 
 
@@ -216,14 +214,18 @@ def test_the_title_survives_a_word_paste():
 def test_an_empty_title_is_built_rather_than_blocking(raw_title):
     """R-24: a title is never a reason to drop a regulation."""
     row = make_row(a_title_html=raw_title)
-    title = compute_regulation_fields(make_frame(row), TODAY).get_column("regulation_title")[0]
+    title = compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON).get_column(
+        "regulation_title"
+    )[0]
     assert title == "Arrêté n° 2024P10001"
 
 
-@pytest.mark.parametrize("length, truncated", [(20, False), (200, False), (400, True)])
+@pytest.mark.parametrize("length, truncated", [(200, False), (400, True)])
 def test_the_title_is_truncated_to_the_api_limit(length, truncated):
     row = make_row(a_title_html="a" * length)
-    title = compute_regulation_fields(make_frame(row), TODAY).get_column("regulation_title")[0]
+    title = compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON).get_column(
+        "regulation_title"
+    )[0]
     assert len(title) <= TITLE_MAX_LENGTH
     if truncated:
         assert len(title) == TITLE_MAX_LENGTH
@@ -247,16 +249,18 @@ def test_the_title_is_truncated_to_the_api_limit(length, truncated):
 )
 def test_the_subject_comes_from_the_reason(reason, subject, text):
     row = make_row(
-        a_type="Temporaire", a_reason=reason, a_start_date=TODAY, a_end_date=date(2026, 12, 1)
+        a_type="Temporaire",
+        a_reason=reason,
+        a_start_date=FIXTURE_EXTRACTED_ON,
+        a_end_date=date(2026, 12, 1),
     )
-    df = compute_regulation_fields(make_frame(row), TODAY)
+    df = compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON)
     assert df.get_column("regulation_subject")[0] == subject
     assert df.get_column("regulation_other_category_text")[0] == text
 
 
 def test_a_permanent_regulation_says_so_in_its_subject():
-    """Permanent orders carry no reason at all in Eudonet (plan §3)."""
-    df = compute_regulation_fields(make_frame(make_row()), TODAY)
+    df = compute_regulation_fields(make_frame(make_row()), FIXTURE_EXTRACTED_ON)
     assert df.get_column("regulation_subject")[0] == PostApiRegulationsAddBodySubject.OTHER.value
     assert df.get_column("regulation_other_category_text")[0] == PERMANENT_SUBJECT_TEXT
     assert (
@@ -267,28 +271,21 @@ def test_a_permanent_regulation_says_so_in_its_subject():
 
 def test_the_other_category_text_stays_within_a_hundred_characters():
     row = make_row(a_type="Temporaire", a_reason="R" * 200, a_end_date=date(2026, 12, 1))
-    df = compute_regulation_fields(make_frame(row), TODAY)
+    df = compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON)
     assert len(df.get_column("regulation_other_category_text")[0]) == 100
 
 
 def test_no_document_url_is_invented(clean):
-    """The Eudonet attachment link is a one-shot token, not a public URL (plan §6)."""
     assert clean.get_column("regulation_document_url").null_count() == clean.height
 
 
 def test_an_unknown_regulation_type_raises():
     with pytest.raises(EudonetVocabularyError, match="1108"):
-        compute_regulation_fields(make_frame(make_row(a_type="Provisoire")), TODAY)
-
-
-# ---------------------------------------------------------------------------
-# Measure
-# ---------------------------------------------------------------------------
+        compute_regulation_fields(make_frame(make_row(a_type="Provisoire")), FIXTURE_EXTRACTED_ON)
 
 
 @pytest.mark.parametrize("label, expected", sorted(MEASURE_TYPE_BY_LABEL.items()))
 def test_every_label_of_catalog_1202_maps_as_decided(label, expected):
-    """The 32 values of the catalog, one test each: nothing falls through by accident."""
     params = [["véhicule concerné (1)", "à tous les véhicules"]]
     if label == "limitation de vitesse":
         params = [["valeur de la vitesse", "à 30 km/h"]]
@@ -297,7 +294,7 @@ def test_every_label_of_catalog_1202_maps_as_decided(label, expected):
         m_params=params,
         l_direction="dans les deux sens" if label == "sens interdit (ou sens unique)" else None,
     )
-    df = compute_measure_fields(compute_regulation_fields(make_frame(row), TODAY))
+    df = compute_measure_fields(compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON))
     if expected is None:
         assert df.height == 0
     else:
@@ -313,20 +310,21 @@ def test_an_unknown_measure_label_raises():
     """Paris can enrich the catalog: guessing what a new value means is forbidden (Q-05)."""
     row = make_row(m_type="interdiction de klaxonner")
     with pytest.raises(EudonetVocabularyError, match="interdiction de klaxonner"):
-        compute_measure_fields(compute_regulation_fields(make_frame(row), TODAY))
+        compute_measure_fields(compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON))
 
 
 def test_measures_outside_the_model_are_dropped_and_counted(raw, captured_logs):
-    compute_measure_fields(compute_regulation_fields(raw, TODAY))
+    compute_measure_fields(compute_regulation_fields(raw, FIXTURE_EXTRACTED_ON))
     dropped = [line for line in captured_logs if "without a DiaLog equivalent" in line]
     assert len(dropped) == 1
-    # One row per measure: the locations of out-of-model measures are never read.
     assert "'stationnement réservé': 6" in dropped[0]
 
 
 def test_rows_without_any_measure_are_dropped_and_counted(captured_logs):
     df = compute_measure_fields(
-        compute_regulation_fields(make_frame(make_row(m_type=None, m_params=None)), TODAY)
+        compute_regulation_fields(
+            make_frame(make_row(m_type=None, m_params=None)), FIXTURE_EXTRACTED_ON
+        )
     )
     assert df.height == 0
     assert any("rows without any measure" in line for line in captured_logs)
@@ -337,7 +335,7 @@ def test_rows_without_any_measure_are_dropped_and_counted(captured_logs):
 )
 def test_the_speed_is_read_from_its_parameter(value, expected):
     row = make_row(m_type="limitation de vitesse", m_params=[["valeur de la vitesse", value]])
-    df = compute_measure_fields(compute_regulation_fields(make_frame(row), TODAY))
+    df = compute_measure_fields(compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON))
     assert df.get_column("measure_max_speed").to_list() == [expected]
 
 
@@ -345,14 +343,14 @@ def test_the_speed_is_read_from_its_parameter(value, expected):
 def test_a_speed_limitation_without_a_speed_is_dropped(params, captured_logs):
     """R-02: 30 or 50 is a decision, not a default."""
     row = make_row(m_type="limitation de vitesse", m_params=params)
-    df = compute_measure_fields(compute_regulation_fields(make_frame(row), TODAY))
+    df = compute_measure_fields(compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON))
     assert df.height == 0
     assert any("without a readable 'valeur de la vitesse'" in line for line in captured_logs)
 
 
 def test_zone_30_carries_its_speed_in_its_name():
     row = make_row(m_type="zone 30", m_params=None)
-    df = compute_measure_fields(compute_regulation_fields(make_frame(row), TODAY))
+    df = compute_measure_fields(compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON))
     assert df.get_column("measure_type_").to_list() == [MeasureTypeEnum.SPEEDLIMITATION.value]
     assert df.get_column("measure_max_speed").to_list() == [30]
 
@@ -361,7 +359,7 @@ def test_no_speed_leaks_onto_another_measure_type():
     row = make_row(
         m_type="interdiction de stationnement", m_params=[["valeur de la vitesse", "à 30 km/h"]]
     )
-    df = compute_measure_fields(compute_regulation_fields(make_frame(row), TODAY))
+    df = compute_measure_fields(compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON))
     assert df.get_column("measure_max_speed").to_list() == [None]
 
 
@@ -444,13 +442,14 @@ def test_a_pedestrian_area_is_a_ban_with_local_access_and_a_walking_pace_twin():
     assert df.get_column("regulation_identifier").n_unique() == 1
 
 
-@pytest.mark.parametrize("publish, kept", [(True, 2), (False, 1)])
+@pytest.mark.parametrize(
+    "publish, kept", [(True, {"2024P10001", "2024P10002"}), (False, {"2024P10001"})]
+)
 def test_the_police_prefecture_is_published_only_behind_its_constant(publish, kept):
-    """R-73 by analogy: on the staging only, until Paris agrees."""
     df = make_frame(
         make_row(), make_row(a_identifier="2024P10002", a_service="Préfecture de Police")
     )
-    assert discard_police_prefecture(df, publish).height == kept
+    assert set(discard_police_prefecture(df, publish)["a_identifier"]) == kept
 
 
 def test_the_number_behind_another_channel_identifier_is_read_without_normalising():
@@ -471,7 +470,6 @@ def test_the_number_behind_another_channel_identifier_is_read_without_normalisin
 
 
 def test_the_frozen_identifiers_of_the_prefecture_channel_are_readable():
-    """The live read cannot see them (raw geometries, no municipality): frozen in the repo."""
     frozen = load_frozen_elsewhere()
     numbers = numbers_published_elsewhere([(i, o) for i, o in frozen])
     assert len(numbers) == len(frozen) == 100
@@ -490,12 +488,10 @@ def test_a_number_another_channel_published_is_not_created_again():
     )
     kept = discard_published_elsewhere(df, numbers)
     assert set(kept["a_identifier"]) == set(df["a_identifier"]) - {"2024T11570", "2024P12345"}
-    # Unreadable export: nothing is held back.
     assert discard_published_elsewhere(df, None).height == df.height
 
 
 def test_a_refused_location_is_dropped_and_its_regulation_goes_with_the_others():
-    """The blacklist removes the location DiaLog cannot geocode, not the regulation."""
     df = make_frame(
         make_row(l_file_id=10),
         make_row(l_file_id=11),
@@ -536,6 +532,9 @@ def test_a_location_complement_that_narrows_the_measure_drops_the_location(captu
         "et jusqu'à",
         "sur toute la longueur de la voie.",
         "Sur toutes les places.",
+        "& n°13",
+        "56-56bis",
+        "n° 34 à 36 ter",
     ],
 )
 def test_a_location_complement_that_says_nothing_keeps_the_location(complement):
@@ -543,13 +542,16 @@ def test_a_location_complement_that_says_nothing_keeps_the_location(complement):
     assert discard_location_complements(df).height == 1
 
 
+@pytest.mark.parametrize(
+    "complement", ["de 8h à 18h", "8h-18h", "côté pair", "1 place", "du 02/11/2026 au 31/08/2027"]
+)
+def test_a_short_complement_that_narrows_the_measure_drops_the_location(complement):
+    df = make_frame(make_row(l_point_location_complement=complement))
+    assert discard_location_complements(df).height == 0
+
+
 def test_the_versioned_blacklist_is_readable():
     assert isinstance(load_refused_locations(), dict)
-
-
-# ---------------------------------------------------------------------------
-# Vehicles
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("weight_label, weight", [("3,5 T", 3.5), ("7,5 T", 7.5), ("19 T", 19.0)])
@@ -563,12 +565,26 @@ def test_a_tonnage_limit_is_a_no_entry_for_heavy_goods_vehicles(weight_label, we
     assert df.get_column("measure_type_").to_list() == [MeasureTypeEnum.NOENTRY.value]
     assert df.get_column("vehicle_restricted_types").to_list() == [["heavyGoodsVehicle"]]
     assert df.get_column("vehicle_heavyweight_max_weight").to_list() == [weight]
-    # The road stays open to everything else.
     assert df.get_column("vehicle_all_vehicles").to_list() == [False]
 
 
+@pytest.mark.parametrize(
+    "second",
+    ["aux véhicules de plus de 7,5 T", "aux véhicules transportant des matières dangereuses"],
+)
+def test_two_tonnages_on_one_measure_keep_the_stricter(second):
+    row = make_row(
+        m_type="limitation catégorielle",
+        m_params=[
+            ["véhicule concerné (1)", "aux véhicules de plus de 7,5 T"],
+            ["véhicule concerné (2)", "aux véhicules de plus de 19 T"],
+            ["véhicule concerné (3)", second],
+        ],
+    )
+    assert pipeline(row).get_column("vehicle_heavyweight_max_weight").to_list() == [7.5]
+
+
 def test_all_vehicles_alone_produces_only_that_field():
-    """`create_save_vehicle_dto` must not send a set of empty lists next to `allVehicles`."""
     source = DataSourceIntegration.__new__(DataSourceIntegration)
     integration = BaseIntegration.__new__(BaseIntegration)
     measure = pipeline(make_row()).pipe(source.select_regulation_measure_fields).row(0, named=True)
@@ -670,7 +686,6 @@ def test_every_exemption_of_the_catalog_maps_to_its_dialog_type(parameter, value
 
 
 def test_a_multi_valued_exemption_is_split_before_being_mapped():
-    """6 cells of the perimeter join several catalog labels with "; "."""
     row = make_row(
         m_type="circulation interdite",
         m_params=[
@@ -702,7 +717,6 @@ def test_an_unknown_exemption_keeps_its_label_as_free_text():
 
 
 def test_the_penal_qualification_is_not_a_vehicle_restriction():
-    """`caractère aggravant` says the parking is `gênant`, not which vehicles are hit."""
     row = make_row(
         m_type="interdiction de stationnement",
         m_params=[
@@ -716,7 +730,6 @@ def test_the_penal_qualification_is_not_a_vehicle_restriction():
 
 
 def test_a_dropped_time_slot_is_counted(captured_logs):
-    """The pivot has no `timeSlots`: the measure is broadcast for the whole day (phase 2)."""
     row = make_row(
         m_params=[
             ["véhicule concerné (3)", "à tous les véhicules"],
@@ -725,11 +738,6 @@ def test_a_dropped_time_slot_is_counted(captured_logs):
     )
     pipeline(row)
     assert any("Jours et Horaires" in line for line in captured_logs)
-
-
-# ---------------------------------------------------------------------------
-# Periods
-# ---------------------------------------------------------------------------
 
 
 def test_a_temporary_period_spans_whole_local_days():
@@ -795,14 +803,12 @@ def test_a_start_after_its_end_rejects_the_whole_regulation(captured_logs):
         l_file_id=1,
     )
     impossible = {**valid, "a_start_date": date(2027, 1, 15), "m_file_id": 2, "l_file_id": 2}
-    # On its own the first row would go through.
     assert pipeline(valid).height == 1
     assert pipeline(valid, impossible).height == 0
     assert any("R-38 date controls" in line for line in captured_logs)
 
 
 def test_a_typo_on_the_year_rejects_the_regulation_the_state_still_calls_in_force(clean):
-    """`2019T15796` runs to 2109 and Eudonet still says "En vigueur" (plan §4.3)."""
     assert "2019T15796" not in set(clean.get_column("a_identifier"))
 
 
@@ -837,7 +843,6 @@ def test_a_start_year_beyond_next_year_is_rejected():
 
 
 def test_a_temporary_regulation_longer_than_a_year_is_kept_but_counted(captured_logs):
-    """Long works sites (tramway, RATP), not mistakes — 280 of them on the perimeter."""
     row = make_row(
         a_type="Temporaire",
         a_reason="Travaux",
@@ -848,13 +853,7 @@ def test_a_temporary_regulation_longer_than_a_year_is_kept_but_counted(captured_
     assert any("last more than a year" in line for line in captured_logs)
 
 
-# ---------------------------------------------------------------------------
-# Contract
-# ---------------------------------------------------------------------------
-
-
 def test_every_produced_column_survives_the_pivot(clean):
-    """`select_regulation_measure_fields` drops any column the pivot does not declare."""
     contract = set(RegulationMeasure.__annotations__)
     produced = {
         column
@@ -892,14 +891,10 @@ def test_the_pivot_keys_this_step_owns_are_all_produced(clean):
 
 
 def test_the_funnel_of_the_fixture_is_the_one_we_expect(raw, clean):
-    """Row by row, what the fixture loses and why. Update the numbers, never the rule."""
-    # 251 locations, but out-of-model measures take one row each, locations unread
     assert raw.height == 79
-    after_state = compute_regulation_fields(raw, TODAY)
+    after_state = compute_regulation_fields(raw, FIXTURE_EXTRACTED_ON)
     assert after_state.height == 76  # 1 Abrogé + 1 Non signé + 1 Périmé
     after_type = compute_measure_fields(after_state)
-    # 13 measures out of model (3 one-ways and 1 dead end among them), 2 speedless; the
-    # pedestrian area is in the model since 2026-09-23 (R-71)
     assert after_type.height == 61
     assert clean.height == 58  # 2025T15489 and 2026T17998, R-38 date controls
     assert dict(
