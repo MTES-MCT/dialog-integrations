@@ -23,6 +23,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
     SaveLocationDTO,
     SaveMeasureDTO,
+    SaveNamedStreetDTO,
     SaveNumberedRoadDTO,
     SavePeriodDTO,
     SaveRawGeoJSONDTO,
@@ -222,6 +223,11 @@ def build_location(measure: RegulationMeasure) -> SaveLocationDTO:
         if road_type == RoadTypeEnum.NATIONALROAD:
             return SaveLocationDTO(road_type=road_type, national_road=numbered)
         return SaveLocationDTO(road_type=road_type, departmental_road=numbered)
+    if road_type == RoadTypeEnum.LANE:
+        # No geometry is sent: DiaLog geocodes the street and its bounds.
+        return SaveLocationDTO(
+            road_type=road_type, named_street=SaveNamedStreetDTO(**location_fields)
+        )
     raise Exception(f"Location saving not implemented for  RoadType {road_type.value}")
 
 

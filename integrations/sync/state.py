@@ -113,6 +113,14 @@ class SnapshotStore:
         logger.info(f"Wrote {len(payload['regulations'])} digest(s) to {self.path}")
 
 
+def _without_empty_lists(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {k: _without_empty_lists(v) for k, v in value.items() if v != []}
+    if isinstance(value, list):
+        return [_without_empty_lists(v) for v in value]
+    return value
+
+
 def compute_regulation_digest(regulation: PostApiRegulationsAddBody) -> Digest:
     """Reduce a regulation payload to what a change must be detected on."""
     payload = regulation.to_dict()
@@ -122,9 +130,19 @@ def compute_regulation_digest(regulation: PostApiRegulationsAddBody) -> Digest:
 
 
 def fingerprint(digest: Digest) -> str:
-    """Stable hash of a digest: canonical JSON, sorted keys."""
+    """Stable hash of a digest: canonical JSON, sorted keys, empty lists dropped.
+
+    An empty list says the same thing as an absent key (`timeSlots: []` is "around the
+    clock"). Dropping them here, on the stored digest as well as on today's, keeps a
+    snapshot built before a key existed — or before it was left out — from reading as a
+    change of every regulation.
+    """
     canonical = json.dumps(
-        digest, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
+        _without_empty_lists(digest),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

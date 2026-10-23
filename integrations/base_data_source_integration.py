@@ -1,4 +1,4 @@
-from typing import TypedDict, get_type_hints
+from typing import Literal, TypedDict, get_type_hints
 
 import pandera.polars as pa
 import polars as pl
@@ -33,6 +33,15 @@ class RegulationMeasure(TypedDict):
     location_to_abscissa: int | None
     location_to_side: str | None
     location_direction: str | None
+    location_city_code: str | None
+    location_city_label: str | None
+    location_road_name: str | None
+    location_from_point_type: Literal["houseNumber", "intersection"] | None
+    location_from_house_number: str | None
+    location_from_road_name: str | None
+    location_to_point_type: Literal["houseNumber", "intersection"] | None
+    location_to_house_number: str | None
+    location_to_road_name: str | None
     # Regulation fields (prefixed with regulation_)
     regulation_identifier: str
     regulation_category: str

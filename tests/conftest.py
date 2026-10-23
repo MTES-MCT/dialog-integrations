@@ -23,3 +23,6 @@ def no_network(monkeypatch):
         raise RuntimeError("network access in a test")
 
     monkeypatch.setattr(socket.socket, "connect", refuse)
+    # A name lookup is network too, and fails on its own offline: a test whose code
+    # swallows that failure would pass by accident.
+    monkeypatch.setattr(socket, "getaddrinfo", refuse)

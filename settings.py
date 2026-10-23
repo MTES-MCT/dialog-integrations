@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Organization = Enum(
@@ -29,6 +30,11 @@ class Settings(BaseSettings):
     base_url: str | None = None
     client_id: str | None = None
     client_secret: str | None = None
+    # A source's own credentials: the alias reads them without the DIALOG_ prefix.
+    eudonet_paris_credentials: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("EUDONET_PARIS_CREDENTIALS", "eudonet_paris_credentials"),
+    )
 
     def __init__(self, organization: str, env: str = "dev", **data: Any):
         candidates = []
@@ -64,6 +70,7 @@ class OrganizationSettings:
     base_url: str | None = None
     client_id: str | None = None
     client_secret: str | None = None
+    eudonet_paris_credentials: str | None = None
 
     # Every organization must carry these to talk to the DiaLog API.
     REQUIRED_VALUES = ("base_url", "client_id", "client_secret")
@@ -78,6 +85,7 @@ class OrganizationSettings:
         self.base_url = settings.base_url
         self.client_id = settings.client_id
         self.client_secret = settings.client_secret
+        self.eudonet_paris_credentials = getattr(settings, "eudonet_paris_credentials", None)
 
         missing_values = [name for name in self.REQUIRED_VALUES if getattr(self, name) is None]
         if missing_values:

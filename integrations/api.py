@@ -35,9 +35,25 @@ from api.dia_log_client.api.private.put_api_regulations_publish import (
 from api.dia_log_client.api.private.put_api_regulations_update import (
     sync_detailed as update_regulation,
 )
+from api.dia_log_client.api.public.get_api_regulations_json import (
+    sync_detailed as get_public_regulations,
+)
 from api.dia_log_client.errors import UnexpectedStatus
-from api.dia_log_client.models import PostApiRegulationsAddBody, PutApiRegulationsUpdateBody
+from api.dia_log_client.models import (
+    GetApiRegulationsJsonStatus,
+    PostApiRegulationsAddBody,
+    PutApiRegulationsUpdateBody,
+)
 from settings import OrganizationSettings
+
+
+class PublicExportUnreadable(Exception):
+    """A page of the public export answered something else than 200."""
+
+
+# The public export serves at most 100 regulations a page, whatever `pageSize` asks
+# (measured on the staging, 2026-10-17).
+PUBLIC_PAGE_SIZE = 100
 
 # The router answers 504 after 60 s, so a read past that means a silent server: without a
 # limit the run waits for the job to be killed.
@@ -137,6 +153,40 @@ class DialogApi:
         if resp.parsed is None or not hasattr(resp.parsed, "identifiers"):
             raise Exception("Failed to fetch identifiers")
         return list(resp.parsed.identifiers)  # type: ignore
+
+    def public_identifiers(self, insee_code: str) -> list[tuple[str, str]]:
+        """(identifier, organization name) of every regulation the public export lists for
+        one municipality, whatever its validity and whichever organization published it.
+        Raises when a page is unreadable.
+
+        `/api/organization/identifiers` only sees our own organization; this is how another
+        organization's regulations are read. Filtered by municipality: the whole export
+        takes ~37 s a page (2026-10-17), one municipality well under a second.
+        """
+        found: list[tuple[str, str]] = []
+        page = 1
+        while True:
+            resp = get_public_regulations(
+                client=self.client,
+                status=GetApiRegulationsJsonStatus.ALL,
+                insee_code=insee_code,
+                page=page,
+                page_size=PUBLIC_PAGE_SIZE,
+            )
+            if resp.status_code != 200:
+                raise PublicExportUnreadable(
+                    f"Failed to read the public export of {insee_code}, page {page}: "
+                    f"got status {resp.status_code}"
+                )
+            body = json.loads(resp.content)
+            regulations = body.get("regulations") or []
+            found.extend(
+                (regulation["identifier"], regulation["organization"]["name"])
+                for regulation in regulations
+            )
+            if not regulations or page >= body["metadata"]["lastPage"]:
+                return found
+            page += 1
 
     def get(self, identifier: str) -> dict | None:
         """GET a regulation as the API serializes it; None when it cannot be read."""
