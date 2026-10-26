@@ -59,12 +59,9 @@ CITY_CODE_BY_DISTRICT = {
     **{f"{n}ème arrondissement": f"751{n:02d}" for n in range(2, 21)},
 }
 
-# `2711` "Sens" values that limit a location to one direction. R-32 freeze: no
-# one-direction measure is published until DiaLog carries the side of the road, so these
-# locations are dropped rather than widened to both directions. Every other value, the two
-# "circulation générale" ones included (relative to the traffic, not to the segment),
-# says nothing about the segment: BOTH.
-ONE_DIRECTION_LABELS = ("du début vers la fin du segment", "de la fin vers le début du segment")
+# `2711` "Sens": any value but "both ways", the "circulation générale" ones included, drops
+# the location rather than widen it to both directions (R-32 freeze; Q-60, 2026-10-26).
+BOTH_DIRECTIONS_LABEL = "dans les deux sens"
 # `2712` "côté" values that limit a location to one side of the street, which the DiaLog
 # write API cannot carry (2026-10-23): dropped rather than widened to both sides.
 ONE_SIDE_LABELS = ("côté pair", "côté impair")
@@ -176,14 +173,13 @@ def parse_bound(
     # Sent as a crossing road, DiaLog answers 400 and the whole regulation is refused
     # (staging run of 2026-09-16, 175 of the 506 refused regulations). Read it like the
     # address label: a leading number is a house number on the road itself.
-    for label in (road_name, address_label):
-        if not label:
-            continue
-        match = _LEADING_NUMBER.match(label)
-        if match:
-            return Bound(POINT_TYPE_HOUSE_NUMBER, house_number=match.group(1))
-        return Bound(POINT_TYPE_INTERSECTION, road_name=official_street_name(label.strip()))
-    return None
+    label = road_name or address_label
+    if not label:
+        return None
+    match = _LEADING_NUMBER.match(label)
+    if match:
+        return Bound(POINT_TYPE_HOUSE_NUMBER, house_number=match.group(1))
+    return Bound(POINT_TYPE_INTERSECTION, road_name=official_street_name(label.strip()))
 
 
 def city_codes(district: str | None) -> list[str]:
@@ -287,58 +283,21 @@ def resolve_location(row: dict) -> dict:
     road_name = official_street_name((row["l_road_name"] or "").strip())
     if not road_name:
         return {**fields, "location_rejection": "no road name"}
-    if row["l_direction"] in ONE_DIRECTION_LABELS:
+    if row["l_direction"] not in (None, BOTH_DIRECTIONS_LABEL):
         return {**fields, "location_rejection": "one direction only (R-32 freeze)"}
     if row["l_side"] in ONE_SIDE_LABELS:
         return {**fields, "location_rejection": "one side of the street only"}
 
-    scope = row["l_scope"]
-    if scope == SCOPE_POINT:
-        numbers = parse_house_number_range(row["l_point_house_number"])
-        if numbers is None:
-            # The 2017 migration put the number in the address label only.
-            leading = _LEADING_NUMBER.match(row["l_point_address_label"] or "")
-            if leading:
-                number = leading.group(1)
-                numbers = (number, number)
-        if numbers is None:
-            return {**fields, "location_rejection": "point without house number"}
-        if names_another_street(row["l_point_address_label"], road_name):
-            return {**fields, "location_rejection": "bound numbered on another street"}
-        start = Bound(POINT_TYPE_HOUSE_NUMBER, house_number=numbers[0])
-        end = Bound(POINT_TYPE_HOUSE_NUMBER, house_number=numbers[1])
-    elif scope == SCOPE_SECTION:
-        start = parse_bound(
-            row["l_from_house_number"], row["l_from_road_name"], row["l_from_address_label"]
-        )
-        end = parse_bound(
-            row["l_to_house_number"], row["l_to_road_name"], row["l_to_address_label"]
-        )
-        if start is None and end is None:
-            return {**fields, "location_rejection": "section without bounds"}
-        if start is None or end is None:
-            return {**fields, "location_rejection": "section with a single bound"}
-        bound_labels = (
-            "l_from_address_label",
-            "l_from_road_name",
-            "l_to_address_label",
-            "l_to_road_name",
-        )
-        if any(names_another_street(row[column], road_name) for column in bound_labels):
-            return {**fields, "location_rejection": "bound numbered on another street"}
-    elif scope == SCOPE_WHOLE_STREET:
-        start = end = None
-    elif scope in (SCOPE_ZONE, SCOPE_AXIS):
-        return {**fields, "location_rejection": f"scope {scope!r} has no geometry"}
-    else:
-        return {**fields, "location_rejection": f"unknown scope {scope!r}"}
-
-    numbers = [
+    bounds = _bounds(row, road_name)
+    if isinstance(bounds, str):
+        return {**fields, "location_rejection": bounds}
+    start, end = bounds
+    bound_numbers = [
         bound.house_number
         for bound in (start, end)
         if bound is not None and bound.house_number is not None
     ]
-    code, district_source = resolve_city_code(row["l_district"], road_name, numbers)
+    code, district_source = resolve_city_code(row["l_district"], road_name, bound_numbers)
     if code is None:
         return {**fields, "location_rejection": "no arrondissement"}
 
@@ -360,6 +319,50 @@ def resolve_location(row: dict) -> dict:
             location_to_road_name=end.road_name,
         )
     return fields
+
+
+def _bounds(row: dict, road_name: str) -> tuple[Bound | None, Bound | None] | str:
+    """The two bounds of the location by its scope (none for the whole street), or why it
+    has none we can send."""
+    scope = row["l_scope"]
+    if scope == SCOPE_WHOLE_STREET:
+        return None, None
+    if scope in (SCOPE_ZONE, SCOPE_AXIS):
+        return f"scope {scope!r} has no geometry"
+    if scope == SCOPE_POINT:
+        point_numbers = parse_house_number_range(row["l_point_house_number"])
+        if point_numbers is None:
+            # The 2017 migration put the number in the address label only.
+            leading = _LEADING_NUMBER.match(row["l_point_address_label"] or "")
+            if leading:
+                point_numbers = (leading.group(1), leading.group(1))
+        if point_numbers is None:
+            return "point without house number"
+        if names_another_street(row["l_point_address_label"], road_name):
+            return "bound numbered on another street"
+        return (
+            Bound(POINT_TYPE_HOUSE_NUMBER, house_number=point_numbers[0]),
+            Bound(POINT_TYPE_HOUSE_NUMBER, house_number=point_numbers[1]),
+        )
+    if scope != SCOPE_SECTION:
+        return f"unknown scope {scope!r}"
+    start = parse_bound(
+        row["l_from_house_number"], row["l_from_road_name"], row["l_from_address_label"]
+    )
+    end = parse_bound(row["l_to_house_number"], row["l_to_road_name"], row["l_to_address_label"])
+    if start is None and end is None:
+        return "section without bounds"
+    if start is None or end is None:
+        return "section with a single bound"
+    bound_labels = (
+        "l_from_address_label",
+        "l_from_road_name",
+        "l_to_address_label",
+        "l_to_road_name",
+    )
+    if any(names_another_street(row[column], road_name) for column in bound_labels):
+        return "bound numbered on another street"
+    return start, end
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:

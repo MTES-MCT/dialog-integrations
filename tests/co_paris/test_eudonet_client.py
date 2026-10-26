@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 from integrations.co_paris.eudonet import client as client_module
 from integrations.co_paris.eudonet.client import (
@@ -58,7 +59,10 @@ class FakeSession:
 
     def post(self, url, json=None, headers=None, timeout=None):
         self.calls.append({"url": url, "json": json, "headers": headers})
-        return FakeResponse(self.payloads.pop(0))
+        payload = self.payloads.pop(0)
+        if isinstance(payload, Exception):
+            raise payload
+        return FakeResponse(payload)
 
     @property
     def search_bodies(self):
@@ -146,6 +150,17 @@ def test_search_all_reads_every_page_announced_by_the_metadata():
     assert [body["ShowMetadata"] for body in bodies] == [True, False, False]
 
 
+@pytest.mark.parametrize("second_page", [[3], [2, 3]], ids=["a row lost", "a row read twice"])
+def test_a_page_that_does_not_add_up_stops_the_extraction(second_page):
+    """A lost page would read as 50 acts gone from the source, closed the same night."""
+    client = make_client(
+        [token_response(), rows_response([1, 2], total_rows=4, total_pages=2)]
+        + [rows_response(second_page)]
+    )
+    with pytest.raises(EudonetError, match="not complete"):
+        client.search_all(1100, [1101], criterion(1108, EQUALS, "7"))
+
+
 def test_search_by_ids_splits_the_identifiers_into_batches():
     ids = list(range(1, 8))
     client = make_client(
@@ -196,6 +211,23 @@ def test_an_expired_token_is_renewed_and_the_call_replayed():
 
     assert [row["FileId"] for row in rows] == [7]
     assert len(client.session.auth_calls) == 2  # type: ignore[attr-defined]
+
+
+def test_a_cut_during_the_renewal_of_the_token_is_retried(monkeypatch):
+    monkeypatch.setattr(client_module.time, "sleep", lambda seconds: None)
+    client = make_client(
+        [
+            token_response(),
+            error_response(101),
+            requests.ConnectionError("cut"),
+            token_response(),
+            rows_response([7], total_rows=1, total_pages=1),
+        ]
+    )
+
+    rows = client.search_all(1100, [1101], criterion(1108, EQUALS, "7"))
+
+    assert [row["FileId"] for row in rows] == [7]
 
 
 def test_the_quota_error_pauses_then_retries(monkeypatch):

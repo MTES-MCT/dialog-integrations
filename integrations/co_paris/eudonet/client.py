@@ -8,7 +8,7 @@ itself (`GET /MetaInfos/ListTabs/`, `POST /MetaInfos/`, Swagger under `/eudoapid
 
 import time
 from datetime import datetime, timedelta
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Iterable, Sequence
 
 import requests
 from loguru import logger
@@ -31,10 +31,10 @@ QUOTA_PAUSE_SECONDS = 20
 EMPTY_BATCH_PAUSE_SECONDS = 5
 # `IN_LIST` accepted 300 values in one criterion on 2026-09-08.
 IN_LIST_MAX_VALUES = 300
-# A batch this large that stays empty after a second read is a lost answer, not data: 2.2 %
-# of the in-scope measures had no location on the 2026-09-08 dump, so twenty empty together
-# do not happen. Believed, it would amputate their regulations at the next update.
-EMPTY_BATCH_MAX_BELIEVED = 20
+# From this size, a batch that stays empty after a second read is a lost answer, not data:
+# 2.2 % of the in-scope measures had no location on the 2026-09-08 dump, so twenty empty
+# together do not happen. Believed, it would amputate their regulations at the next update.
+EMPTY_BATCH_DISBELIEVED_FROM = 20
 DEFAULT_ATTEMPTS = 6
 DEFAULT_TIMEOUT = (10, 120)
 TOKEN_MARGIN = timedelta(minutes=5)
@@ -110,16 +110,10 @@ class EudonetClient:
         self,
         credentials: dict[str, Any],
         base_url: str = DEFAULT_BASE_URL,
-        rows_per_page: int = ROWS_PER_PAGE,
-        attempts: int = DEFAULT_ATTEMPTS,
-        timeout: tuple[int, int] = DEFAULT_TIMEOUT,
         session: requests.Session | None = None,
     ):
         self.credentials = credentials
         self.base_url = base_url.rstrip("/")
-        self.rows_per_page = rows_per_page
-        self.attempts = attempts
-        self.timeout = timeout
         self.session = session or requests.Session()
         self._token: str | None = None
         self._token_expires_at: datetime | None = None
@@ -129,7 +123,7 @@ class EudonetClient:
         response = self.session.post(
             f"{self.base_url}/Authenticate/Token",
             json=self.credentials,
-            timeout=self.timeout,
+            timeout=DEFAULT_TIMEOUT,
         )
         payload = response.json()
         infos = payload.get("ResultInfos") or {}
@@ -156,6 +150,10 @@ class EudonetClient:
             return self.authenticate()
         return self._token
 
+    def _forget_token(self) -> None:
+        """The next read of `token` authenticates again, inside the retried block."""
+        self._token = None
+
     def search(
         self,
         table: int,
@@ -167,7 +165,7 @@ class EudonetClient:
         """One page of results, as the raw JSON payload."""
         body = {
             "ShowMetadata": with_metadata,
-            "RowsPerPage": self.rows_per_page,
+            "RowsPerPage": ROWS_PER_PAGE,
             "NumPage": page,
             "ListCols": list(columns),
             "WhereCustom": where,
@@ -178,12 +176,6 @@ class EudonetClient:
         self, table: int, columns: Sequence[int], where: Criterion, label: str = ""
     ) -> list[dict[str, Any]]:
         """Every matching row of `table`, flattened. Logs the volume before paging."""
-        return list(self.iter_search(table, columns, where, label=label))
-
-    def iter_search(
-        self, table: int, columns: Sequence[int], where: Criterion, label: str = ""
-    ) -> Iterator[dict[str, Any]]:
-        """Same as `search_all`, one row at a time."""
         name = label or f"table {table}"
         first = self.search(table, columns, where, page=1, with_metadata=True)
         metadata = first.get("ResultMetaData") or {}
@@ -191,13 +183,21 @@ class EudonetClient:
         total_pages = metadata.get("TotalPages", 1)
         logger.info(f"Eudonet {name}: {total_rows} rows over {total_pages} pages")
 
-        for row in first["ResultData"]["Rows"]:
-            yield flatten_row(row)
+        # A lost or shifted page would read as acts gone from the source, closed the same
+        # night: the rows read are checked against the count announced on page 1.
+        pages = [first["ResultData"]["Rows"]]
         for page in range(2, total_pages + 1):
-            payload = self.search(table, columns, where, page=page)
-            for row in payload["ResultData"]["Rows"]:
-                yield flatten_row(row)
+            pages.append(self.search(table, columns, where, page=page)["ResultData"]["Rows"])
+        rows = [flatten_row(row) for page_rows in pages for row in page_rows]
+        seen = {row.get("FileId") for row in rows}
+        if len(rows) != total_rows or len(seen) != len(rows):
+            raise EudonetError(
+                f"Eudonet {name}: {len(rows)} rows read ({len(seen)} distinct) for "
+                f"{total_rows} announced over {total_pages} pages; the extraction is not "
+                "complete"
+            )
         logger.debug(f"Eudonet {name}: {total_pages} pages read")
+        return rows
 
     def search_by_ids(
         self,
@@ -221,9 +221,7 @@ class EudonetClient:
         for index, start in enumerate(starts, start=1):
             batch = identifiers[start : start + chunk]
             where = criterion(id_field, IN_LIST, ";".join(str(value) for value in batch))
-            batch_rows = list(
-                self.iter_search(table, columns, where, label=f"{name} batch {index}")
-            )
+            batch_rows = self.search_all(table, columns, where, label=f"{name} batch {index}")
             if not batch_rows:
                 # Seen live on 2026-09-08: a batch of 50 measures answered `TotalRows = 0`
                 # once, then 64 rows on every replay. An empty batch is plausible but rare,
@@ -233,10 +231,8 @@ class EudonetClient:
                     f"identifiers, reading it again in {EMPTY_BATCH_PAUSE_SECONDS} s"
                 )
                 time.sleep(EMPTY_BATCH_PAUSE_SECONDS)
-                batch_rows = list(
-                    self.iter_search(table, columns, where, label=f"{name} batch {index}")
-                )
-                if not batch_rows and len(batch) >= EMPTY_BATCH_MAX_BELIEVED:
+                batch_rows = self.search_all(table, columns, where, label=f"{name} batch {index}")
+                if not batch_rows and len(batch) >= EMPTY_BATCH_DISBELIEVED_FROM:
                     raise EudonetError(
                         f"Eudonet {name} batch {index}: still empty for {len(batch)} "
                         "identifiers after a second read; the extraction is not complete"
@@ -252,10 +248,10 @@ class EudonetClient:
         url = f"{self.base_url}{path}"
         last_error: str = "no attempt was made"
 
-        for attempt in range(1, self.attempts + 1):
+        for attempt in range(1, DEFAULT_ATTEMPTS + 1):
             try:
                 response = self.session.post(
-                    url, headers={"x-auth": self.token}, json=body, timeout=self.timeout
+                    url, headers={"x-auth": self.token}, json=body, timeout=DEFAULT_TIMEOUT
                 )
                 payload = response.json()
             except (requests.RequestException, ValueError) as error:
@@ -272,7 +268,7 @@ class EudonetClient:
             last_error = f"error {number}: {infos.get('ErrorMessage')}"
             if number in EXPIRED_TOKEN_ERRORS:
                 logger.info(f"Eudonet token rejected ({number}), re-authenticating")
-                self.authenticate()
+                self._forget_token()
                 continue
             if number == QUOTA_ERROR:
                 logger.warning(f"Eudonet quota reached, pausing {QUOTA_PAUSE_SECONDS}s")
@@ -280,7 +276,9 @@ class EudonetClient:
                 continue
             raise EudonetError(f"Eudonet {path} rejected the request - {last_error}")
 
-        raise EudonetError(f"Eudonet {path} failed after {self.attempts} attempts - {last_error}")
+        raise EudonetError(
+            f"Eudonet {path} failed after {DEFAULT_ATTEMPTS} attempts - {last_error}"
+        )
 
 
 def _parse_expiration(value: Any) -> datetime | None:

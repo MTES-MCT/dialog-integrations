@@ -4,16 +4,14 @@ import httpx
 import pytest
 
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
-from integrations.api import DialogApi
+from integrations.api import DialogApi, PublicExportUnreadable
 from integrations.base_integration import BaseIntegration
 from integrations.co_paris.eudonet import data_source_integration
 from integrations.co_paris.eudonet.data_source_integration import (
-    FIXTURE_ENV_VAR,
     DataSourceIntegration,
 )
 from settings import OrganizationSettings
-
-FIXTURE = "tests/co_paris/eudonet.json"
+from tests.co_paris.eudonet_fixture import read_eudonet_from_the_fixture
 
 
 class OfflineSettings:
@@ -29,7 +27,7 @@ def captured_regulations():
 
 @pytest.fixture
 def integration(monkeypatch, captured_regulations):
-    monkeypatch.setenv(FIXTURE_ENV_VAR, FIXTURE)
+    read_eudonet_from_the_fixture(monkeypatch)
     settings = OrganizationSettings(OfflineSettings(), "co_paris")  # type: ignore[arg-type]
     integration = BaseIntegration.from_settings(settings)
 
@@ -62,6 +60,19 @@ def test_a_municipality_the_export_cannot_serve_falls_back_on_its_last_read(monk
     assert "2024T11570" in _eudonet_source().fetch_numbers_published_elsewhere()
     monkeypatch.setattr(DialogApi, "public_identifiers", second_night)
     assert "2024T11570" in _eudonet_source().fetch_numbers_published_elsewhere()
+
+
+def test_a_municipality_never_read_stops_the_run_rather_than_create_duplicates(monkeypatch):
+    """Read as empty, it would let the night create what another channel holds (R-80)."""
+
+    def timeout(self, insee_code):
+        if insee_code == "75104":
+            raise httpx.ReadTimeout("no answer")
+        return []
+
+    monkeypatch.setattr(DialogApi, "public_identifiers", timeout)
+    with pytest.raises(PublicExportUnreadable, match="75104"):
+        _eudonet_source().fetch_numbers_published_elsewhere()
 
 
 def test_an_export_of_another_shape_stops_the_run(monkeypatch):
