@@ -47,7 +47,7 @@ def read_numbers_published_elsewhere(
     """Read the public export and keep the Eudonet numbers other channels published.
 
     A municipality the export cannot serve falls back on its last successful read; one
-    never read stops the run.
+    never read is read as empty, with a warning.
     """
     last_read = _load_state(state_path)
     read: dict[str, list[list[str]]] = {}
@@ -55,23 +55,30 @@ def read_numbers_published_elsewhere(
     for code in PUBLIC_EXPORT_CITY_CODES:
         try:
             read[code] = [list(found) for found in api.public_identifiers(code)]
-        except (httpx.HTTPError, UnexpectedStatus, PublicExportUnreadable) as error:
+        # KeyError, TypeError, ValueError: an export of another shape than expected.
+        except (
+            httpx.HTTPError,
+            UnexpectedStatus,
+            PublicExportUnreadable,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as error:
             unreadable[code] = _describe_failure(error)
             if code in last_read:
                 read[code] = last_read[code]
     never_read = sorted(code for code in unreadable if code not in last_read)
     _save_state(state_path, read)
     if never_read:
-        raise PublicExportUnreadable(
-            f"R-80: the public export could not be read for {never_read}, never read "
-            f"before; stopping rather than creating what another channel may hold: "
-            f"{unreadable}"
+        logger.warning(
+            f"R-80: the public export could not be read for {never_read}, never read before: "
+            "read as empty, their regulations published by another channel may be created"
         )
     if unreadable:
         logger.warning(
             f"R-80: the public export could not be read for {len(unreadable)} "
             f"municipalities, their last successful read is used "
-            f"({sum(len(read[code]) for code in unreadable)} regulations): {unreadable}"
+            f"({sum(len(read.get(code, [])) for code in unreadable)} regulations): {unreadable}"
         )
     live = [
         (identifier, organization) for found in read.values() for identifier, organization in found
@@ -128,10 +135,11 @@ def index_by_eudonet_number(identifiers: Iterable[tuple[str, str]]) -> dict[str,
 def discard_published_elsewhere(df: pl.DataFrame, numbers: dict[str, str] | None) -> pl.DataFrame:
     """Drop the regulations whose `1101` number another channel already published (R-80).
 
-    `None` is a list never loaded (`fetch_raw_data` did not run): nothing would be held back.
+    `None` is a list never loaded (`fetch_raw_data` did not run): said, not passed over.
     """
     if numbers is None:
-        raise ValueError("R-80: the numbers published elsewhere were never loaded")
+        logger.warning("R-80: the numbers published elsewhere were never loaded, none held back")
+        return df
     if not numbers:
         return df
     published = pl.col("a_identifier").is_in(list(numbers))

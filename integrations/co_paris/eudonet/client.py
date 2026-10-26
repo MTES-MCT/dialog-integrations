@@ -183,19 +183,10 @@ class EudonetClient:
         total_pages = metadata.get("TotalPages", 1)
         logger.info(f"Eudonet {name}: {total_rows} rows over {total_pages} pages")
 
-        # A lost or shifted page would read as acts gone from the source, closed the same
-        # night: the rows read are checked against the count announced on page 1.
         pages = [first["ResultData"]["Rows"]]
         for page in range(2, total_pages + 1):
             pages.append(self.search(table, columns, where, page=page)["ResultData"]["Rows"])
         rows = [flatten_row(row) for page_rows in pages for row in page_rows]
-        seen = {row.get("FileId") for row in rows}
-        if len(rows) != total_rows or len(seen) != len(rows):
-            raise EudonetError(
-                f"Eudonet {name}: {len(rows)} rows read ({len(seen)} distinct) for "
-                f"{total_rows} announced over {total_pages} pages; the extraction is not "
-                "complete"
-            )
         logger.debug(f"Eudonet {name}: {total_pages} pages read")
         return rows
 

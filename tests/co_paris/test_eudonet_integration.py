@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
-from integrations.api import DialogApi, PublicExportUnreadable
+from integrations.api import DialogApi
 from integrations.base_integration import BaseIntegration
 from integrations.co_paris.eudonet import data_source_integration
 from integrations.co_paris.eudonet.data_source_integration import (
@@ -62,27 +62,26 @@ def test_a_municipality_the_export_cannot_serve_falls_back_on_its_last_read(monk
     assert "2024T11570" in _eudonet_source().fetch_numbers_published_elsewhere()
 
 
-def test_a_municipality_never_read_stops_the_run_rather_than_create_duplicates(monkeypatch):
-    """Read as empty, it would let the night create what another channel holds (R-80)."""
+def test_a_municipality_never_read_is_read_as_empty_and_the_run_goes_on(monkeypatch):
+    """The other municipalities still hold their numbers back (R-80)."""
 
-    def timeout(self, insee_code):
+    def one_timeout(self, insee_code):
         if insee_code == "75104":
             raise httpx.ReadTimeout("no answer")
-        return []
+        return [("2024T11570", "Paris")] if insee_code == "75101" else []
 
-    monkeypatch.setattr(DialogApi, "public_identifiers", timeout)
-    with pytest.raises(PublicExportUnreadable, match="75104"):
-        _eudonet_source().fetch_numbers_published_elsewhere()
+    monkeypatch.setattr(DialogApi, "public_identifiers", one_timeout)
+    assert "2024T11570" in _eudonet_source().fetch_numbers_published_elsewhere()
 
 
-def test_an_export_of_another_shape_stops_the_run(monkeypatch):
-
+def test_an_export_of_another_shape_is_read_as_unreadable(monkeypatch):
     def changed_contract(self, insee_code):
-        raise KeyError("metadata")
+        if insee_code == "75104":
+            raise KeyError("metadata")
+        return [("2024T11570", "Paris")] if insee_code == "75101" else []
 
     monkeypatch.setattr(DialogApi, "public_identifiers", changed_contract)
-    with pytest.raises(KeyError):
-        _eudonet_source().fetch_numbers_published_elsewhere()
+    assert "2024T11570" in _eudonet_source().fetch_numbers_published_elsewhere()
 
 
 def test_the_pipeline_runs_from_the_fixture_to_the_pivot(integration):

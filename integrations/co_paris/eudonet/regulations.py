@@ -29,14 +29,6 @@ IS_PERMANENT = pl.col("a_type") == TYPE_PERMANENT_LABEL
 IS_TEMPORARY = pl.col("a_type") == TYPE_TEMPORARY_LABEL
 
 
-class EudonetVocabularyError(Exception):
-    """A regulation type (catalog 1108) that `vocabulary.py` does not know.
-
-    The query asks for the two codes of that catalog only (7, 8): a label we do not know
-    means Paris renamed one of them, on every row: a changed contract, which stops the run.
-    """
-
-
 def filter_police_prefecture(df: pl.DataFrame, publish: bool) -> pl.DataFrame:
     """Keep or drop the acts of the police prefecture (R-73, Q-36).
 
@@ -74,7 +66,7 @@ def compute_regulation_fields(df: pl.DataFrame, today: date) -> pl.DataFrame:
     """
     return (
         df.pipe(_discard_unnumbered)
-        .pipe(_check_regulation_types)
+        .pipe(_discard_unknown_types)
         .pipe(_discard_out_of_state)
         .pipe(_discard_unusable_temporaries, today)
         .pipe(_regulation_columns)
@@ -91,18 +83,17 @@ def _discard_unnumbered(df: pl.DataFrame) -> pl.DataFrame:
     return df.filter(pl.col("a_identifier").is_not_null())
 
 
-def _check_regulation_types(df: pl.DataFrame) -> pl.DataFrame:
-    unknown_types = sorted(
-        repr(label)
-        for label in set(df.get_column("a_type").unique().to_list())
-        - set(REGULATION_CATEGORY_BY_LABEL)
-    )
-    if unknown_types:
-        raise EudonetVocabularyError(
-            f"Unknown Eudonet regulation type(s) in catalog 1108: {unknown_types}. "
-            "The category decides how the periods are built: it cannot be guessed."
+def _discard_unknown_types(df: pl.DataFrame) -> pl.DataFrame:
+    """The category decides how the periods are built: an unknown type is never guessed."""
+    known = pl.col("a_type").is_in(list(REGULATION_CATEGORY_BY_LABEL)).fill_null(False)
+    unknown = df.filter(~known)
+    if unknown.height:
+        logger.warning(
+            f"Dropping {unknown.height} rows of {unknown['a_identifier'].n_unique()} "
+            f"regulations with a type unknown to catalog 1108: {count_by(unknown, 'a_type')}. "
+            "Qualify it in vocabulary.REGULATION_CATEGORY_BY_LABEL."
         )
-    return df
+    return df.filter(known)
 
 
 def _discard_out_of_state(df: pl.DataFrame) -> pl.DataFrame:

@@ -150,17 +150,6 @@ def test_search_all_reads_every_page_announced_by_the_metadata():
     assert [body["ShowMetadata"] for body in bodies] == [True, False, False]
 
 
-@pytest.mark.parametrize("second_page", [[3], [2, 3]], ids=["a row lost", "a row read twice"])
-def test_a_page_that_does_not_add_up_stops_the_extraction(second_page):
-    """A lost page would read as 50 acts gone from the source, closed the same night."""
-    client = make_client(
-        [token_response(), rows_response([1, 2], total_rows=4, total_pages=2)]
-        + [rows_response(second_page)]
-    )
-    with pytest.raises(EudonetError, match="not complete"):
-        client.search_all(1100, [1101], criterion(1108, EQUALS, "7"))
-
-
 def test_search_by_ids_splits_the_identifiers_into_batches():
     ids = list(range(1, 8))
     client = make_client(

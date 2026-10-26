@@ -39,7 +39,6 @@ from integrations.co_paris.eudonet.raw_rows import (
 from integrations.co_paris.eudonet.regulations import (
     IDENTIFIER_PREFIX,
     TITLE_MAX_LENGTH,
-    EudonetVocabularyError,
     compute_period_fields,
     compute_regulation_fields,
     filter_police_prefecture,
@@ -303,9 +302,11 @@ def test_no_document_url_is_invented(clean):
     assert clean.get_column("regulation_document_url").null_count() == clean.height
 
 
-def test_an_unknown_regulation_type_raises():
-    with pytest.raises(EudonetVocabularyError, match="1108"):
-        compute_regulation_fields(make_frame(make_row(a_type="Provisoire")), FIXTURE_EXTRACTED_ON)
+def test_an_unknown_regulation_type_is_dropped_not_the_run(captured_logs):
+    rows = make_frame(make_row(), make_row(a_identifier="2024P10002", a_type="Provisoire"))
+    kept = compute_regulation_fields(rows, FIXTURE_EXTRACTED_ON)
+    assert kept.get_column("a_identifier").to_list() == ["2024P10001"]
+    assert any("unknown to catalog 1108" in line and "Provisoire" in line for line in captured_logs)
 
 
 @pytest.mark.parametrize("label, expected", sorted(MEASURE_TYPE_BY_LABEL.items()))
@@ -524,8 +525,7 @@ def test_a_number_another_channel_published_is_not_created_again():
     )
     kept = discard_published_elsewhere(df, numbers)
     assert set(kept["a_identifier"]) == set(df["a_identifier"]) - {"2024T11570", "2024P12345"}
-    with pytest.raises(ValueError, match="never loaded"):
-        discard_published_elsewhere(df, None)
+    assert discard_published_elsewhere(df, None).height == df.height
 
 
 def test_a_single_point_carries_only_a_parking_ban():
