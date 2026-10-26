@@ -1,5 +1,4 @@
 from datetime import date, datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import polars as pl
@@ -8,19 +7,20 @@ import pytest
 from integrations.api import DialogApi
 from integrations.co_paris.eudonet.client import EQUALS, GREATER_OR_EQUAL, EudonetError
 from integrations.co_paris.eudonet.data_source_integration import (
-    FIXTURE_ENV_VAR,
-    MEASURE_PARAMETER_PAIRS,
-    RAW_COLUMNS,
     DataSourceIntegration,
-    build_raw_dataframe,
+)
+from integrations.co_paris.eudonet.extraction import (
     check_extraction_completeness,
-    load_fixture,
-    needs_locations,
     perimeter_criteria,
 )
+from integrations.co_paris.eudonet.raw_rows import (
+    MEASURE_PARAMETER_PAIRS,
+    RAW_COLUMNS,
+    build_raw_dataframe,
+    needs_locations,
+)
 from integrations.co_paris.eudonet.schema import EudonetRawDataSchema
-
-FIXTURE = Path("tests/co_paris/eudonet.json")
+from tests.co_paris.eudonet_fixture import load_fixture, read_eudonet_from_the_fixture
 
 
 class StubSettings:
@@ -33,7 +33,7 @@ class StubSettings:
 
 @pytest.fixture
 def tables():
-    return load_fixture(FIXTURE)
+    return load_fixture()
 
 
 @pytest.fixture
@@ -44,7 +44,6 @@ def raw(tables):
 @pytest.fixture
 def source(monkeypatch):
     monkeypatch.delenv("EUDONET_PARIS_CREDENTIALS", raising=False)
-    monkeypatch.delenv(FIXTURE_ENV_VAR, raising=False)
     monkeypatch.setattr(DialogApi, "public_identifiers", lambda self, insee_code: [])
     return DataSourceIntegration(StubSettings(), client=None)  # type: ignore[arg-type]
 
@@ -103,6 +102,11 @@ def test_the_rows_do_not_depend_on_the_order_eudonet_serves_them(raw, tables):
     assert build_raw_dataframe(reversed_tables).equals(raw)
 
 
+def test_the_schema_declares_the_raw_columns_in_their_order():
+    """Both declare the raw columns: a column added to one only would go unchecked."""
+    assert list(EudonetRawDataSchema.to_schema().columns) == list(RAW_COLUMNS)
+
+
 def test_the_fixture_validates_against_the_pandera_schema(source, raw):
     validated = source.validate_raw_data(raw)
 
@@ -117,7 +121,7 @@ def test_dates_come_from_the_database_value_not_the_displayed_one(raw, tables):
     expected = date(*(int(part) for part in regulation["1109_db"][:10].split("/")))
     assert row["a_start_date"] == expected
     assert raw.schema["a_start_date"] == pl.Date
-    assert raw.schema["a_modified_at"] == pl.Datetime("us")
+    assert raw.schema["a_end_date"] == pl.Date
 
 
 def test_a_permanent_regulation_has_no_end_date(raw):
@@ -138,7 +142,7 @@ def test_eudonet_empty_strings_become_nulls(raw, tables):
 
 
 def _pair_count(measure):
-    return sum(1 for name, _ in MEASURE_PARAMETER_PAIRS if measure.get(name))
+    return sum(1 for name, _ in MEASURE_PARAMETER_PAIRS if measure.get(str(name)))
 
 
 def test_named_parameters_are_flattened_in_eudonet_order(raw, tables):
@@ -147,9 +151,9 @@ def test_named_parameters_are_flattened_in_eudonet_order(raw, tables):
 
     row = raw.filter(pl.col("m_file_id") == measure["FileId"]).row(0, named=True)
     expected = [
-        [measure[name], measure.get(value) or ""]
+        [measure[str(name)], measure.get(str(value)) or ""]
         for name, value in MEASURE_PARAMETER_PAIRS
-        if measure.get(name)
+        if measure.get(str(name))
     ]
     assert row["m_params"] == expected
 
@@ -186,8 +190,8 @@ def test_an_extraction_that_lost_its_locations_is_refused(located, refused):
         check_extraction_completeness(measures, locations)
 
 
-def test_the_fixture_is_read_when_the_environment_variable_points_at_it(source, monkeypatch):
-    monkeypatch.setenv(FIXTURE_ENV_VAR, str(FIXTURE))
+def test_the_extracted_tables_become_the_raw_columns(source, monkeypatch):
+    read_eudonet_from_the_fixture(monkeypatch)
 
     raw = source.fetch_raw_data()
 
@@ -195,7 +199,18 @@ def test_the_fixture_is_read_when_the_environment_variable_points_at_it(source, 
     assert raw.height > 0
 
 
-def test_without_a_fixture_nor_credentials_the_failure_names_the_variable(source):
+@pytest.mark.parametrize(
+    "base_url, published",
+    [("https://dialog.beta.gouv.fr", False), ("https://dialog-staging.osc-fr1.scalingo.io", True)],
+)
+def test_the_police_prefecture_is_never_published_on_the_production_host(base_url, published):
+    settings = StubSettings()
+    settings.base_url = base_url
+    source = DataSourceIntegration(settings, client=None)  # type: ignore[arg-type]
+    assert source._publishes_police_prefecture() is published
+
+
+def test_without_credentials_the_failure_names_the_variable(source):
     with pytest.raises(EudonetError, match="EUDONET_PARIS_CREDENTIALS is not set"):
         source.fetch_raw_data()
 
@@ -225,4 +240,4 @@ def test_only_the_measures_dialog_can_carry_need_their_locations():
     assert needs_locations({"1202": "interdiction de stationnement"})
     assert needs_locations({"1202": "aire piétonne"})
     assert not needs_locations({"1202": "stationnement réservé"})
-    assert needs_locations({"1202": "interdiction de klaxonner"})
+    assert not needs_locations({"1202": "interdiction de klaxonner"})

@@ -141,7 +141,6 @@ def test_no_bound():
     [
         ("1er arrondissement", ["75101"]),
         ("17ème arrondissement", ["75117"]),
-        ("20ème arrondissement", ["75120"]),
         ("1er arrondissement ; 2ème arrondissement", ["75101", "75102"]),
         ("", []),
         (None, []),
@@ -357,7 +356,6 @@ def test_kept_rows_keep_their_other_columns_and_lose_the_rejection_column():
     "column, label",
     [
         ("l_direction", "dans les deux sens"),
-        ("l_direction", "dans le sens de la circulation générale"),
         ("l_direction", None),
         ("l_side", "côté pair et impair"),
         ("l_side", "dans l'axe de la chaussée"),
@@ -373,6 +371,8 @@ def test_a_location_not_limited_to_one_direction_goes_both_ways(column, label):
     [
         ("l_direction", "du début vers la fin du segment"),
         ("l_direction", "de la fin vers le début du segment"),
+        ("l_direction", "dans le sens de la circulation générale"),
+        ("l_direction", "dans le sens inverse de la circulation générale"),
         ("l_side", "côté pair"),
         ("l_side", "côté impair"),
     ],

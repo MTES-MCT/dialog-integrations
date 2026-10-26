@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 from integrations.co_paris.eudonet import client as client_module
 from integrations.co_paris.eudonet.client import (
@@ -58,7 +59,10 @@ class FakeSession:
 
     def post(self, url, json=None, headers=None, timeout=None):
         self.calls.append({"url": url, "json": json, "headers": headers})
-        return FakeResponse(self.payloads.pop(0))
+        payload = self.payloads.pop(0)
+        if isinstance(payload, Exception):
+            raise payload
+        return FakeResponse(payload)
 
     @property
     def search_bodies(self):
@@ -196,6 +200,23 @@ def test_an_expired_token_is_renewed_and_the_call_replayed():
 
     assert [row["FileId"] for row in rows] == [7]
     assert len(client.session.auth_calls) == 2  # type: ignore[attr-defined]
+
+
+def test_a_cut_during_the_renewal_of_the_token_is_retried(monkeypatch):
+    monkeypatch.setattr(client_module.time, "sleep", lambda seconds: None)
+    client = make_client(
+        [
+            token_response(),
+            error_response(101),
+            requests.ConnectionError("cut"),
+            token_response(),
+            rows_response([7], total_rows=1, total_pages=1),
+        ]
+    )
+
+    rows = client.search_all(1100, [1101], criterion(1108, EQUALS, "7"))
+
+    assert [row["FileId"] for row in rows] == [7]
 
 
 def test_the_quota_error_pauses_then_retries(monkeypatch):

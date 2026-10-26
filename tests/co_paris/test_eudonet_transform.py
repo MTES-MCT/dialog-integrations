@@ -1,6 +1,5 @@
 import re
 from datetime import date, datetime
-from pathlib import Path
 from typing import Any
 
 import polars as pl
@@ -14,42 +13,55 @@ from api.dia_log_client.models import (
 )
 from integrations.base_data_source_integration import RegulationMeasure
 from integrations.base_integration import BaseIntegration
+from integrations.co_paris.eudonet import location_filters
 from integrations.co_paris.eudonet.data_source_integration import (
-    IDENTIFIER_PREFIX,
-    RAW_COLUMNS,
-    TITLE_ELLIPSIS,
-    TITLE_MAX_LENGTH,
     DataSourceIntegration,
-    EudonetVocabularyError,
+)
+from integrations.co_paris.eudonet.location_filters import (
+    discard_location_complements,
+    discard_points_beyond_parking,
+    discard_refused_locations,
+    load_refused_locations,
+)
+from integrations.co_paris.eudonet.measures import (
     add_pedestrian_area_speed,
-    build_raw_dataframe,
     compute_measure_fields,
+)
+from integrations.co_paris.eudonet.published_elsewhere import (
+    discard_published_elsewhere,
+    index_by_eudonet_number,
+    load_frozen_elsewhere,
+)
+from integrations.co_paris.eudonet.raw_rows import (
+    RAW_COLUMNS,
+    build_raw_dataframe,
+)
+from integrations.co_paris.eudonet.regulations import (
+    IDENTIFIER_PREFIX,
+    TITLE_MAX_LENGTH,
     compute_period_fields,
     compute_regulation_fields,
+    filter_police_prefecture,
+)
+from integrations.co_paris.eudonet.text import (
+    ELLIPSIS as TITLE_ELLIPSIS,
+)
+from integrations.co_paris.eudonet.vehicles import (
     compute_vehicle_fields,
-    discard_location_complements,
-    discard_police_prefecture,
-    discard_published_elsewhere,
-    discard_refused_locations,
-    load_fixture,
-    load_frozen_elsewhere,
-    load_refused_locations,
-    numbers_published_elsewhere,
 )
 from integrations.co_paris.eudonet.vocabulary import (
     MEASURE_TYPE_BY_LABEL,
     PERMANENT_SUBJECT_TEXT,
     UNKNOWN_REASON_TEXT,
 )
-
-FIXTURE = Path("tests/co_paris/eudonet.json")
+from tests.co_paris.eudonet_fixture import load_fixture
 
 FIXTURE_EXTRACTED_ON = date(2026, 9, 8)
 
 
 @pytest.fixture
 def raw():
-    return build_raw_dataframe(load_fixture(FIXTURE))
+    return build_raw_dataframe(load_fixture())
 
 
 @pytest.fixture
@@ -185,10 +197,21 @@ def test_a_temporary_regulation_that_ended_is_dropped():
     assert compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON).height == 0
 
 
-def test_a_temporary_regulation_without_an_end_date_is_dropped():
-    """Nothing would ever close it (R-37); online the Eudonet filter never returns one."""
-    row = make_row(a_type="Temporaire", a_reason="Travaux", a_end_date=None)
+@pytest.mark.parametrize(
+    "dates",
+    [{"a_end_date": None}, {"a_start_date": None, "a_end_date": date(2026, 11, 30)}],
+    ids=["no end: nothing would close it", "no start: the write date would stand in"],
+)
+def test_a_temporary_regulation_needs_both_its_dates(dates):
+    """R-37: a temporary period has a start and an end."""
+    row = make_row(a_type="Temporaire", a_reason="Travaux", **dates)
     assert compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON).height == 0
+
+
+def test_a_regulation_without_an_order_number_is_dropped_not_the_run():
+    rows = make_frame(make_row(), make_row(a_file_id=2, a_identifier=None))
+    kept = compute_regulation_fields(rows, FIXTURE_EXTRACTED_ON)
+    assert kept.get_column("a_file_id").to_list() == [1]
 
 
 def test_the_title_is_stripped_of_its_html(clean):
@@ -279,9 +302,11 @@ def test_no_document_url_is_invented(clean):
     assert clean.get_column("regulation_document_url").null_count() == clean.height
 
 
-def test_an_unknown_regulation_type_raises():
-    with pytest.raises(EudonetVocabularyError, match="1108"):
-        compute_regulation_fields(make_frame(make_row(a_type="Provisoire")), FIXTURE_EXTRACTED_ON)
+def test_an_unknown_regulation_type_is_dropped_not_the_run(captured_logs):
+    rows = make_frame(make_row(), make_row(a_identifier="2024P10002", a_type="Provisoire"))
+    kept = compute_regulation_fields(rows, FIXTURE_EXTRACTED_ON)
+    assert kept.get_column("a_identifier").to_list() == ["2024P10001"]
+    assert any("unknown to catalog 1108" in line and "Provisoire" in line for line in captured_logs)
 
 
 @pytest.mark.parametrize("label, expected", sorted(MEASURE_TYPE_BY_LABEL.items()))
@@ -306,11 +331,19 @@ def test_the_catalog_table_is_complete():
     assert len(MEASURE_TYPE_BY_LABEL) == 32
 
 
-def test_an_unknown_measure_label_raises():
-    """Paris can enrich the catalog: guessing what a new value means is forbidden (Q-05)."""
-    row = make_row(m_type="interdiction de klaxonner")
-    with pytest.raises(EudonetVocabularyError, match="interdiction de klaxonner"):
-        compute_measure_fields(compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON))
+def test_an_unknown_measure_label_is_dropped_with_a_warning(captured_logs):
+    """Paris can enrich the catalog: a new value is never guessed (Q-05), nor stops the run."""
+    unknown = make_row(m_file_id=11, m_type="interdiction de klaxonner", l_file_id=None)
+    known = make_row()
+
+    df = compute_measure_fields(
+        compute_regulation_fields(make_frame(unknown, known), FIXTURE_EXTRACTED_ON)
+    )
+
+    assert df.get_column("m_file_id").to_list() == [10]
+    dropped = [line for line in captured_logs if "unknown to catalog 1202" in line]
+    assert len(dropped) == 1
+    assert "'interdiction de klaxonner': 1" in dropped[0]
 
 
 def test_measures_outside_the_model_are_dropped_and_counted(raw, captured_logs):
@@ -339,7 +372,7 @@ def test_the_speed_is_read_from_its_parameter(value, expected):
     assert df.get_column("measure_max_speed").to_list() == [expected]
 
 
-@pytest.mark.parametrize("params", [None, [], [["valeur de la vitesse", ""]]])
+@pytest.mark.parametrize("params", [None, [["valeur de la vitesse", ""]]])
 def test_a_speed_limitation_without_a_speed_is_dropped(params, captured_logs):
     """R-02: 30 or 50 is a decision, not a default."""
     row = make_row(m_type="limitation de vitesse", m_params=params)
@@ -443,18 +476,22 @@ def test_a_pedestrian_area_is_a_ban_with_local_access_and_a_walking_pace_twin():
 
 
 @pytest.mark.parametrize(
-    "publish, kept", [(True, {"2024P10001", "2024P10002"}), (False, {"2024P10001"})]
+    "publish, kept",
+    [(True, {"2024P10001", "2024P10002", "2024P10003"}), (False, {"2024P10001", "2024P10003"})],
 )
 def test_the_police_prefecture_is_published_only_behind_its_constant(publish, kept):
+    """A regulation with no service is not the prefecture's."""
     df = make_frame(
-        make_row(), make_row(a_identifier="2024P10002", a_service="Préfecture de Police")
+        make_row(),
+        make_row(a_identifier="2024P10002", a_service="Préfecture de Police"),
+        make_row(a_identifier="2024P10003", a_service=None),
     )
-    assert set(discard_police_prefecture(df, publish)["a_identifier"]) == kept
+    assert set(filter_police_prefecture(df, publish)["a_identifier"]) == kept
 
 
 def test_the_number_behind_another_channel_identifier_is_read_without_normalising():
     """`Paris_` is cut, a bare number is taken whole, ours are skipped (R-80)."""
-    numbers = numbers_published_elsewhere(
+    numbers = index_by_eudonet_number(
         [
             ("Paris_2024P12345", "Paris (préfecture)"),
             ("paris_2025P12924", "Paris (préfecture)"),
@@ -471,7 +508,7 @@ def test_the_number_behind_another_channel_identifier_is_read_without_normalisin
 
 def test_the_frozen_identifiers_of_the_prefecture_channel_are_readable():
     frozen = load_frozen_elsewhere()
-    numbers = numbers_published_elsewhere(frozen)
+    numbers = index_by_eudonet_number(frozen)
     assert len(numbers) == len(frozen) == 100
     assert all(re.fullmatch(r"\d{4}P\d+", number) for number in numbers)
 
@@ -483,7 +520,7 @@ def test_a_number_another_channel_published_is_not_created_again():
         make_row(a_identifier="2024T11570"),
         make_row(a_identifier="2024P12345"),
     )
-    numbers = numbers_published_elsewhere(
+    numbers = index_by_eudonet_number(
         [("Paris_2024P12345", "Paris (préfecture)"), ("2024T11570", "Paris")]
     )
     kept = discard_published_elsewhere(df, numbers)
@@ -491,17 +528,31 @@ def test_a_number_another_channel_published_is_not_created_again():
     assert discard_published_elsewhere(df, None).height == df.height
 
 
-def test_a_refused_location_is_dropped_and_its_regulation_goes_with_the_others():
+def test_a_single_point_carries_only_a_parking_ban():
+    """R-74: a ban, a speed or a gauge stands on a stretch of road, not on a house number."""
+    df = pl.DataFrame(
+        {
+            "a_identifier": ["1", "2", "3"],
+            "l_scope": ["Un point", "Un point", "Une section"],
+            "measure_type_": ["parkingProhibited", "noEntry", "noEntry"],
+        }
+    )
+    assert discard_points_beyond_parking(df)["a_identifier"].to_list() == ["1", "3"]
+
+
+def test_a_refused_location_is_dropped_and_its_regulation_goes_with_the_others(monkeypatch):
     df = make_frame(
         make_row(l_file_id=10),
         make_row(l_file_id=11),
         make_row(a_identifier="2024P10002", l_file_id=20),
     )
     refused = {11: "Cette adresse n'est pas reconnue", 20: "Les deux rues ne se croisent pas"}
-    kept = discard_refused_locations(df, refused)
+    monkeypatch.setattr(location_filters, "load_refused_locations", lambda: refused)
+    kept = discard_refused_locations(df)
     assert kept["l_file_id"].to_list() == [10]
     assert set(kept["a_identifier"]) == {"2024P10001"}
-    assert discard_refused_locations(df, {}).height == df.height
+    monkeypatch.setattr(location_filters, "load_refused_locations", lambda: {})
+    assert discard_refused_locations(df).height == df.height
 
 
 def test_a_location_complement_that_narrows_the_measure_drops_the_location(captured_logs):
@@ -535,6 +586,7 @@ def test_a_location_complement_that_narrows_the_measure_drops_the_location(captu
         "& n°13",
         "56-56bis",
         "n° 34 à 36 ter",
+        "<!--[if gte mso 9]><xml><w:Word>Normal</w:Word></xml><![endif]-->",
     ],
 )
 def test_a_location_complement_that_says_nothing_keeps_the_location(complement):
@@ -635,11 +687,12 @@ def test_a_category_without_an_equivalent_becomes_other_plus_its_label():
     assert df.get_column("vehicle_all_vehicles").to_list() == [False]
 
 
-def test_cycles_are_restricted_as_other_because_bicycle_is_exemption_only():
-    row = make_row(m_type="limitation catégorielle", m_params=[["véhicule concerné (1)", "cycles"]])
-    df = pipeline(row)
-    assert df.get_column("vehicle_restricted_types").to_list() == [["other"]]
-    assert df.get_column("vehicle_other_restricted_type_text").to_list() == ["cycles"]
+@pytest.mark.parametrize("label", ["cycles", "aux véhicules de plus de 12 T"])
+def test_a_restriction_outside_the_closed_list_drops_its_measure(label, captured_logs):
+    """Cycles are never restricted (R-34); a new value waits for a human (Q-58)."""
+    row = make_row(m_type="limitation catégorielle", m_params=[["véhicule concerné (1)", label]])
+    assert pipeline(row).height == 0
+    assert any("outside the closed list" in line and label in line for line in captured_logs)
 
 
 @pytest.mark.parametrize("label", ["limitation dimensionnelle", "limitation catégorielle"])
@@ -729,26 +782,16 @@ def test_the_penal_qualification_is_not_a_vehicle_restriction():
     assert df.get_column("vehicle_restricted_types").to_list() == [None]
 
 
-def test_a_dropped_time_slot_is_counted(captured_logs):
-    row = make_row(
-        m_params=[
-            ["véhicule concerné (3)", "à tous les véhicules"],
-            ["Jours et Horaires", "de 20h00 à 7h00 ainsi que les dimanches et jours fériés"],
-        ]
+def test_a_filled_parameter_of_an_unknown_name_drops_its_measure(captured_logs):
+    """It may narrow the measure like a time slot does (R-81): never published wider."""
+    known = make_row(
+        m_params=[["véhicule concerné (3)", "à tous les véhicules"], ["caractère aggravant", "x"]]
     )
-    pipeline(row)
-    assert any("Jours et Horaires" in line for line in captured_logs)
-
-
-def test_a_filled_parameter_of_an_unknown_name_is_counted(captured_logs):
-    row = make_row(
-        m_params=[
-            ["véhicule concerné (3)", "à tous les véhicules"],
-            ["caractère aggravant", "gênant"],
-            ["Alinéa", "sauf le dimanche"],
-        ]
+    unknown = make_row(
+        m_file_id=11,
+        m_params=[["véhicule concerné (3)", "à tous les véhicules"], ["Alinéa", "sauf dimanche"]],
     )
-    pipeline(row)
+    assert pipeline(known, unknown).get_column("m_file_id").to_list() == [10]
     assert any("unknown name" in line and "Alinéa" in line for line in captured_logs)
     assert not any("caractère aggravant" in line for line in captured_logs)
 
@@ -785,18 +828,13 @@ def test_a_permanent_period_has_no_end():
     assert df.get_column("period_recurrence_type").to_list() == ["everyDay"]
 
 
-def test_a_permanent_without_a_start_falls_back_on_the_signature_date(captured_logs):
-    """R-39: a fallback, never a constant — and the fallback is counted."""
-    row = make_row(a_start_date=None, a_signed_at=date(2011, 6, 30))
-    df = pipeline(row)
-    assert df.get_column("period_start_date").to_list() == ["2011-06-30T00:00:00+02:00"]
-    assert any("fall back on" in line for line in captured_logs)
-
-
-def test_a_permanent_without_a_start_nor_a_signature_is_dated_on_first_write(captured_logs):
-    """R-39: never the moving "Modifié le"; `sync/dating.py` dates it when DiaLog is written."""
+def test_a_permanent_without_a_start_is_dated_on_first_write(captured_logs):
+    """R-39: never the signature, never the moving "Modifié le"; `sync/dating.py` dates it
+    when DiaLog is written."""
     row = make_row(
-        a_start_date=None, a_signed_at=None, a_modified_at=datetime(2017, 2, 3, 0, 30, 7)
+        a_start_date=None,
+        a_signed_at=date(2011, 6, 30),
+        a_modified_at=datetime(2017, 2, 3, 0, 30, 7),
     )
     df = pipeline(row)
     assert df.get_column("period_start_date").to_list() == [None]
