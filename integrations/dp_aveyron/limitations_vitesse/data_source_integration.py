@@ -35,6 +35,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     raw_data_schema = AveyronLimitationsVitesseRawDataSchema
     name = "limitation_vitesse"
+    identifier_prefix = "AV-LV-"
 
     # R-28: one arrete carries one measure per distinct signature, and that measure
     # carries every stretch it applies to — not one measure per stretch. The grouped

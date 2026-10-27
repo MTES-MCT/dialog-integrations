@@ -82,6 +82,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     """Disruptive work sites of the Métropole de Lyon."""
 
     name = "chantiers_perturbants"
+    identifier_prefix = "MGL-CHP-"
     raw_data_schema = LyonChantiersPerturbantsRawDataSchema
 
     def fetch_raw_data(self) -> pl.DataFrame:

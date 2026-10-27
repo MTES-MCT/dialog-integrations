@@ -177,6 +177,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     """Data source for the Métropole de Lyon roadway inventory."""
 
     name = "chaussees_trottoirs"
+    identifier_prefix = f"{IDENTIFIER_PREFIX}-"
     raw_data_schema = LyonChausseesTrottoirsRawDataSchema
 
     # One measure carries every segment it applies to, rather than one measure per
@@ -391,7 +392,7 @@ def discard_unexpressed_qualifiers(df: pl.DataFrame) -> pl.DataFrame:
 
 def exempts_public_services() -> pl.Expr:
     """The free text says "sauf service(s) public(s)" and the measure is a dimension limit."""
-    return (pl.col("measure_kind") == "dimensions") & pl.col(
+    return (pl.col("_measure_kind") == "dimensions") & pl.col(
         "precisionreglementation"
     ).str.contains(PUBLIC_SERVICE_EXEMPTION).fill_null(False)
 
@@ -447,19 +448,19 @@ def explode_into_measures(df: pl.DataFrame) -> pl.DataFrame:
     """
     is_ztl = pl.col("ztl").fill_null(False)
 
-    ztl = df.filter(is_ztl).with_columns(pl.lit("ztl").alias("measure_kind"))
+    ztl = df.filter(is_ztl).with_columns(pl.lit("ztl").alias("_measure_kind"))
 
     speeds = df.filter(
         pl.col("limitationvitesse").is_not_null()
         & (~is_ztl if ZTL_REPLACES_SPEED else pl.lit(True))
-    ).with_columns(pl.lit("speed").alias("measure_kind"))
+    ).with_columns(pl.lit("speed").alias("_measure_kind"))
 
     # The dimension limit keeps the row's order number like the speed does: whether the
     # order carries it is decided downstream, on all the segments citing that number
     # (`measures_carried_by_each_order`), not on a word of the free text.
     dimensions = df.filter(
         pl.any_horizontal(pl.col(column).is_not_null() for column in DIMENSION_COLUMNS)
-    ).with_columns(pl.lit("dimensions").alias("measure_kind"))
+    ).with_columns(pl.lit("dimensions").alias("_measure_kind"))
 
     total = speeds.height + dimensions.height + ztl.height
     logger.info(
@@ -484,13 +485,13 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     Inside a ZTL, 5 km/h is the speed of the zone, not a pedestrian area: the ZTL already
     bans entry (R-71, R-72).
     """
-    is_ztl = pl.col("measure_kind") == "ztl"
+    is_ztl = pl.col("_measure_kind") == "ztl"
     is_pedestrian_area = (
-        (pl.col("measure_kind") == "speed")
+        (pl.col("_measure_kind") == "speed")
         & (pl.col("limitationvitesse") == PEDESTRIAN_AREA_SPEED)
         & ~pl.col("ztl").fill_null(False)
     )
-    is_speed_limit = (pl.col("measure_kind") == "speed") & ~is_pedestrian_area
+    is_speed_limit = (pl.col("_measure_kind") == "speed") & ~is_pedestrian_area
 
     return df.with_columns(
         pl.when(is_speed_limit)
@@ -543,7 +544,7 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     invented, only carried over (R-35) — and exempt public services when the free text
     says so (D-26).
     """
-    is_dimension = pl.col("measure_kind") == "dimensions"
+    is_dimension = pl.col("_measure_kind") == "dimensions"
     has_tonnage = pl.col("limitationtonnage").is_not_null()
     has_size = pl.any_horizontal(
         pl.col(column).is_not_null()
@@ -569,7 +570,7 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     # one does not drive through, but one enters to reach an address. Without it we would
     # publish a barred street where the Métropole lets residents, deliveries and services
     # in. Pedestrian areas carry it since 2026-09-17.
-    is_ztl = pl.col("measure_kind") == "ztl"
+    is_ztl = pl.col("_measure_kind") == "ztl"
     is_pedestrian_area = pl.col("measure_group_key") == "AIRE_PIETONNE"
     exempted = (
         pl.when(is_ztl | is_pedestrian_area)

@@ -33,7 +33,12 @@ from .raw_rows import (
     build_raw_dataframe,
     count_unreadable_measures,
 )
-from .regulations import compute_period_fields, compute_regulation_fields, filter_police_prefecture
+from .regulations import (
+    IDENTIFIER_PREFIX,
+    compute_period_fields,
+    compute_regulation_fields,
+    filter_police_prefecture,
+)
 from .schema import EudonetRawDataSchema
 from .vehicles import compute_vehicle_fields
 
@@ -57,6 +62,7 @@ def today_in_paris() -> date:
 
 class DataSourceIntegration(BaseDataSourceIntegration):
     name = "eudonet"
+    identifier_prefix = IDENTIFIER_PREFIX
     raw_data_schema = EudonetRawDataSchema
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
