@@ -97,6 +97,16 @@ def format_diff(identifier: str, old: Digest, new: Digest) -> list[str]:
     return lines
 
 
+FROZEN_REASONS = {"failed": "en échec", "paused": "en pause", "volume": "volume en chute"}
+
+
+def _render_frozen(why: str, drop: list[int] | None) -> str:
+    reason = FROZEN_REASONS.get(why, why)
+    if drop:
+        reason += f" ({drop[0]} → {drop[1]} arrêtés, relâcher avec --force-deletions)"
+    return f"{reason} : rien n'est clos ni supprimé sous son préfixe"
+
+
 def render_report(
     *,
     organization: str,
@@ -107,6 +117,8 @@ def render_report(
     produced: Mapping[str, Digest],
     snapshot: Mapping[str, Digest] | None,
     force_deletions: bool = False,
+    frozen_sources: Mapping[str, str] | None = None,
+    volume_drops: Mapping[str, list[int]] | None = None,
 ) -> str:
     """Build the whole report. Same text in --dry-run and before a real run."""
     mode = "simulation (--dry-run), aucune écriture" if dry_run else "exécution réelle"
@@ -138,6 +150,8 @@ def render_report(
             lines.append(f"    volumétries source — {measured}")
     if not funnels:
         lines.append("  (aucune source n'a produit de données)")
+    for name, why in (frozen_sources or {}).items():
+        lines.append(f"  {name} : gelée, {_render_frozen(why, (volume_drops or {}).get(name))}")
 
     remote = f"DiaLog : {plan.remote_total} identifiant(s) dans l'organisation"
     if plan.identifier_prefix:
@@ -154,6 +168,10 @@ def render_report(
     for batch in plan.batches:
         lines.append(f"  {_render_batch_header(batch)}")
     lines.append(f"  inchangés : {len(plan.unchanged)}")
+    if plan.frozen:
+        lines.append(
+            f"  absents de la source mais source gelée, laissés tels quels : {len(plan.frozen)}"
+        )
     if plan.closures is not None:
         lines.append(f"  déjà clos, laissés tels quels : {len(plan.already_ended)}")
         if plan.closed_at is not None:
@@ -174,12 +192,18 @@ def render_report(
     if held:
         lines += ["", "⚠ Lots retenus — à revoir manuellement"]
         for batch in held:
-            lines.append(
-                f"  {OPERATION_LABELS[batch.operation]} : {batch.size} > plafond "
-                f"{batch.limit} — lot non appliqué, redétecté à l'identique demain"
+            reason = (
+                f"> plafond {batch.limit}" if batch.over_cap else "en attente des lots ci-dessus"
             )
-        missing_held = plan.deletions.held or (plan.closures is not None and plan.closures.held)
-        if missing_held and not force_deletions:
+            lines.append(
+                f"  {OPERATION_LABELS[batch.operation]} : {batch.size} {reason} — lot non "
+                "appliqué, redétecté à l'identique demain"
+            )
+        # Only a batch over its own cap is released; one waiting on the others stays held.
+        missing_over_cap = any(
+            batch.operation in (DELETE, CLOSE) and batch.over_cap for batch in held
+        )
+        if missing_over_cap and not force_deletions:
             what = "suppressions" if plan.deletions.held else "clôtures"
             lines.append(
                 f"  Relâcher les {what} : uv run dialog integrate {organization} "
