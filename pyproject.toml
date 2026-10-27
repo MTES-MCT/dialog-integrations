@@ -38,7 +38,7 @@ dependencies = [
 dialog = "cli:app"
 
 [tool.setuptools]
-py-modules = ["cli", "settings"]
+py-modules = ["cli", "settings", "registry"]
 packages = ["integrations", "api", "notifications"]
 
 [tool.ruff]

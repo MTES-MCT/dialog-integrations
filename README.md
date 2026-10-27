@@ -82,7 +82,7 @@ Exemples :
 
 ## Synchronisation
 
-Par défaut la pipeline est **additive** : elle crée les arrêtés absents de DiaLog, ne met rien à jour et ne touche pas à ce qui a disparu de la source. Une organisation active les autres opérations en surchargeant des attributs de classe dans son `integration.py` :
+Sans réglage, la pipeline serait **additive** : elle créerait les arrêtés absents de DiaLog, sans rien mettre à jour ni toucher à ce qui a disparu de la source. Ce n'est plus permis par omission : une organisation déclare un `identifier_prefix`, ou `legacy_additive = True` pour dire qu'elle ne fait qu'ajouter (Brest, Sarthe, Issy, Rennes, intégrées avant les préfixes) ; sinon l'exécution refuse de démarrer. Une organisation active les autres opérations en surchargeant des attributs de classe dans son `integration.py` :
 
 ```python
 class Integration(BaseIntegration):
@@ -112,20 +112,42 @@ Une organisation DiaLog reçoit souvent des arrêtés par d'autres canaux que ce
 * **sans préfixe, la suppression et la clôture sont refusées** (exception), pas seulement désactivées ;
 * un identifiant produit qui ne commence pas par le préfixe **arrête l'exécution** avant toute écriture : c'est le garde-fou contre un préfixe appliqué deux fois ou oublié dans une branche de la transformation.
 
+### Une source gelée
+
+Chaque source d'une organisation qui supprime ou clôt déclare son propre préfixe (`identifier_prefix = "AV-LV-"` sur la classe de la source), contenu dans celui de l'organisation. Une source est **gelée** pour la nuit — rien n'est clos ni supprimé sous son préfixe, ses arrêtés restent tels que DiaLog les détient — dans trois cas :
+
+* **elle a planté** : l'exception est journalisée, comptée « source en échec », et les autres sources de l'organisation écrivent normalement. La commande sort en erreur et Tchap affiche ❌ ;
+* **son volume s'est effondré** : elle produit moins de 70 % des arrêtés de la veille (`state/…/totals.json`). Un export vide ou tronqué se lirait sinon comme la disparition de tout son corpus, et sous le plafond tout serait clos ou supprimé. La référence reste le dernier volume de confiance jusqu'à ce qu'on relâche avec `--force-deletions` ;
+* **elle est en pause** dans `integrations.toml` (`paused = ["nom"]`) : elle n'est pas lue. Retirer une source de `data_sources` à la place ferait passer tout ce qu'elle a produit pour disparu.
+
+Une source sans préfixe propre gèle celui de l'organisation, donc toutes ses voisines : le test de contrat (`tests/contract/`) exige un préfixe par source dès qu'une organisation à plusieurs sources supprime ou clôt.
+
+### Les contrôles communs
+
+Après la transformation de la source et avant la construction des corps d'écriture, chaque ligne passe des contrôles communs (`integrations/checks.py`) : fin avant début, limitation de vitesse sans vitesse, emprise `rawGeoJSON` sans géométrie, coordonnées hors bornes ou en ordre (latitude, longitude). Un arrêté dont une ligne échoue est laissé de côté **en entier**, et laissé tel que DiaLog le détient : ni créé, ni mis à jour, ni clos. Il compte en erreur sous « contrôle : {motif} ».
+
+Une colonne nommée comme un champ du pivot (`location_…`, `vehicle_…`) sans y figurer est supprimée comme avant, mais signalée : une faute de frappe ou un champ que le pivot ne porte pas encore. Une colonne de travail d'une source commence par `_` (`_measure_kind`).
+
 ### Les plafonds et les lots retenus
 
 Un lot au-dessus de son plafond est **retenu en entier** — rien n'est appliqué — et signalé « à revoir manuellement ». Son ancienne empreinte reste dans l'instantané : il est redétecté à l'identique le lendemain, jusqu'à ce qu'on le relâche.
 
+Pour relâcher, lire d'abord le rapport de la nuit (résumé du run GitHub), puis lancer le workflow `integrate` à la main, depuis l'onglet Actions : `organization` = l'organisation, `force_deletions` coché. Le run se fait avec les secrets et l'instantané de la CI, et laisse une trace. En local, réservé au staging :
+
 ```shell
-uv run dialog integrate co_lyon --env=prod --dry-run           # lire le rapport
-uv run dialog integrate co_lyon --env=prod --force-deletions   # relâcher les suppressions ou les clôtures
+uv run dialog integrate co_lyon --dry-run           # lire le rapport
+uv run dialog integrate co_lyon --force-deletions   # relâcher les suppressions ou les clôtures
 ```
 
 `--force-deletions` ne relâche que le lot de ce qui a disparu de la source — suppressions ou clôtures, selon l'organisation.
 
+Ce qui a disparu de la source attend aussi, sans plafond atteint, dans deux cas : tant qu'un lot de créations ou de mises à jour est retenu, et la nuit où une création ou une mise à jour est restée sans réponse (panne, 5xx). Ces écritures portent peut-être ses tronçons : le retirer d'abord laisserait la route sans limite. Un refus de l'API (4xx) ne fait pas attendre. Les créations, elles, ne sont jamais retenues par un autre lot. Le rapport dit « en attente des lots ci-dessus », Tchap « lot retenu ». `--force-deletions` relâche dans tous les cas ; le rapport ne le propose que pour un lot au-dessus de son propre plafond.
+
+Un arrêté dont une mesure n'a pas pu être construite n'est ni créé, ni mis à jour, ni supprimé, ni clos, toutes ses tranches (`-01`, `-02`…) comprises : il reste tel que DiaLog le détient, et compte comme une erreur « construction impossible ».
+
 ### L'instantané
 
-`state/{organisation}/{source}.json.gz` : un digest par arrêté (titre, catégorie, objet, et par mesure le type, la vitesse, la période, le jeu de véhicules et la localisation). On compare à cette empreinte de **notre propre envoi**, jamais à une relecture de DiaLog : l'API réécrit une partie de ce qu'elle reçoit et une relecture republierait tout le corpus chaque jour.
+`state/{hôte cible}/{organisation}/{source}.json.gz` (l'hôte DiaLog écrit : ce qu'on a envoyé au staging ne dit rien de la prod ; l'ancien chemin `state/{organisation}/` est encore lu s'il manque le nouveau) : un digest par arrêté (titre, catégorie, objet, et par mesure le type, la vitesse, la période, le jeu de véhicules et la localisation). On compare à cette empreinte de **notre propre envoi**, jamais à une relecture de DiaLog : l'API réécrit une partie de ce qu'elle reçoit et une relecture republierait tout le corpus chaque jour.
 
 * `DIALOG_STATE_DIR` déplace le dossier (en CI il vit dans le cache GitHub Actions).
 * **Instantané absent = aucune mise à jour**, et il est reconstruit à la fin de l'exécution. Un cache perdu coûte une journée de mises à jour, jamais une réécriture de masse.
@@ -167,6 +189,10 @@ Ordre de priorité en dev, du plus faible au plus fort :
 2. `.env.{organization}.dev` ;
 3. variables d'environnement du processus.
 
+
+## Ce qui tourne chaque nuit : `integrations.toml`
+
+Le registre liste les organisations du workflow `integrate`, leur cible (`prod` ou `staging`) et leurs sources en pause. Le workflow en génère sa matrice (`python3 registry.py matrix`) : ajouter, promouvoir ou mettre en pause une organisation ne touche plus le YAML. L'environnement GitHub et ses secrets restent à créer à la main (`{org}` pour la prod, `{org}-staging` sinon). La politique de synchronisation, elle, reste dans `integration.py`, à côté du code qui fabrique les identifiants.
 
 ## Organisation des dossiers
 

@@ -1,0 +1,39 @@
+# What the nightly workflow integrates, and where: `registry.py` builds its matrix from
+# this file. One entry per organization, since DiaLog gives one API client each.
+#
+#   target  "prod" or "staging". The GitHub environment holding the DiaLog secrets is
+#           the organization for prod (`co_brest`), suffixed otherwise (`co_paris-staging`).
+#           Promoting means flipping it; the snapshot then starts afresh.
+#   paused  data sources not read, by `name`: nothing under their prefix is closed or
+#           deleted, where removing one from `data_sources` would take all it made for gone.
+#
+# The sync policy (prefix, closure or deletion, caps) stays in each `integration.py`.
+
+[[integration]]
+organization = "co_brest"
+target = "prod"
+
+[[integration]]
+organization = "dp_sarthe"
+target = "prod"
+
+[[integration]]
+organization = "co_issy-les-moulineaux"
+target = "prod"
+
+[[integration]]
+organization = "dp_aveyron"
+target = "prod"
+
+# Under review on the staging: never written to production by this workflow.
+[[integration]]
+organization = "co_lyon"
+target = "staging"
+
+[[integration]]
+organization = "co_nantes"
+target = "staging"
+
+[[integration]]
+organization = "co_paris"
+target = "staging"

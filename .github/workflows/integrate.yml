@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
+    inputs:
+      organization:
+        description: "Only this organization (empty: every organization of integrations.toml)"
+        required: false
+        default: ""
+      force_deletions:
+        description: "Release the closures or deletions held by a cap or a volume drop (needs an organization)"
+        type: boolean
+        default: false
 
 # A second run waits for the first: both would read the identifiers before either
 # creates, and post the same regulations twice.
@@ -12,38 +21,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The matrix is read from integrations.toml: adding, promoting or pausing an
+  # organization never touches this file.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.registry.outputs.matrix }}
+      organizations: ${{ steps.registry.outputs.organizations }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read integrations.toml
+        id: registry
+        # Inputs go through the environment, never pasted into the script.
+        env:
+          ONLY: ${{ inputs.organization }}
+          FORCE: ${{ inputs.force_deletions }}
+        run: |
+          if [ "$FORCE" = "true" ] && [ -z "$ONLY" ]; then
+            echo "force_deletions releases one organization at a time: name it" >&2
+            exit 1
+          fi
+          echo "matrix=$(python3 registry.py matrix ${ONLY:+"$ONLY"})" >> "$GITHUB_OUTPUT"
+          echo "organizations=$(python3 registry.py organizations ${ONLY:+"$ONLY"})" >> "$GITHUB_OUTPUT"
+
   integrate:
     runs-on: ubuntu-latest
+    needs: plan
     # Twice the longest job seen (31 min, dp_aveyron, September 2026). The default is six
     # hours, and with two jobs at a time a hung one holds back the whole matrix.
     timeout-minutes: 60
     strategy:
       fail-fast: false
       max-parallel: 2
-      # `target` names the DiaLog instance the organization writes to. The GitHub
-      # environment holding its secrets is the organization for `prod` (`co_brest`),
-      # suffixed otherwise (`co_paris-staging`). Promoting an organization means
-      # flipping its target; its snapshot then starts afresh.
-      matrix:
-        include:
-          - { organization: co_brest, target: prod }
-          - { organization: dp_sarthe, target: prod }
-          - { organization: co_issy-les-moulineaux, target: prod }
-          - { organization: dp_aveyron, target: prod }
-          # Under review on the staging: never written to production by this workflow.
-          - { organization: co_lyon, target: staging }
-          - { organization: co_nantes, target: staging }
-          - { organization: co_paris, target: staging }
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     environment: ${{ matrix.target == 'prod' && matrix.organization || format('{0}-{1}', matrix.organization, matrix.target) }}
-    outputs:
-      # One output per matrix value — names must be static
-      result_co_brest:   ${{ steps.integration.outputs.result_co_brest }}
-      result_dp_sarthe:  ${{ steps.integration.outputs.result_dp_sarthe }}
-      result_co_issy-les-moulineaux: ${{ steps.integration.outputs['result_co_issy-les-moulineaux'] }}
-      result_dp_aveyron: ${{ steps.integration.outputs.result_dp_aveyron }}
-      result_co_lyon:    ${{ steps.integration.outputs.result_co_lyon }}
-      result_co_nantes:  ${{ steps.integration.outputs.result_co_nantes }}
-      result_co_paris:   ${{ steps.integration.outputs.result_co_paris }}
 
     steps:
       - uses: actions/checkout@v4
@@ -76,15 +87,18 @@ jobs:
           DIALOG_CLIENT_SECRET: ${{ secrets.DIALOG_CLIENT_SECRET }}
           # Source credentials, set only in the environments that need them (co_paris).
           EUDONET_PARIS_CREDENTIALS: ${{ secrets.EUDONET_PARIS_CREDENTIALS }}
+          FORCE: ${{ inputs.force_deletions }}
         # `--json` prints the run counters on stdout (the logs stay on stderr); they go
-        # to the step output named after this org.
+        # to a file named after this org, gathered by the notify job.
         run: |
           org="${{ matrix.organization }}"
           # --summary: the run's counters, funnel, alerts and errors. Written to a file
           # rather than to this job's summary: the notify job gathers them all into
           # one document, in matrix order (hence the job index in the name).
           summary="$(printf 'summary-%02d-%s.md' "${{ strategy.job-index }}" "$org")"
-          if uv run dialog integrate "$org" --json --summary "$summary" > result.json; then
+          release=""
+          if [ "$FORCE" = "true" ]; then release="--force-deletions"; fi
+          if uv run dialog integrate "$org" --json --summary "$summary" $release > result.json; then
             result="$(tr -d '\n' < result.json)"
             if [ -z "$result" ]; then
               result='{"success":true}'
@@ -98,7 +112,15 @@ jobs:
             fi
             echo "failed=true" >> "$GITHUB_OUTPUT"
           fi
-          echo "result_${org}=${result}" >> "$GITHUB_OUTPUT"
+          printf '%s' "$result" > "result_${org}.json"
+      - name: Upload the result for the notify job
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.organization }}
+          path: result_*.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Upload the run summary for the notify job
         if: always()
         uses: actions/upload-artifact@v4
@@ -113,8 +135,9 @@ jobs:
 
   notify:
     runs-on: ubuntu-latest
-    needs: integrate
-    if: always()
+    needs: [plan, integrate]
+    # Not when the plan itself failed: there is no list of organizations to report on.
+    if: always() && needs.plan.result == 'success'
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
@@ -131,6 +154,14 @@ jobs:
         with:
           pattern: summary-*
           path: summaries
+          merge-multiple: true
+
+      - name: Gather the results of every organization
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          path: results
           merge-multiple: true
 
       - name: Publish one report for the whole run
@@ -167,8 +198,8 @@ jobs:
           TCHAP_HOMESERVER_URL: ${{ secrets.TCHAP_HOMESERVER_URL }}
           TCHAP_ROOM_ID: ${{ secrets.TCHAP_ROOM_ID }}
           TCHAP_ACCESS_TOKEN: ${{ secrets.TCHAP_ACCESS_TOKEN }}
-          # Through the environment, never pasted into the script: an apostrophe in a
-          # result (a French label) would end the shell string and break the step.
-          RESULTS: ${{ toJson(needs.integrate.outputs) }}
+          # An organization of the plan without a result file is reported as failed.
+          EXPECTED: ${{ needs.plan.outputs.organizations }}
         run: |
-          uv run dialog notify --results "$RESULTS"
+          mkdir -p results
+          uv run dialog notify --results-dir results --expected "$EXPECTED"
