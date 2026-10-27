@@ -9,6 +9,7 @@ data sources, default status and synchronization options.
 from collections.abc import Sequence
 from datetime import datetime
 from importlib import util as importlib_util
+from urllib.parse import urlparse
 
 import polars as pl
 from loguru import logger
@@ -22,7 +23,7 @@ from api.dia_log_client.models import (
     SavePeriodDTO,
     SaveVehicleSetDTO,
 )
-from integrations import payloads
+from integrations import checks, payloads
 from integrations.api import DialogApi, build_client, split_failures
 from integrations.base_data_source_integration import BaseDataSourceIntegration, RegulationMeasure
 from integrations.shared.zone_sections import MAX_SECTIONS_PER_LENGTH, MIN_SECTION_LENGTH_M
@@ -33,15 +34,28 @@ from integrations.sync.closure import (
     save_payload_from_read,
 )
 from integrations.sync.dating import date_creation, date_update, has_undated_period, run_day
-from integrations.sync.reconciliation import IntegrationOutcome, UpdateMode, reconcile
+from integrations.sync.reconciliation import (
+    CLOSE,
+    DELETE,
+    FAILED,
+    PAUSED,
+    VOLUME,
+    IntegrationOutcome,
+    MissingPrefixError,
+    UpdateMode,
+    assert_identifiers_in_prefix,
+    reconcile,
+)
 from integrations.sync.report import SourceFunnel, render_report
 from integrations.sync.state import Digest, SnapshotStore, compute_regulation_digest
-from integrations.sync.totals import Totals, TotalsStore, total_shift
+from integrations.sync.totals import Totals, TotalsStore, total_shift, volume_drops
 from integrations.zone_flow import create_zone_regulation, has_zone
 from settings import OrganizationSettings
 
 # A zone regulation is updated by DELETE then POST: when the POST fails, it is gone.
 LOST_ON_UPDATE = "arrêté supprimé, nouvelle version non créée"
+UNBUILT = "construction impossible"
+SOURCE_FAILED = "source en échec"
 
 
 class BaseIntegration:
@@ -62,8 +76,13 @@ class BaseIntegration:
     # Defaults are purely additive: create what is missing, never update, never delete.
     #
     # `identifier_prefix` bounds every destructive operation to the regulations this
-    # pipeline owns; without it deletion is refused, not merely disabled.
+    # pipeline owns; without it deletion is refused, not merely disabled. An organization
+    # without one sets `legacy_additive`: what it creates stays in DiaLog for good, which
+    # has to be a decision, not an omission.
     identifier_prefix: str | None = None
+    legacy_additive: bool = False
+    # Set from `integrations.toml`, never in an `integration.py`.
+    paused_sources: frozenset[str] = frozenset()
     max_deletions_per_run: int | None = None
     max_closures_per_run: int | None = None
     max_updates_per_run: int | None = None
@@ -83,6 +102,12 @@ class BaseIntegration:
     @property
     def organization(self) -> str:
         return self.organization_settings.organization
+
+    @property
+    def target(self) -> str | None:
+        """The DiaLog host written to; it keys the state kept between runs."""
+        base_url = getattr(self.organization_settings, "base_url", None) or ""
+        return urlparse(base_url).hostname or base_url.strip("/") or None
 
     @classmethod
     def from_organization(cls, organization: str, env: str = "dev") -> "BaseIntegration":
@@ -131,6 +156,11 @@ class BaseIntegration:
         our prefix only). `dry_run` computes everything and writes nothing — neither
         to DiaLog nor to the snapshot.
         """
+        if not self.identifier_prefix and not self.legacy_additive:
+            raise MissingPrefixError(
+                f"{self.organization} declares no identifier_prefix: declare one, or set "
+                "legacy_additive to say that what it creates is never updated nor removed."
+            )
         outcome = IntegrationOutcome(organization=self.organization, dry_run=dry_run)
         # With `--identifiers`, the rest of the prefix is filtered out, not gone from the
         # source: nothing is deleted or closed, and the snapshot is left as it was.
@@ -140,26 +170,54 @@ class BaseIntegration:
         # would re-create the whole corpus as duplicates.
         remote_identifiers = self.fetch_regulation_ids()
 
-        update_mode = self._update_mode(update_existing)
         regulations: dict[str, PostApiRegulationsAddBody] = {}
         digests: dict[str, Digest] = {}
         source_of: dict[str, str] = {}
         funnels: list[SourceFunnel] = []
         stores: dict[str, SnapshotStore] = {}
+        unbuilt: set[str] = set()
+        # Left out by the common checks; also in `unbuilt`, but counted under their reason.
+        checked_out: set[str] = set()
+        # Built or not, by source: what the volume guard compares with the previous run.
+        produced_by_source: dict[str, int] = {}
+        prefix_of: dict[str, str | None] = {}
 
         for data_source in self.data_sources:
             name = data_source.name or data_source.__name__
+            stores[name] = SnapshotStore(self.organization, name, target=self.target)
+            prefix_of[name] = data_source.identifier_prefix or self.identifier_prefix
+            if name in self.paused_sources:
+                logger.warning(f"Data source {name} is paused: not read, nothing in it removed")
+                outcome.frozen_sources[name] = PAUSED
+                continue
             logger.info(f"Processing data source: {name}")
-            source = data_source(self.organization_settings, self.client)
-            clean_data, raw_rows = self._compute_clean_data(source)
+            try:
+                source = data_source(self.organization_settings, self.client)
+                clean_data, raw_rows = self._compute_clean_data(source)
+            except Exception as error:
+                # One source failing must not cost the others their run. What it held in
+                # DiaLog stays as it is: an exception says nothing about what left it.
+                logger.exception(f"Data source {name} failed, its regulations are left as is")
+                outcome.frozen_sources[name] = FAILED
+                outcome.error_causes[SOURCE_FAILED] = outcome.error_causes.get(SOURCE_FAILED, 0) + 1
+                outcome.source_errors[name] = repr(error)[:300]
+                continue
 
             if not whole_organization:
                 logger.info(f"Limiting processing to following ids : {limit_to}")
                 clean_data = clean_data.filter(pl.col("regulation_identifier").is_in(limit_to))
 
             logger.info(f"Total records from source {name}: {clean_data.shape[0]}")
+            unbuilt_before = len(unbuilt)
+            clean_data = self._apply_checks(name, clean_data, checked_out, outcome)
+            unbuilt |= checked_out
 
-            source_regulations = self.create_regulations(clean_data, source)
+            source_regulations = self.create_regulations(clean_data, source, unbuilt)
+            produced_by_source[name] = len(source_regulations) + len(unbuilt) - unbuilt_before
+            if data_source.identifier_prefix:
+                assert_identifiers_in_prefix(
+                    (str(r.identifier) for r in source_regulations), data_source.identifier_prefix
+                )
             for regulation in source_regulations:
                 regulation.identifier = f"{regulation.identifier}"
                 regulation.status = self.status
@@ -204,7 +262,6 @@ class BaseIntegration:
                 regulations[identifier] = regulation
                 digests[identifier] = compute_regulation_digest(regulation)
                 source_of[identifier] = name
-            stores[name] = SnapshotStore(self.organization, name)
 
         # The snapshot only exists for organizations that opted into update detection
         # or closure: both need to know what was last sent.
@@ -216,12 +273,27 @@ class BaseIntegration:
         )
         closed_at = closing_instant()
 
+        totals = TotalsStore(self.organization, target=self.target)
+        previous_totals = totals.load() if whole_organization else None
+        drops = volume_drops(previous_totals, produced_by_source)
+        if drops:
+            for name, (before, today) in drops.items():
+                logger.warning(
+                    f"Data source {name} produced {today} regulations against {before} on the "
+                    "previous run"
+                    + (": released by --force-deletions" if force_deletions else ": frozen")
+                )
+            outcome.volume_drops = drops
+            if not force_deletions:
+                outcome.frozen_sources |= {name: VOLUME for name in drops}
+        frozen_prefixes = self._frozen_prefixes(outcome.frozen_sources, prefix_of)
+
         plan = reconcile(
             digests,
             remote_identifiers,
             snapshot,
             identifier_prefix=self.identifier_prefix,
-            update_mode=update_mode,
+            update_mode=self._update_mode(update_existing),
             delete_missing=self.delete_missing and whole_organization,
             close_missing=self.close_missing and whole_organization,
             closed_at=closed_at,
@@ -230,9 +302,22 @@ class BaseIntegration:
             max_deletions=self.max_deletions_per_run,
             max_closures=self.max_closures_per_run,
             force_deletions=force_deletions,
+            unbuilt=unbuilt,
+            frozen_prefixes=frozen_prefixes,
         )
+        if plan.frozen:
+            logger.warning(
+                f"{len(plan.frozen)} regulations no longer produced are left as DiaLog has "
+                f"them, their source being frozen: {list(plan.frozen)[:10]}"
+            )
         outcome.planned = plan.planned
         outcome.held = plan.held
+        if not_built := unbuilt - checked_out:
+            logger.warning(
+                f"{len(not_built)} regulations could not be built, left as DiaLog has them: "
+                f"{sorted(not_built)[:10]}"
+            )
+            outcome.error_causes[UNBUILT] = len(not_built)
         outcome.regulations = outcome.produced = len(regulations)
         outcome.measures = sum(len(r.measures or []) for r in regulations.values())
         counted = [funnel.raw_rows for funnel in funnels if funnel.raw_rows is not None]
@@ -247,6 +332,8 @@ class BaseIntegration:
             produced=digests,
             snapshot=snapshot,
             force_deletions=force_deletions,
+            frozen_sources=outcome.frozen_sources,
+            volume_drops=outcome.volume_drops,
         )
         # Logged before writing anything, so a real run leaves the same trace as a
         # dry run in the CI log.
@@ -262,10 +349,29 @@ class BaseIntegration:
         updated, lost = self._integrate_regulations_update(
             [regulations[identifier] for identifier in plan.updates.applicable]
         )
-        deleted = self._delete_regulations(plan.deletions.applicable)
+        write_failures = getattr(self.api, "write_failures", {})
+        unwritten = (set(plan.creations.applicable) - set(created) - set(refused)) | (
+            set(plan.updates.applicable) - set(updated)
+        )
+        outages = [
+            i for i in unwritten if not getattr(write_failures.get(i), "is_rejection", False)
+        ]
+        deletions = plan.deletions.applicable
+        closures = plan.closures.applicable if plan.closures is not None else ()
+        if outages and not force_deletions:
+            # What was not written may have replaced what left the source. A refusal will
+            # be refused again tomorrow and does not wait; an outage does.
+            logger.warning(
+                f"{len(outages)} creations or updates got no answer: "
+                "deletions and closures wait for the next run"
+            )
+            waiting = {DELETE: len(deletions), CLOSE: len(closures)}
+            outcome.held |= {operation: n for operation, n in waiting.items() if n}
+            deletions = closures = ()
+        deleted = self._delete_regulations(deletions)
         closed_digests: dict[str, Digest] = {}
         if plan.closures is not None:
-            closed_digests = self._close_regulations(plan.closures.applicable, closed_at)
+            closed_digests = self._close_regulations(closures, closed_at)
             outcome.closed = len(closed_digests)
 
         outcome.created = len(created)
@@ -273,15 +379,12 @@ class BaseIntegration:
         outcome.deleted = len(deleted)
         outcome.refused = len(refused)
         failed = (
-            (set(plan.creations.applicable) - set(created) - set(refused))
-            | (set(plan.updates.applicable) - set(updated) - set(lost))
-            | (set(plan.deletions.applicable) - set(deleted))
+            (unwritten - set(lost))
+            | (set(deletions) - set(deleted))
+            | (set(closures) - set(closed_digests))
         )
-        if plan.closures is not None:
-            failed |= set(plan.closures.applicable) - set(closed_digests)
-        outcome.rejections, outcome.error_causes = split_failures(
-            sorted(failed), getattr(self.api, "write_failures", {})
-        )
+        outcome.rejections, causes = split_failures(sorted(failed), write_failures)
+        outcome.error_causes |= causes
         if lost:
             outcome.error_causes[LOST_ON_UPDATE] = len(lost)
         # Not in DiaLog after the run: the creations that were held, refused or failed.
@@ -291,19 +394,20 @@ class BaseIntegration:
         outcome.datasets = self._dataset_summaries(funnels, regulations, source_of, not_integrated)
 
         if whole_organization and (self.update_changed or self.close_missing):
-            # Closed today, or missing from the source and still in DiaLog: these stay
-            # in the snapshot so tomorrow knows they have ended (or retries a closure
-            # that failed or was held).
+            # Closed today, missing from the source and still in DiaLog, or not built
+            # today: these stay in the snapshot so tomorrow knows they have ended (or
+            # retries a closure that failed or was held, or an update the build missed).
             carried: dict[str, Digest] = dict(closed_digests)
-            if self.close_missing and snapshot:
-                remaining = set(plan.already_ended) | (
+            previous = snapshot or {}
+            remaining = {i for i in previous if payloads.is_part_of(i, unbuilt)}
+            remaining |= set(plan.frozen)
+            if plan.closures is not None:
+                remaining |= set(plan.already_ended) | (
                     set(plan.closures.identifiers) - set(closed_digests)
-                    if plan.closures is not None
-                    else set()
                 )
-                carried.update(
-                    {i: snapshot[i] for i in remaining if i in snapshot and i not in carried}
-                )
+            carried.update(
+                {i: previous[i] for i in remaining if i in previous and i not in carried}
+            )
             self._save_snapshots(
                 stores=stores,
                 source_of=source_of,
@@ -319,17 +423,62 @@ class BaseIntegration:
             )
 
         if whole_organization:
-            totals = TotalsStore(self.organization)
+            # A frozen source keeps its previous count as the baseline: a collapse is
+            # judged against the last volume that was trusted, until it is released.
+            counts = dict(produced_by_source)
+            for name in outcome.frozen_sources:
+                before = previous_totals.sources.get(name) if previous_totals else None
+                if before is not None:
+                    counts[name] = before
+                else:
+                    counts.pop(name, None)
             current = Totals(
                 dialog_in_prefix=plan.remote_in_prefix + outcome.created - outcome.deleted,
                 produced=len(regulations),
+                sources=counts,
             )
-            outcome.total_shift = total_shift(totals.load(), current)
+            outcome.total_shift = total_shift(previous_totals, current)
             if outcome.total_shift:
                 logger.warning(f"DiaLog total moved without production: {outcome.total_shift}")
             totals.save(current)
 
         return outcome
+
+    @staticmethod
+    def _apply_checks(
+        name: str, clean_data: pl.DataFrame, checked_out: set[str], outcome: IntegrationOutcome
+    ) -> pl.DataFrame:
+        """Leave out, whole, every regulation with a row failing a common check.
+
+        They go into `checked_out`, then into `unbuilt`: neither sent nor taken for gone.
+        """
+        failing = checks.failing_rows(clean_data)
+        if failing.is_empty():
+            return clean_data
+        for (reason,), group in failing.group_by("reason", maintain_order=True):
+            identifiers = group["regulation_identifier"].unique().to_list()
+            cause = f"contrôle : {reason}"
+            outcome.error_causes[cause] = outcome.error_causes.get(cause, 0) + len(identifiers)
+            logger.warning(
+                f"{name}: {len(identifiers)} regulations left out ({reason}), left as "
+                f"DiaLog has them: {sorted(identifiers)[:5]}"
+            )
+        left_out = set(failing["regulation_identifier"].to_list())
+        checked_out |= left_out
+        return clean_data.filter(
+            ~pl.col("regulation_identifier").cast(pl.Utf8).is_in(list(left_out))
+        )
+
+    def _frozen_prefixes(
+        self, frozen_sources: dict[str, str], prefix_of: dict[str, str | None]
+    ) -> list[str]:
+        """The prefixes inside which nothing is closed or deleted this run.
+
+        A source without its own prefix freezes the organization's, and with it every
+        other source: the pipeline cannot tell their regulations apart.
+        """
+        prefixes = {prefix_of[name] for name in frozen_sources}
+        return sorted(p for p in prefixes if p)
 
     def _update_mode(self, update_existing: bool | None) -> UpdateMode:
         """Reconcile the CLI flag with the organization's own setting.
@@ -646,14 +795,16 @@ class BaseIntegration:
             if read is None:
                 continue
             try:
-                payload = save_payload_from_read(read)
+                closed_payload, changed = close_payload(save_payload_from_read(read), closed_at)
+                regulation = PostApiRegulationsAddBody.from_dict(closed_payload)
+                digest = compute_regulation_digest(regulation)
             except ClosureNotRebuildable as e:
                 logger.error(f"Cannot close {identifier}, it would lose a detail: {e}")
                 continue
-
-            closed_payload, changed = close_payload(payload, closed_at)
-            regulation = PostApiRegulationsAddBody.from_dict(closed_payload)
-            digest = compute_regulation_digest(regulation)
+            except Exception as e:
+                # A read the rebuild does not expect: this one waits, the others go on.
+                logger.error(f"Cannot close {identifier}, unexpected read: {e!r}")
+                continue
             if not changed:
                 logger.info(f"{identifier} had already ended, nothing to write")
                 closed[identifier] = digest
@@ -698,6 +849,7 @@ class BaseIntegration:
         self,
         clean_data: pl.DataFrame,
         source: BaseDataSourceIntegration | type[BaseDataSourceIntegration] | None = None,
+        unbuilt: set[str] | None = None,
     ) -> list[PostApiRegulationsAddBody]:
         """The source decides how its rows fold into measures and regulations.
 
@@ -710,6 +862,7 @@ class BaseIntegration:
             self.create_measure,
             group_locations_by_measure=bool(source and source.group_locations_by_measure),
             max_locations_per_regulation=source.max_locations_per_regulation if source else None,
+            unbuilt=unbuilt,
         )
 
     def create_measure(
