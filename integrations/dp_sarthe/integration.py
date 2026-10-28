@@ -1,5 +1,5 @@
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
-from integrations.base_integration import BaseIntegration
+from run.organization import BaseIntegration
 
 from .chantiers_routiers.data_source_integration import DataSourceIntegration as ChantiersRoutiers
 from .limitations_vitesse.data_source_integration import DataSourceIntegration as LimitationsVitesse

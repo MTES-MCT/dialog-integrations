@@ -9,8 +9,7 @@ from api.dia_log_client.models import (
     SaveLocationDTO,
     SaveNamedStreetDTO,
 )
-from integrations.base_data_source_integration import RegulationMeasure
-from integrations.base_integration import BaseIntegration
+from canonical.regulation_measure import RegulationMeasure
 from integrations.co_paris.eudonet import locations
 from integrations.co_paris.eudonet.locations import (
     Bound,
@@ -20,6 +19,7 @@ from integrations.co_paris.eudonet.locations import (
     parse_house_number,
     parse_house_number_range,
 )
+from run.organization import BaseIntegration
 
 INPUT_COLUMNS = {
     "l_file_id": pl.Int64,

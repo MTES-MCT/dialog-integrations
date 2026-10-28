@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from integrations.sync.reconciliation import IntegrationOutcome
-from notifications.summary import MAX_LINES_PER_LEVEL, render_summary
+from report.summary import MAX_LINES_PER_LEVEL, render_summary
+from sync.outcome import IntegrationOutcome
 
 
 def _record(level: str, name: str, message: str) -> dict:

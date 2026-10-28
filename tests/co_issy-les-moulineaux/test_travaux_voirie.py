@@ -13,7 +13,7 @@ import polars as pl
 import pytest
 
 from api.dia_log_client.models import MeasureTypeEnum, PostApiRegulationsAddBodyStatus
-from integrations.base_integration import BaseIntegration
+from run.organization import BaseIntegration
 
 MODULE = "integrations.co_issy-les-moulineaux.travaux_voirie.data_source_integration"
 

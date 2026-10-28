@@ -1,6 +1,6 @@
 import pytest
 
-from integrations.sync.totals import Totals, TotalsStore, total_shift
+from sync.totals import Totals, TotalsStore, total_shift
 
 
 @pytest.mark.parametrize(

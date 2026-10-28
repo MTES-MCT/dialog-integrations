@@ -1,6 +1,6 @@
 import json
 
-from integrations.shared.zone_sections import length_m, line_pieces, sections_of
+from dialog.zone_sections import length_m, line_pieces, sections_of
 
 # In Lyon, 0.001° of longitude is ~78 m and 0.00003° is ~2.3 m.
 LONG = [[4.83, 45.76], [4.831, 45.76]]
@@ -45,7 +45,7 @@ def test_reads_lines_out_of_a_geometry_collection():
 
 # --- parallel roads ----------------------------------------------------------------
 
-from integrations.shared.zone_sections import sections_per_length  # noqa: E402
+from dialog.zone_sections import sections_per_length  # noqa: E402
 
 # A 78 m × 7.8 m rectangle: one road inside gives a ratio near 1, four give near 4.
 RECT = json.dumps(

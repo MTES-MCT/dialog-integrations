@@ -16,12 +16,12 @@ from api.dia_log_client.models import (
 from api.dia_log_client.models import (
     PostApiRegulationsAddBodyMeasuresItemVehicleSetType0RestrictedTypesType0Item as VehicleRestrictedTypeEnum,  # noqa
 )
-from integrations.base_data_source_integration import BaseDataSourceIntegration
+from canonical.source import BaseDataSourceIntegration
 from integrations.dp_aveyron.restrictions_gabarits.schema import (
     AveyronPrescriptionsRoutieresRawDataSchema,
 )
-from integrations.shared.download import DOWNLOAD_TIMEOUT
-from integrations.shared.local_time import start_of_local_day
+from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.transforms.local_time import start_of_local_day
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/prescriptions-routieres-du-departement-aveyron/exports/parquet"
 LOCAL_FILE = "explorations/dp_aveyron/data/prescriptions-routieres-du-departement-aveyron.parquet"
@@ -182,7 +182,7 @@ def compute_period_fields(df: pl.DataFrame):
       nothing supports. R-39: no date at all.
 
     Rows with no readable date are left undated either way: signed, signposted and in
-    force, only the day of signature is missing. `integrations/sync/dating.py` resolves
+    force, only the day of signature is missing. `sync/dating.py` resolves
     the null when DiaLog is written: the day of the run on creation ("this applies now"),
     the date DiaLog already holds on update. Dating them the day of the run here would
     make them look modified each morning.

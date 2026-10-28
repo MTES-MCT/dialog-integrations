@@ -16,7 +16,7 @@ spaces), and the shortest illegitimate one, `SensNord/Sud` (12) — see R-78.
 import re
 from dataclasses import dataclass
 
-from integrations.shared.time_slots import _CLOCK, _SLOT, parse_time_slots
+from toolkit.transforms.time_slots import _CLOCK, _SLOT, parse_time_slots
 
 # `Sauf riverain` / `Sauf riverains`, the one exemption the layer spells out.
 RESIDENT_EXEMPTION = re.compile(r"sauf\s+riverains?", re.IGNORECASE)

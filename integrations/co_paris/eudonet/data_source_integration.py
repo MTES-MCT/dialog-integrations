@@ -7,10 +7,10 @@ from zoneinfo import ZoneInfo
 import polars as pl
 from loguru import logger
 
-from integrations.api import DialogApi
-from integrations.base_data_source_integration import BaseDataSourceIntegration
-from integrations.shared.local_time import PARIS
-from integrations.sync.state import state_dir
+from canonical.source import BaseDataSourceIntegration
+from dialog.calls import DialogApi
+from sync.snapshot import state_dir
+from toolkit.transforms.local_time import PARIS
 
 from .client import EudonetClient, EudonetError
 from .extraction import extract_tables

@@ -2,7 +2,7 @@
 
 import pytest
 
-from notifications.notifier import Notifier
+from report.notifier import Notifier
 
 # Deliberately out of order: GitHub matrix job outputs have no guaranteed order.
 RESULTS = {

@@ -1,9 +1,9 @@
 """One organization: its data sources, and what it does with their regulations.
 
-The class is the orchestrator. Building the payloads lives in `payloads.py`, talking to
-DiaLog in `api.py`, zones in `zone_flow.py`, and deciding what to create, update,
-close and delete in `sync/`; an organization's `integration.py` subclasses this and declares its
-data sources, default status and synchronization options.
+The class is the orchestrator. Building the payloads lives in `payloads/`, talking to
+DiaLog in `dialog/`, and deciding what to create, update, close and delete in `sync/`;
+an organization's `integration.py` subclasses this and declares its data sources,
+default status and synchronization options.
 """
 
 from collections.abc import Sequence
@@ -23,34 +23,37 @@ from api.dia_log_client.models import (
     SavePeriodDTO,
     SaveVehicleSetDTO,
 )
-from integrations import checks, payloads
-from integrations.api import DialogApi, build_client, split_failures
-from integrations.base_data_source_integration import BaseDataSourceIntegration, RegulationMeasure
-from integrations.shared.zone_sections import MAX_SECTIONS_PER_LENGTH, MIN_SECTION_LENGTH_M
-from integrations.sync.closure import (
+from canonical.regulation_measure import RegulationMeasure
+from canonical.source import BaseDataSourceIntegration
+from checks import rows as checks
+from dialog.calls import DialogApi
+from dialog.client import build_client
+from dialog.failures import split_failures
+from dialog.zone_flow import create_zone_regulation, has_zone
+from dialog.zone_sections import MAX_SECTIONS_PER_LENGTH, MIN_SECTION_LENGTH_M
+from payloads.measures import build_location, build_measure, build_period, build_vehicle_set
+from payloads.regulations import build_regulations, is_part_of
+from report.sync_report import SourceFunnel, render_report
+from settings import OrganizationSettings
+from sync.closure import (
     ClosureNotRebuildable,
     close_payload,
     closing_instant,
     save_payload_from_read,
 )
-from integrations.sync.dating import date_creation, date_update, has_undated_period, run_day
-from integrations.sync.reconciliation import (
+from sync.dating import date_creation, date_update, has_undated_period, run_day
+from sync.digest import Digest, compute_regulation_digest
+from sync.outcome import FAILED, PAUSED, VOLUME, IntegrationOutcome
+from sync.plan import (
     CLOSE,
     DELETE,
-    FAILED,
-    PAUSED,
-    VOLUME,
-    IntegrationOutcome,
     MissingPrefixError,
     UpdateMode,
     assert_identifiers_in_prefix,
     reconcile,
 )
-from integrations.sync.report import SourceFunnel, render_report
-from integrations.sync.state import Digest, SnapshotStore, compute_regulation_digest
-from integrations.sync.totals import Totals, TotalsStore, total_shift, volume_drops
-from integrations.zone_flow import create_zone_regulation, has_zone
-from settings import OrganizationSettings
+from sync.snapshot import SnapshotStore
+from sync.totals import Totals, TotalsStore, total_shift, volume_drops
 
 # A zone regulation is updated by DELETE then POST: when the POST fails, it is gone.
 LOST_ON_UPDATE = "arrêté supprimé, nouvelle version non créée"
@@ -396,7 +399,7 @@ class BaseIntegration:
             # retries a closure that failed or was held, or an update the build missed).
             carried: dict[str, Digest] = dict(closed_digests)
             previous = snapshot or {}
-            remaining = {i for i in previous if payloads.is_part_of(i, unbuilt)}
+            remaining = {i for i in previous if is_part_of(i, unbuilt)}
             remaining |= set(plan.frozen)
             if plan.closures is not None:
                 remaining |= set(plan.already_ended) | (
@@ -839,8 +842,8 @@ class BaseIntegration:
 
     # --- payloads -------------------------------------------------------------------
     # `create_regulations` and `create_measure` are the override points. The three
-    # `create_save_*_dto` below are called by nobody: `payloads.build_measure` calls
-    # `payloads.build_period` & co. directly, so overriding them has no effect.
+    # `create_save_*_dto` below are called by nobody: `build_measure` calls
+    # `build_period` & co. directly, so overriding them has no effect.
 
     def create_regulations(
         self,
@@ -853,7 +856,7 @@ class BaseIntegration:
         Only class attributes are read, so the class itself does as well as an instance
         (tests build payloads without instantiating a source).
         """
-        return payloads.build_regulations(
+        return build_regulations(
             clean_data,
             self.status,
             self.create_measure,
@@ -865,13 +868,13 @@ class BaseIntegration:
     def create_measure(
         self, measure: RegulationMeasure, locations: list[RegulationMeasure] | None = None
     ) -> SaveMeasureDTO:
-        return payloads.build_measure(measure, locations)
+        return build_measure(measure, locations)
 
     def create_save_period_dto(self, measure: RegulationMeasure) -> SavePeriodDTO:
-        return payloads.build_period(measure)
+        return build_period(measure)
 
     def create_save_location_dto(self, measure: RegulationMeasure) -> SaveLocationDTO:
-        return payloads.build_location(measure)
+        return build_location(measure)
 
     def create_save_vehicle_dto(self, measure: RegulationMeasure) -> SaveVehicleSetDTO:
-        return payloads.build_vehicle_set(measure)
+        return build_vehicle_set(measure)

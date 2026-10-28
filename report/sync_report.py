@@ -1,7 +1,7 @@
 """Render the synchronization report — in French, it is read by the team.
 
 Two things live here: a field-by-field diff between two digests
-(`sync/state.py`), and the report printed by `--dry-run` and logged before
+(`sync/digest.py`), and the report printed by `--dry-run` and logged before
 every real run.
 """
 
@@ -11,15 +11,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from integrations.sync.reconciliation import (
-    CLOSE,
-    CREATE,
-    DELETE,
-    UPDATE,
-    Batch,
-    ReconciliationPlan,
-)
-from integrations.sync.state import Digest
+from sync.digest import Digest
+from sync.plan import CLOSE, CREATE, DELETE, UPDATE, Batch, ReconciliationPlan
 
 # Beyond that, only the head of the list is printed: the report has to stay readable
 # in a terminal and in the CI log.

@@ -13,8 +13,8 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
 )
-from integrations.base_data_source_integration import BaseDataSourceIntegration
-from integrations.shared.download import DOWNLOAD_TIMEOUT
+from canonical.source import BaseDataSourceIntegration
+from toolkit.connectors.download import DOWNLOAD_TIMEOUT
 
 from .schema import RennesCirculationInterditeRawDataSchema
 

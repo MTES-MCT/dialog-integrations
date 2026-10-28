@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from integrations.sync.closure import (
+from sync.closure import (
     ClosureNotRebuildable,
     close_payload,
     closing_instant,

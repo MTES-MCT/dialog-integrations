@@ -4,7 +4,7 @@ import polars as pl
 from loguru import logger
 
 from api.dia_log_client.models import PeriodRecurrenceTypeEnum, PostApiRegulationsAddBodySubject
-from integrations.shared.local_time import end_of_local_day, start_of_local_day
+from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 
 from .counts import count_by
 from .text import plain_text, truncate

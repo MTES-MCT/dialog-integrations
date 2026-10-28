@@ -5,13 +5,8 @@ import polars as pl
 import pytest
 
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
-from integrations.payloads import (
-    build_location,
-    build_measure,
-    build_period,
-    build_regulations,
-    build_vehicle_set,
-)
+from payloads.measures import build_location, build_measure, build_period, build_vehicle_set
+from payloads.regulations import build_regulations
 
 
 def period(**overrides):

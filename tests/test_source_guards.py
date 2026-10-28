@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from integrations.base_data_source_integration import BaseDataSourceIntegration
-from integrations.base_integration import BaseIntegration
-from integrations.sync.reconciliation import IdentifierOutsidePrefixError, MissingPrefixError
-from integrations.sync.state import SnapshotStore
-from integrations.sync.totals import Totals, TotalsStore
+from canonical.source import BaseDataSourceIntegration
+from run.organization import BaseIntegration
+from sync.plan import IdentifierOutsidePrefixError, MissingPrefixError
+from sync.snapshot import SnapshotStore
+from sync.totals import Totals, TotalsStore
 from tests.sync_fixtures import measure_rows
 
 ORG = "OR-"
@@ -172,7 +172,7 @@ def test_a_source_unknown_yesterday_is_not_judged_on_its_volume(monkeypatch, tmp
 
 
 def test_what_a_frozen_source_left_stays_in_the_snapshot(monkeypatch, tmp_path):
-    from integrations.sync.state import compute_regulation_digest
+    from sync.digest import compute_regulation_digest
     from tests.sync_fixtures import build_regulation
 
     digest = compute_regulation_digest(build_regulation(f"{B}kept"))

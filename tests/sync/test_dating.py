@@ -18,8 +18,8 @@ from api.dia_log_client.models import (
     SaveRawGeoJSONDTO,
     SaveVehicleSetDTO,
 )
-from integrations.sync.dating import date_creation, date_update, has_undated_period, run_day
-from integrations.sync.state import compute_regulation_digest, fingerprint
+from sync.dating import date_creation, date_update, has_undated_period, run_day
+from sync.digest import compute_regulation_digest, fingerprint
 from tests.sync.test_closure import READ
 from tests.sync_fixtures import geometry
 

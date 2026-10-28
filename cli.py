@@ -8,10 +8,10 @@ import typer
 from loguru import logger
 
 import registry
-from integrations.base_integration import BaseIntegration
-from notifications.notifier import Notifier
-from notifications.summary import render_summary
-from notifications.tchap_bot import TchapBot
+from report.notifier import Notifier
+from report.summary import render_summary
+from report.tchap_bot import TchapBot
+from run.organization import BaseIntegration
 from settings import Organization
 
 # By default loguru prints the value of every variable of a failing frame, and Typer the

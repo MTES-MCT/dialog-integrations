@@ -23,7 +23,7 @@ import polars as pl
 from loguru import logger
 
 from api.dia_log_client.errors import UnexpectedStatus
-from integrations.api import DialogApi, PublicExportUnreadable
+from dialog.calls import DialogApi, PublicExportUnreadable
 
 from .locations import CITY_CODE_BY_DISTRICT
 from .regulations import IDENTIFIER_PREFIX

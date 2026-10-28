@@ -1,5 +1,5 @@
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
-from integrations.base_integration import BaseIntegration
+from run.organization import BaseIntegration
 
 from .eudonet.data_source_integration import DataSourceIntegration as Eudonet
 from .eudonet.regulations import IDENTIFIER_PREFIX

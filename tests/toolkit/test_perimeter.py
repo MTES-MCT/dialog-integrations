@@ -1,4 +1,4 @@
-"""`integrations/shared/perimeter.py` — rebuilding DiaLog's competence check upstream."""
+"""`toolkit/transforms/perimeter.py` — rebuilding DiaLog's competence check upstream."""
 
 import json
 
@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 from shapely.geometry import box
 
-from integrations.shared.perimeter import (
+from toolkit.transforms.perimeter import (
     SIMPLIFICATION_BY_CODE_TYPE,
     Perimeter,
     discard_outside_perimeter,

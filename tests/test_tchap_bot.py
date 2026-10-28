@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 import requests
 
-from notifications.tchap_bot import TchapBot
+from report.tchap_bot import TchapBot
 
 TCHAP_ENV_VARS = ("TCHAP_HOMESERVER_URL", "TCHAP_ACCESS_TOKEN", "TCHAP_ROOM_ID")
 
@@ -40,7 +40,7 @@ def without_configuration(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("no network call may happen without configuration")
 
-    monkeypatch.setattr("notifications.tchap_bot.requests.put", forbidden)
+    monkeypatch.setattr("report.tchap_bot.requests.put", forbidden)
 
 
 def test_quotes_coming_from_env_files_are_stripped():
@@ -75,7 +75,7 @@ def test_sending_calls_the_matrix_api(bot, monkeypatch):
         captured.update(url=url, headers=headers, payload=json, timeout=timeout)
         return _FakeResponse()
 
-    monkeypatch.setattr("notifications.tchap_bot.requests.put", fake_put)
+    monkeypatch.setattr("report.tchap_bot.requests.put", fake_put)
     event_id = bot.send("hello", "<p>hello</p>")
 
     assert event_id == "$event:example.org"
@@ -103,7 +103,7 @@ def test_a_plain_text_message_carries_no_format(bot, monkeypatch):
         captured.update(payload=json)
         return _FakeResponse()
 
-    monkeypatch.setattr("notifications.tchap_bot.requests.put", fake_put)
+    monkeypatch.setattr("report.tchap_bot.requests.put", fake_put)
     bot.send("hello")
 
     assert captured["payload"] == {"msgtype": "m.text", "body": "hello"}
@@ -113,7 +113,7 @@ def test_rejected_token_propagates_the_error(bot, monkeypatch):
     rejection = requests.Response()
     rejection.status_code = 401
 
-    monkeypatch.setattr("notifications.tchap_bot.requests.put", lambda *a, **k: rejection)
+    monkeypatch.setattr("report.tchap_bot.requests.put", lambda *a, **k: rejection)
 
     with pytest.raises(requests.HTTPError):
         bot.send("hello")
