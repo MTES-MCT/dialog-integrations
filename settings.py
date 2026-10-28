@@ -9,12 +9,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 Organization = Enum(
     "Organization",
     {
-        name: name
-        for name in [
-            p.name
-            for p in Path("integrations").iterdir()
-            if p.is_dir() and p.name != "shared" and not p.name.startswith("__")
-        ]
+        p.name: p.name
+        for p in sorted(Path("integrations").iterdir())
+        if p.is_dir() and (p / "integration.py").is_file()
     },
     type=str,
 )

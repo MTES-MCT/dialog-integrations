@@ -7,4 +7,6 @@ from integrations.co_brest.permanent_lineaire.data_source_integration import Dat
 
 class Integration(BaseIntegration):
     status = PostApiRegulationsAddBodyStatus.PUBLISHED
+    # Legacy integration kept as is by decision: it never updates nor removes.
+    legacy_additive = True
     data_sources = [DataSourceIntegration]

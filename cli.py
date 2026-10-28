@@ -1,11 +1,13 @@
 import json
 import sys
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
 
 import typer
 from loguru import logger
 
+import registry
 from integrations.base_integration import BaseIntegration
 from notifications.notifier import Notifier
 from notifications.summary import render_summary
@@ -67,6 +69,9 @@ def integrate(
 ):
     """Sync data for a specific organization to Dialog API."""
     dialog_integration = BaseIntegration.from_organization(organization.name, env=env)
+    entry = registry.entry(organization.name)
+    if entry and entry.paused:
+        dialog_integration.paused_sources = frozenset(entry.paused)
     logger.info(f"Integrating measures for organization: {organization.name} (env: {env})")
     # The host actually written to, so the Tchap report can file the run under its
     # target. Scheme and trailing slash are dropped; a URL without scheme is kept as is.
@@ -111,6 +116,30 @@ def integrate(
     elif dry_run:
         typer.echo(outcome.report)
 
+    # Outages and a few refusals do not fail the run; a failed source or refusals past the
+    # alert threshold turn this organization's job red, whatever the others did.
+    if outcome.failed_sources or outcome.rejections_alarming:
+        logger.error(
+            f"{organization.name}: failed sources {outcome.failed_sources}, "
+            f"refusals {outcome.rejections}"
+        )
+        raise typer.Exit(code=1)
+
+
+def read_results(directory: Path, expected: list[str]) -> dict[str, str]:
+    """The results the integration jobs left, keyed `result_{org}` as the notifier reads them.
+
+    An expected organization without a file died before writing it: it is reported as
+    a failure, never left out of the message.
+    """
+    found = {
+        path.stem: path.read_text(encoding="utf-8").strip()
+        for path in sorted(directory.glob("result_*.json"))
+    }
+    for organization in expected:
+        found.setdefault(f"result_{organization}", "")
+    return {key: value or '{"success": false}' for key, value in found.items()}
+
 
 def _append_summary(path: str, markdown: str) -> None:
     with open(path, "a", encoding="utf-8") as handle:
@@ -130,15 +159,26 @@ def publish(
 
 @app.command()
 def notify(
-    results: Annotated[str, typer.Option(help="JSON results from integration step")],
+    results: Annotated[
+        str | None, typer.Option(help='JSON results, {"result_{org}": result}')
+    ] = None,
+    results_dir: Annotated[
+        str | None, typer.Option(help="Folder of result_{org}.json files written by the jobs")
+    ] = None,
+    expected: Annotated[
+        str | None,
+        typer.Option(help="Comma-separated organizations that ran; a missing result is a failure"),
+    ] = None,
     dry_run: Annotated[bool, typer.Option(help="Render the message without posting it")] = False,
 ):
     """Notify Tchap with integration results."""
     try:
-        results_data = json.loads(results)
+        results_data = json.loads(results) if results else {}
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON results: {e}")
         raise typer.Exit(code=1)
+    if results_dir is not None:
+        results_data |= read_results(Path(results_dir), comma_list(expected) if expected else [])
 
     logger.info(f"Processing integration results: {results_data}")
     body, formatted_body = Notifier().format_message(results_data)

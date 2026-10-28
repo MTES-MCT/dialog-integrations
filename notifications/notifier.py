@@ -154,6 +154,8 @@ class Notifier:
         """A counter read from a result; anything but a positive integer counts as 0."""
         return value if isinstance(value, int) and value > 0 else 0
 
+    FROZEN_LABELS = {"failed": "en échec", "paused": "en pause", "volume": "volume"}
+
     @classmethod
     def format_alerts(cls, result: dict) -> list[str]:
         """One line per thing to look at or left out; shared with the GitHub summary."""
@@ -165,7 +167,7 @@ class Notifier:
                 f"{count} {cls.HELD_LABELS.get(operation, operation)}"
                 for operation, count in sorted(held.items())
             )
-            lines.append(f"⚠️ lot retenu (plafond dépassé) : {rendered} - à revoir manuellement")
+            lines.append(f"⚠️ lot retenu : {rendered} - à revoir manuellement")
 
         if errors := cls._count(result.get("errors")):
             line = f"⚠️ Attention : {errors} erreur{'s' if errors > 1 else ''} lors des écritures"
@@ -173,6 +175,19 @@ class Notifier:
             if isinstance(causes, dict) and causes:
                 line += " (" + ", ".join(f"{c} : {n}" for c, n in causes.items()) + ")"
             lines.append(line)
+
+        frozen = result.get("frozen_sources")
+        if isinstance(frozen, dict) and frozen:
+            reported = result.get("volume_drops")
+            drops = reported if isinstance(reported, dict) else {}
+            rendered = []
+            for name, why in sorted(frozen.items()):
+                reason = cls.FROZEN_LABELS.get(why, str(why))
+                drop = drops.get(name)
+                if isinstance(drop, list) and len(drop) == 2:
+                    reason += f" {drop[0]} → {drop[1]}"
+                rendered.append(f"{name} ({reason})")
+            lines.append("⚠️ source gelée, rien n'y est clos ni supprimé : " + ", ".join(rendered))
 
         shift = result.get("total_shift")
         if isinstance(shift, dict) and shift:

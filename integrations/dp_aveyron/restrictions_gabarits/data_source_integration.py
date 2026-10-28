@@ -32,6 +32,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     raw_data_schema = AveyronPrescriptionsRoutieresRawDataSchema
     name = "restrictions_gabarits"
+    identifier_prefix = "AV-GB-"
 
     # R-28: one arrete carries one measure per distinct sign-and-value, and that measure
     # carries every stretch it applies to.

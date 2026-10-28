@@ -98,8 +98,8 @@ LOCATION_COLUMNS = {
     "location_to_house_number": pl.Utf8,
     "location_to_road_name": pl.Utf8,
     "location_direction": pl.Utf8,
-    "location_rejection": pl.Utf8,
-    "location_district_source": pl.Utf8,
+    "_location_rejection": pl.Utf8,
+    "_location_district_source": pl.Utf8,
 }
 
 _INPUT_COLUMNS = [
@@ -277,20 +277,20 @@ def resolve_location(row: dict) -> dict:
     fields: dict = {name: None for name in LOCATION_COLUMNS}
 
     if row["l_file_id"] is None:
-        return {**fields, "location_rejection": "measure without location"}
+        return {**fields, "_location_rejection": "measure without location"}
     if row["l_status"] in WITHDRAWN_STATUSES:
-        return {**fields, "location_rejection": "withdrawn location"}
+        return {**fields, "_location_rejection": "withdrawn location"}
     road_name = official_street_name((row["l_road_name"] or "").strip())
     if not road_name:
-        return {**fields, "location_rejection": "no road name"}
+        return {**fields, "_location_rejection": "no road name"}
     if row["l_direction"] not in (None, BOTH_DIRECTIONS_LABEL):
-        return {**fields, "location_rejection": "one direction only (R-32 freeze)"}
+        return {**fields, "_location_rejection": "one direction only (R-32 freeze)"}
     if row["l_side"] in ONE_SIDE_LABELS:
-        return {**fields, "location_rejection": "one side of the street only"}
+        return {**fields, "_location_rejection": "one side of the street only"}
 
     bounds = _bounds(row, road_name)
     if isinstance(bounds, str):
-        return {**fields, "location_rejection": bounds}
+        return {**fields, "_location_rejection": bounds}
     start, end = bounds
     bound_numbers = [
         bound.house_number
@@ -299,7 +299,7 @@ def resolve_location(row: dict) -> dict:
     ]
     code, district_source = resolve_city_code(row["l_district"], road_name, bound_numbers)
     if code is None:
-        return {**fields, "location_rejection": "no arrondissement"}
+        return {**fields, "_location_rejection": "no arrondissement"}
 
     fields.update(
         location_road_type=RoadTypeEnum.LANE.value,
@@ -307,7 +307,7 @@ def resolve_location(row: dict) -> dict:
         location_city_label=CITY_LABEL,
         location_road_name=road_name,
         location_direction=DirectionEnum.BOTH.value,
-        location_district_source=district_source,
+        _location_district_source=district_source,
     )
     if start is not None and end is not None:
         fields.update(
@@ -387,24 +387,24 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     )
     df = df.with_columns(resolved).unnest("resolved")
 
-    rejected = df.filter(pl.col("location_rejection").is_not_null())
+    rejected = df.filter(pl.col("_location_rejection").is_not_null())
     if rejected.height:
         reasons = dict(
-            rejected.get_column("location_rejection").value_counts(sort=True).iter_rows()
+            rejected.get_column("_location_rejection").value_counts(sort=True).iter_rows()
         )
         logger.warning(f"Dropping {rejected.height} locations DiaLog cannot take: {reasons}")
-    df = df.filter(pl.col("location_rejection").is_null()).drop("location_rejection")
+    df = df.filter(pl.col("_location_rejection").is_null()).drop("_location_rejection")
 
-    deduced = df.filter(pl.col("location_district_source") != DISTRICT_FROM_SOURCE)
+    deduced = df.filter(pl.col("_location_district_source") != DISTRICT_FROM_SOURCE)
     if deduced.height:
         sources = dict(
-            deduced.get_column("location_district_source").value_counts(sort=True).iter_rows()
+            deduced.get_column("_location_district_source").value_counts(sort=True).iter_rows()
         )
         logger.info(
             f"{deduced.height} locations without a single arrondissement in the source, "
             f"settled by the street referential or kept on the first cited: {sources}"
         )
-    df = df.drop("location_district_source")
+    df = df.drop("_location_district_source")
 
     if df.height:
         shapes = dict(df.get_column("l_scope").value_counts(sort=True).iter_rows())

@@ -77,12 +77,25 @@ class RegulationMeasure(TypedDict):
     vehicle_other_restricted_type_text: str | None
 
 
+PIVOT_FAMILIES = ("period_", "location_", "regulation_", "measure_", "vehicle_")
+
+
+def unknown_pivot_columns(columns: list[str]) -> list[str]:
+    """Columns with a pivot prefix that the pivot does not declare."""
+    declared = set(get_type_hints(RegulationMeasure))
+    return sorted(c for c in columns if c.startswith(PIVOT_FAMILIES) and c not in declared)
+
+
 class BaseDataSourceIntegration:
     """One data source. Subclasses set `name` and `raw_data_schema`, and implement
     `fetch_raw_data` and `compute_clean_data`."""
 
     name: str | None = None
     raw_data_schema: type[pa.DataFrameModel] | None = None
+
+    # Owned inside the organization's prefix (`AV-LV-` in `AV-`): a failing or paused
+    # source freezes only this one.
+    identifier_prefix: str | None = None
 
     # Opt-in: collapse the rows sharing a `measure_group_key` into a single measure
     # carrying every one of their locations (R-28). Off by default: the sources already
@@ -174,8 +187,12 @@ class BaseDataSourceIntegration:
         raise NotImplementedError("Subclasses must implement compute_clean_data method")
 
     def select_regulation_measure_fields(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Keep the `RegulationMeasure` columns present in `df`. Any other column,
-        a misspelt one included, is dropped without warning (D-08)."""
+        """Keep the pivot columns; an unknown one with a pivot prefix is logged (D-08)."""
+        unknown = unknown_pivot_columns(df.columns)
+        if unknown:
+            logger.error(
+                f"{self.name}: columns named like the pivot but not in it, dropped: {unknown}"
+            )
         required_fields = list(get_type_hints(RegulationMeasure).keys())
         available_fields = [field for field in required_fields if field in df.columns]
 

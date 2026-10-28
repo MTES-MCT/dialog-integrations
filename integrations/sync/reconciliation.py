@@ -20,6 +20,8 @@ Two guard rails:
   receives regulations from channels outside this repository.
 - a batch over its cap is held **whole** and flagged for manual review; its previous
   digest stays in the snapshot so it is detected again, identically, the next day.
+  While creations or updates are held, what left the source is held too: they may
+  carry its segments, and removing it first would leave them without a limit.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
+from integrations.payloads import is_part_of
 from integrations.sync.closure import is_ended
 from integrations.sync.state import Digest, fingerprint
 
@@ -36,6 +39,11 @@ CREATE = "create"
 UPDATE = "update"
 DELETE = "delete"
 CLOSE = "close"
+
+# Why a source is frozen for the run: nothing under its prefix is closed or deleted.
+FAILED = "failed"
+PAUSED = "paused"
+VOLUME = "volume"
 
 # "none": never update. "changed": update what differs from the snapshot (the class
 # attribute `update_changed`). "all": update everything already in DiaLog — what the
@@ -59,6 +67,10 @@ class IdentifierOutsidePrefixError(SynchronizationError):
     """A produced identifier does not carry the declared prefix."""
 
 
+class MissingPrefixError(SynchronizationError):
+    """An organization declares neither an identifier prefix nor that it only adds."""
+
+
 @dataclass(frozen=True)
 class Batch:
     """A set of identifiers to apply one operation to, and its cap."""
@@ -71,6 +83,10 @@ class Batch:
     @property
     def size(self) -> int:
         return len(self.identifiers)
+
+    @property
+    def over_cap(self) -> bool:
+        return self.limit is not None and self.size > self.limit
 
     @property
     def applicable(self) -> tuple[str, ...]:
@@ -94,6 +110,8 @@ class ReconciliationPlan:
     identifier_prefix: str | None = None
     remote_total: int = 0
     remote_in_prefix: int = 0
+    # Missing, but under the prefix of a frozen source: neither deleted nor closed.
+    frozen: tuple[str, ...] = ()
 
     @property
     def batches(self) -> tuple[Batch, ...]:
@@ -134,8 +152,8 @@ class IntegrationOutcome:
     # command itself exits non-zero.
     error_causes: dict[str, int] = field(default_factory=dict)
     rejections: int = 0
-    # Regulations the pipeline itself refused (a zone covering parallel roads): not an
-    # API failure, retried every day until the source changes.
+    # Regulations the pipeline itself left out (a zone over parallel roads, a failed check,
+    # a measure it cannot build): not an API failure, retried every day.
     refused: int = 0
     planned: dict[str, int] = field(default_factory=dict)
     held: dict[str, int] = field(default_factory=dict)
@@ -152,11 +170,18 @@ class IntegrationOutcome:
     measures: int = 0
     produced: int = 0
     total_shift: dict | None = None
+    frozen_sources: dict[str, str] = field(default_factory=dict)
+    volume_drops: dict[str, list[int]] = field(default_factory=dict)
+    source_errors: dict[str, str] = field(default_factory=dict)
     report: str = ""
 
     @property
     def errors(self) -> int:
         return sum(self.error_causes.values())
+
+    @property
+    def failed_sources(self) -> list[str]:
+        return [name for name, why in self.frozen_sources.items() if why == FAILED]
 
     @property
     def rejections_alarming(self) -> bool:
@@ -165,7 +190,8 @@ class IntegrationOutcome:
     def to_result(self) -> dict:
         """The JSON payload handed to the CI step and to the Tchap notifier."""
         result: dict = {
-            "success": True,
+            # A failed source fails its organization in Tchap, whatever the others did.
+            "success": not self.failed_sources,
             "created": self.created,
             "updated": self.updated,
             "deleted": self.deleted,
@@ -184,6 +210,10 @@ class IntegrationOutcome:
             result["rejected_alert"] = True
         if self.total_shift:
             result["total_shift"] = self.total_shift
+        if self.frozen_sources:
+            result["frozen_sources"] = self.frozen_sources
+        if self.volume_drops:
+            result["volume_drops"] = self.volume_drops
         if self.refused:
             result["refused"] = self.refused
         if self.held:
@@ -230,11 +260,15 @@ def reconcile(
     max_deletions: int | None = None,
     max_closures: int | None = None,
     force_deletions: bool = False,
+    unbuilt: Iterable[str] = (),
+    frozen_prefixes: Iterable[str] = (),
 ) -> ReconciliationPlan:
     """Split today's production into its batches.
 
     `force_deletions` releases the batch of what left the source — deletions or
-    closures, whichever the organization chose — when its cap holds it.
+    closures, whichever the organization chose — when it is held. What is missing because
+    it could not be built (`unbuilt`, slices included) or sits under a frozen prefix is
+    not taken for gone, and `--force-deletions` does not release the latter.
     """
     assert_identifiers_in_prefix(produced.keys(), identifier_prefix)
     if delete_missing and close_missing:
@@ -275,8 +309,16 @@ def reconcile(
             "Refusing to compute deletions or closures without an identifier_prefix: "
             "an unbounded pass would touch regulations this pipeline does not own."
         )
-    missing = tuple(sorted(in_prefix - set(produced)))
+    unbuilt = set(unbuilt)
+    frozen_prefixes = tuple(frozen_prefixes)
+    absent = sorted(i for i in in_prefix - set(produced) if not is_part_of(i, unbuilt))
+    frozen = tuple(i for i in absent if frozen_prefixes and i.startswith(frozen_prefixes))
+    missing = tuple(i for i in absent if not (frozen_prefixes and i.startswith(frozen_prefixes)))
     to_delete = missing if delete_missing else ()
+
+    creations = _batch(CREATE, to_create, max_creations)
+    updates = _batch(UPDATE, to_update, max_updates)
+    waiting = creations.held or updates.held
 
     closures = None
     already_ended: tuple[str, ...] = ()
@@ -292,13 +334,13 @@ def reconcile(
         )
         ended = set(already_ended)
         to_close = tuple(identifier for identifier in missing if identifier not in ended)
-        closures = _batch(CLOSE, to_close, max_closures, released=force_deletions)
+        closures = _batch(CLOSE, to_close, max_closures, force_deletions, waiting)
 
     return ReconciliationPlan(
-        creations=_batch(CREATE, to_create, max_creations),
-        updates=_batch(UPDATE, to_update, max_updates),
+        creations=creations,
+        updates=updates,
         # --force-deletions releases the deletion batch only.
-        deletions=_batch(DELETE, to_delete, max_deletions, released=force_deletions),
+        deletions=_batch(DELETE, to_delete, max_deletions, force_deletions, waiting),
         unchanged=unchanged,
         closures=closures,
         closed_at=closed_at if close_missing else None,
@@ -308,6 +350,7 @@ def reconcile(
         identifier_prefix=identifier_prefix,
         remote_total=len(remote),
         remote_in_prefix=len(in_prefix),
+        frozen=frozen,
     )
 
 
@@ -316,6 +359,8 @@ def _batch(
     identifiers: tuple[str, ...],
     limit: int | None,
     released: bool = False,
+    waiting: bool = False,
 ) -> Batch:
-    held = bool(limit is not None and len(identifiers) > limit and not released)
+    over_cap = limit is not None and len(identifiers) > limit
+    held = bool(identifiers) and (over_cap or waiting) and not released
     return Batch(operation=operation, identifiers=identifiers, limit=limit, held=held)

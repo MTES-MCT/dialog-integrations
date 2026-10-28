@@ -31,6 +31,7 @@ IDENTIFIER_PREFIX = "NM-CC-"
 class DataSourceIntegration(BaseDataSourceIntegration):
     raw_data_schema = NantesCirculationChantierRawDataSchema
     name = "circulation_chantier"
+    identifier_prefix = IDENTIFIER_PREFIX
 
     def fetch_raw_data(self):
         all_features = []

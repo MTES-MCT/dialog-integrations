@@ -87,7 +87,7 @@ def test_a_run_that_changed_nothing_says_so(notifier):
 def test_a_held_batch_is_reported_for_review(notifier):
     body, formatted_body = notifier.format_message(SYNCHRONIZED)
 
-    assert "lot retenu (plafond dépassé) : 60 suppressions - à revoir manuellement" in body
+    assert "⚠️ lot retenu : 60 suppressions - à revoir manuellement" in body
     assert "60 suppressions" in formatted_body
 
 
@@ -299,3 +299,18 @@ def test_a_run_against_another_host_is_filed_under_its_staging(notifier):
     )
     assert "Production" not in body
     assert "<strong>Staging — dialog-staging-pr2096.osc-fr1.scalingo.io</strong>" in formatted_body
+
+
+def test_a_frozen_source_is_named_with_its_reason():
+    lines = Notifier.format_alerts(
+        {
+            "success": False,
+            "frozen_sources": {"limitation_vitesse": "volume", "restrictions_gabarits": "failed"},
+            "volume_drops": {"limitation_vitesse": [420, 12]},
+        }
+    )
+
+    assert lines == [
+        "⚠️ source gelée, rien n'y est clos ni supprimé : "
+        "limitation_vitesse (volume 420 → 12), restrictions_gabarits (en échec)"
+    ]

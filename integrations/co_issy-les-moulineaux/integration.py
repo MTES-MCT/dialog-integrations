@@ -8,5 +8,7 @@ from .travaux_voirie.data_source_integration import (
 
 class Integration(BaseIntegration):
     status = PostApiRegulationsAddBodyStatus.PUBLISHED
+    # Legacy integration kept as is by decision: it never updates nor removes.
+    legacy_additive = True
 
     data_sources = [TravauxVoirie]

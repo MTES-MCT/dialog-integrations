@@ -349,7 +349,7 @@ def test_kept_rows_keep_their_other_columns_and_lose_the_rejection_column():
     out = compute_location_fields(frame(point("4"), point(None)))
     assert out.height == 1
     assert out["m_type"].to_list() == ["m"]
-    assert "location_rejection" not in out.columns
+    assert "_location_rejection" not in out.columns
 
 
 @pytest.mark.parametrize(
@@ -408,8 +408,7 @@ def test_a_bound_numbered_on_the_crossing_street_drops_the_location():
 
 
 def test_every_location_column_is_a_pivot_key():
-    working = {"location_rejection", "location_district_source"}
-    produced = {name for name in locations.LOCATION_COLUMNS if name not in working}
+    produced = {name for name in locations.LOCATION_COLUMNS if not name.startswith("_")}
     assert produced <= set(RegulationMeasure.__annotations__)
 
 

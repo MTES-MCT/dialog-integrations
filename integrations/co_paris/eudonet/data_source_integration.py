@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import polars as pl
+from loguru import logger
 
 from integrations.api import DialogApi
 from integrations.base_data_source_integration import BaseDataSourceIntegration
@@ -33,7 +34,12 @@ from .raw_rows import (
     build_raw_dataframe,
     count_unreadable_measures,
 )
-from .regulations import compute_period_fields, compute_regulation_fields, filter_police_prefecture
+from .regulations import (
+    IDENTIFIER_PREFIX,
+    compute_period_fields,
+    compute_regulation_fields,
+    filter_police_prefecture,
+)
 from .schema import EudonetRawDataSchema
 from .vehicles import compute_vehicle_fields
 
@@ -57,10 +63,10 @@ def today_in_paris() -> date:
 
 class DataSourceIntegration(BaseDataSourceIntegration):
     name = "eudonet"
+    identifier_prefix = IDENTIFIER_PREFIX
     raw_data_schema = EudonetRawDataSchema
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
-    metrics: dict[str, int]
     numbers_published_elsewhere: dict[str, str] | None = None
 
     def fetch_raw_data(self) -> pl.DataFrame:
@@ -69,12 +75,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         client = EudonetClient(self._credentials())
         tables = extract_tables(client, today_in_paris())
         self.numbers_published_elsewhere = self.fetch_numbers_published_elsewhere()
-        self.metrics = {
-            "arrêtés du périmètre": len(tables.get(str(TABLE_REGULATIONS), [])),
-            "mesures": len(tables.get(str(TABLE_MEASURES), [])),
-            "mesures d'arrêtés illisibles pour le compte": count_unreadable_measures(tables),
-            "localisations": len(tables.get(str(TABLE_LOCATIONS), [])),
-        }
+        logger.info(
+            f"Eudonet perimeter: {len(tables.get(str(TABLE_REGULATIONS), []))} regulations, "
+            f"{len(tables.get(str(TABLE_MEASURES), []))} measures "
+            f"({count_unreadable_measures(tables)} of unreadable regulations), "
+            f"{len(tables.get(str(TABLE_LOCATIONS), []))} locations"
+        )
         return build_raw_dataframe(tables)
 
     def fetch_numbers_published_elsewhere(self) -> dict[str, str]:
