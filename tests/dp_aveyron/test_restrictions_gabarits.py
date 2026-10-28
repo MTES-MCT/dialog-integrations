@@ -205,7 +205,7 @@ def test_a_grouped_fallback_is_dated_from_the_run_not_from_one_of_its_members():
 def test_an_undated_numbered_arrete_stays_undated():
     """Signed, signposted and in force; only the day it was signed is missing.
 
-    Left null rather than dated the day of the run: `integrations/sync/dating.py`
+    Left null rather than dated the day of the run: `sync/dating.py`
     dates it when DiaLog is written, so the comparison never sees a moving date.
     """
     df = compute_regulation_fields(signs(date_darre=[None]))

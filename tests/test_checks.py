@@ -4,8 +4,8 @@ import json
 
 import polars as pl
 
-from integrations import checks
-from integrations.base_data_source_integration import unknown_pivot_columns
+from canonical.regulation_measure import unknown_pivot_columns
+from checks import rows as checks
 from tests.sync_fixtures import measure_rows
 
 

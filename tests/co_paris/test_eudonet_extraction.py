@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import polars as pl
 import pytest
 
-from integrations.api import DialogApi
+from dialog.calls import DialogApi
 from integrations.co_paris.eudonet.client import EQUALS, GREATER_OR_EQUAL, EudonetError
 from integrations.co_paris.eudonet.data_source_integration import (
     DataSourceIntegration,

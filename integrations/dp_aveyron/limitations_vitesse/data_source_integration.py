@@ -13,11 +13,11 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
 )
-from integrations.base_data_source_integration import BaseDataSourceIntegration
+from canonical.source import BaseDataSourceIntegration
 from integrations.dp_aveyron.limitations_vitesse.schema import (
     AveyronLimitationsVitesseRawDataSchema,
 )
-from integrations.shared.download import DOWNLOAD_TIMEOUT
+from toolkit.connectors.download import DOWNLOAD_TIMEOUT
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/limitations-de-vitesse-du-departement-aveyron/exports/parquet"
 
@@ -274,7 +274,7 @@ def compute_period_fields(df: pl.DataFrame):
     the day the limit took effect. R-39: no past date is presumed (the file's refresh
     date would claim every limit commenced that day). Nor the day of the run: the date
     is part of what the synchronization compares, so every limit would look modified
-    each morning. `integrations/sync/dating.py` resolves the null when DiaLog is
+    each morning. `sync/dating.py` resolves the null when DiaLog is
     written: the day of the run on creation ("this applies now"), the date DiaLog
     already holds on update.
     """

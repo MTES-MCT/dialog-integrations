@@ -371,7 +371,7 @@ def test_the_period_is_permanent_and_undated():
 
     The start used to be the day of the run; that made every limit look modified each
     morning, the date being part of what the synchronization compares. It is now left
-    null and dated by `integrations/sync/dating.py` when DiaLog is written.
+    null and dated by `sync/dating.py` when DiaLog is written.
     """
     result = compute_period_fields(stretches())
 

@@ -4,7 +4,7 @@ A `zone` location is a polygon; DiaLog turns it into the BD TOPO street sections
 intersects and publishes those. Two things make that result say more than the producer
 did — clipped slivers of neighbouring streets, and polygons wide enough to hold several
 roads side by side — and nothing in the API lets us filter what the zone computes
-(`shared/zone_sections.py` has the measurements). So the regulation is created in four
+(`dialog/zone_sections.py` has the measurements). So the regulation is created in four
 calls:
 
 1. POST as a draft, with the zones, so that DiaLog does the polygon → sections
@@ -36,8 +36,8 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBodyStatus,
     RoadTypeEnum,
 )
-from integrations.api import DialogApi
-from integrations.shared.zone_sections import sections_of, sections_per_length
+from dialog.calls import DialogApi
+from dialog.zone_sections import sections_of, sections_per_length
 
 Outcome = Literal["created", "refused", "failed"]
 
@@ -64,7 +64,7 @@ def create_zone_regulation(
     """The four calls, with their fallbacks. `regulation` carries the target status.
 
     The thresholds are the caller's: `BaseIntegration` holds their defaults, an
-    organization may override them, `shared/zone_sections.py` defines them.
+    organization may override them, `dialog/zone_sections.py` defines them.
     """
     identifier = str(regulation.identifier)
     target_status = regulation.status

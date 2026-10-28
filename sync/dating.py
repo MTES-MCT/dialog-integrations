@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfo
 
 from api.dia_log_client.models import PostApiRegulationsAddBody
 from api.dia_log_client.types import Unset
-from integrations.sync.closure import _parse, _to_paris_iso
+from sync.closure import _parse, _to_paris_iso
 
 PARIS = ZoneInfo("Europe/Paris")
 
@@ -50,7 +50,7 @@ def run_day(now: datetime | None = None) -> str:
     """French midnight of the day, carrying the real offset of that day.
 
     `2026-09-19T00:00:00+02:00`: the one shape DiaLog reads without shifting it
-    (`integrations/shared/local_time.py`).
+    (`toolkit/transforms/local_time.py`).
     """
     instant = (now or datetime.now(PARIS)).astimezone(PARIS)
     return datetime.combine(instant.date(), time(), tzinfo=PARIS).isoformat(timespec="seconds")

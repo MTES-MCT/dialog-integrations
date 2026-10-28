@@ -11,8 +11,7 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBodyCategory,
     PostApiRegulationsAddBodySubject,
 )
-from integrations.base_data_source_integration import RegulationMeasure
-from integrations.base_integration import BaseIntegration
+from canonical.regulation_measure import RegulationMeasure
 from integrations.co_paris.eudonet import location_filters
 from integrations.co_paris.eudonet.data_source_integration import (
     DataSourceIntegration,
@@ -54,6 +53,7 @@ from integrations.co_paris.eudonet.vocabulary import (
     PERMANENT_SUBJECT_TEXT,
     UNKNOWN_REASON_TEXT,
 )
+from run.organization import BaseIntegration
 from tests.co_paris.eudonet_fixture import load_fixture
 
 FIXTURE_EXTRACTED_ON = date(2026, 9, 8)

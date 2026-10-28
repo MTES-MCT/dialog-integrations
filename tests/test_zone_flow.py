@@ -6,10 +6,10 @@ from types import SimpleNamespace
 import pytest
 
 from api.dia_log_client.models import PostApiRegulationsAddBody, PostApiRegulationsAddBodyStatus
-from integrations.base_integration import BaseIntegration
-from integrations.shared.zone_sections import MAX_SECTIONS_PER_LENGTH, MIN_SECTION_LENGTH_M
-from integrations.zone_flow import create_zone_regulation as _create
-from integrations.zone_flow import has_zone
+from dialog.zone_flow import create_zone_regulation as _create
+from dialog.zone_flow import has_zone
+from dialog.zone_sections import MAX_SECTIONS_PER_LENGTH, MIN_SECTION_LENGTH_M
+from run.organization import BaseIntegration
 
 # In Lyon, 0.001° of longitude is ~78 m and 0.00003° is ~2.3 m.
 LONG = [[4.83, 45.76], [4.831, 45.76]]

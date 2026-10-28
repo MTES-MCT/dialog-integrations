@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import polars as pl
 import pytest
 
-from integrations.base_integration import BaseIntegration
+from run.organization import BaseIntegration
 
 
 @pytest.mark.parametrize(
@@ -34,9 +34,10 @@ def test_full_pipeline_integration(organization, monkeypatch):
 
 # --- Synchronization: the operations, the guard rails and --dry-run ----------------
 
-from integrations.base_data_source_integration import BaseDataSourceIntegration  # noqa: E402
-from integrations.sync.reconciliation import IdentifierOutsidePrefixError  # noqa: E402
-from integrations.sync.state import SnapshotStore, compute_regulation_digest  # noqa: E402
+from canonical.source import BaseDataSourceIntegration  # noqa: E402
+from sync.digest import compute_regulation_digest  # noqa: E402
+from sync.plan import IdentifierOutsidePrefixError  # noqa: E402
+from sync.snapshot import SnapshotStore  # noqa: E402
 from tests.sync_fixtures import build_regulation, measure_rows  # noqa: E402
 
 PREFIX = "MGL-CHP-"
@@ -651,9 +652,9 @@ def test_a_dated_regulation_is_updated_without_reading_anything(monkeypatch, tmp
 
 # --- What could not be written, and the organization's total ------------------------
 
-from integrations.api import WriteFailure  # noqa: E402
-from integrations.sync.totals import Totals, TotalsStore  # noqa: E402
-from notifications.notifier import Notifier  # noqa: E402
+from dialog.failures import WriteFailure  # noqa: E402
+from report.notifier import Notifier  # noqa: E402
+from sync.totals import Totals, TotalsStore  # noqa: E402
 
 
 class _RefusingApi(_RecordingApi):

@@ -11,10 +11,10 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
 )
-from integrations.base_data_source_integration import BaseDataSourceIntegration
+from canonical.source import BaseDataSourceIntegration
 from integrations.dp_sarthe.chantiers_routiers.schema import SartheChantiersRoutiersSchema
-from integrations.shared.download import DOWNLOAD_TIMEOUT
-from integrations.shared.local_time import end_of_local_day, start_of_local_day
+from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_chantiers_routiers/exports/parquet"
 LOCAL_FILE = "explorations/dp_sarthe/data/227200029_chantiers_routiers.parquet"

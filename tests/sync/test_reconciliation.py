@@ -2,14 +2,14 @@
 
 import pytest
 
-from integrations.sync.reconciliation import (
+from sync.digest import compute_regulation_digest
+from sync.outcome import IntegrationOutcome
+from sync.plan import (
     DeletionsWithoutPrefixError,
     IdentifierOutsidePrefixError,
-    IntegrationOutcome,
     assert_identifiers_in_prefix,
     reconcile,
 )
-from integrations.sync.state import compute_regulation_digest
 from tests.sync_fixtures import build_regulation
 
 PREFIX = "PARIS-EUDO-"
@@ -212,7 +212,7 @@ def test_an_unchanged_regulation_produces_no_operation():
 from datetime import datetime  # noqa: E402
 from zoneinfo import ZoneInfo  # noqa: E402
 
-from integrations.sync.reconciliation import ConflictingMissingPoliciesError  # noqa: E402
+from sync.plan import ConflictingMissingPoliciesError  # noqa: E402
 
 CLOSED_AT = datetime(2026, 9, 16, 23, 59, 59, tzinfo=ZoneInfo("Europe/Paris"))
 

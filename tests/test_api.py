@@ -7,8 +7,9 @@ from loguru import logger
 
 from api.dia_log_client.errors import UnexpectedStatus
 from api.dia_log_client.models import PostApiRegulationsAddBody
-from integrations import api as api_module
-from integrations.api import DialogApi, WriteFailure, split_failures
+from dialog import calls as api_module
+from dialog.calls import DialogApi
+from dialog.failures import WriteFailure, split_failures
 
 
 def regulation(identifier: str = "X-1") -> PostApiRegulationsAddBody:

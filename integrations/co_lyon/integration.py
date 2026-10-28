@@ -36,7 +36,7 @@ Measurements behind all three: `explorations/co_lyon/`.
 """
 
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
-from integrations.base_integration import BaseIntegration
+from run.organization import BaseIntegration
 
 from .chantiers_perturbants.data_source_integration import (
     DataSourceIntegration as ChantiersPerturbants,

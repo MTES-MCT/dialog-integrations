@@ -8,12 +8,7 @@ orchestration can count, and keeps the error messages consistent.
 """
 
 import json
-from collections import Counter
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
-from http import HTTPStatus
 
-import httpx
 from loguru import logger
 
 from api.dia_log_client import Client
@@ -44,7 +39,7 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBody,
     PutApiRegulationsUpdateBody,
 )
-from settings import OrganizationSettings
+from dialog.failures import WriteFailure
 
 
 class PublicExportUnreadable(Exception):
@@ -54,73 +49,6 @@ class PublicExportUnreadable(Exception):
 # The public export serves at most 100 regulations a page, whatever `pageSize` asks
 # (measured on the staging, 2026-10-17).
 PUBLIC_PAGE_SIZE = 100
-
-# The router answers 504 after 60 s, so a read past that means a silent server: without a
-# limit the run waits for the job to be killed.
-TIMEOUT = httpx.Timeout(10, read=120)
-
-
-def build_client(settings: OrganizationSettings) -> Client:
-    """The authenticated client for one organization."""
-    return Client(
-        base_url=settings.base_url,  # type: ignore
-        raise_on_unexpected_status=True,
-        timeout=TIMEOUT,
-        headers={
-            "X-Client-Id": settings.client_id,
-            "X-Client-Secret": settings.client_secret,
-            "Accept": "application/json",
-        },  # type: ignore
-    )
-
-
-OUTAGE_4XX = frozenset(
-    {
-        HTTPStatus.UNAUTHORIZED,
-        HTTPStatus.FORBIDDEN,
-        HTTPStatus.PROXY_AUTHENTICATION_REQUIRED,
-        HTTPStatus.REQUEST_TIMEOUT,
-        HTTPStatus.TOO_MANY_REQUESTS,
-    }
-)
-UNRECORDED_CAUSE = "autre"
-
-
-@dataclass(frozen=True)
-class WriteFailure:
-    """Why a write failed. `status` is None when the call got no answer."""
-
-    status: int | None
-
-    @property
-    def is_rejection(self) -> bool:
-        return (
-            self.status is not None and 400 <= self.status < 500 and self.status not in OUTAGE_4XX
-        )
-
-    @property
-    def cause(self) -> str:
-        return f"HTTP {self.status}" if self.status is not None else "sans réponse"
-
-
-def split_failures(
-    identifiers: Iterable[str], failures: Mapping[str, WriteFailure]
-) -> tuple[int, dict[str, int]]:
-    """Regulations that were not written: (rejections, outages by cause).
-
-    A refusal's motive is only in the log, which keeps the API's whole answer.
-    """
-    rejections = 0
-    outages: Counter[str] = Counter()
-    for identifier in identifiers:
-        failure = failures.get(identifier)
-        if failure is None:
-            outages[UNRECORDED_CAUSE] += 1
-        elif failure.is_rejection:
-            rejections += 1
-        else:
-            outages[failure.cause] += 1
-    return rejections, dict(outages.most_common())
 
 
 class DialogApi:

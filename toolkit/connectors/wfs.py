@@ -17,7 +17,7 @@ import polars as pl
 import requests
 from loguru import logger
 
-from integrations.shared.download import DOWNLOAD_TIMEOUT
+from toolkit.connectors.download import DOWNLOAD_TIMEOUT
 
 BBox = tuple[float, float, float, float]  # min_lon, min_lat, max_lon, max_lat
 

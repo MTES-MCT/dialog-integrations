@@ -9,8 +9,8 @@ of the run.
 
 from collections.abc import Iterable, Mapping
 
-from integrations.sync.reconciliation import IntegrationOutcome
-from notifications.notifier import Notifier
+from report.notifier import Notifier
+from sync.outcome import IntegrationOutcome
 
 # Beyond this, a list of alerts says "something is very wrong" better than its content.
 MAX_LINES_PER_LEVEL = 100

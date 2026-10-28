@@ -12,12 +12,12 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
 )
-from integrations.base_data_source_integration import BaseDataSourceIntegration
+from canonical.source import BaseDataSourceIntegration
 from integrations.dp_sarthe.restrictions_gabarits.schema import (
     SartheRestrictionGabaritsRawDataSchema,
 )
-from integrations.shared.download import DOWNLOAD_TIMEOUT
-from integrations.shared.local_time import start_of_local_day
+from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.transforms.local_time import start_of_local_day
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_restrictions_gabarits/exports/csv?lang=fr&timezone=Europe%2FLondon&use_labels=true&delimiter=%3B"
 

@@ -33,7 +33,7 @@ def test_the_results_left_by_the_jobs_are_read_and_a_missing_one_is_a_failure(tm
 def test_a_failed_source_or_too_many_refusals_fail_the_command(monkeypatch):
     from typer.testing import CliRunner
 
-    from integrations.sync.reconciliation import IntegrationOutcome
+    from sync.outcome import IntegrationOutcome
 
     def run(outcome):
         integration = type(

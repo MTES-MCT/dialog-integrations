@@ -11,8 +11,8 @@ from api.dia_log_client.models import (
     PostApiRegulationsAddBodySubject,
     RoadTypeEnum,
 )
-from integrations.base_data_source_integration import BaseDataSourceIntegration
-from integrations.shared.local_time import end_of_local_day, start_of_local_day
+from canonical.source import BaseDataSourceIntegration
+from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 
 from .schema import IssylesMoulineauxTravauxRawDataSchema
 

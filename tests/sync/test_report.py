@@ -1,8 +1,8 @@
 """Tests for the field-by-field diff and the French synchronization report."""
 
-from integrations.sync.reconciliation import reconcile
-from integrations.sync.report import SourceFunnel, diff_digests, format_diff, render_report
-from integrations.sync.state import compute_regulation_digest
+from report.sync_report import SourceFunnel, diff_digests, format_diff, render_report
+from sync.digest import compute_regulation_digest
+from sync.plan import reconcile
 from tests.sync_fixtures import build_regulation
 
 PREFIX = "PARIS-EUDO-"

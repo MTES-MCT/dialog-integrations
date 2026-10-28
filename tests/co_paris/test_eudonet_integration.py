@@ -4,12 +4,12 @@ import httpx
 import pytest
 
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
-from integrations.api import DialogApi
-from integrations.base_integration import BaseIntegration
+from dialog.calls import DialogApi
 from integrations.co_paris.eudonet import data_source_integration
 from integrations.co_paris.eudonet.data_source_integration import (
     DataSourceIntegration,
 )
+from run.organization import BaseIntegration
 from settings import OrganizationSettings
 from tests.co_paris.eudonet_fixture import read_eudonet_from_the_fixture
 

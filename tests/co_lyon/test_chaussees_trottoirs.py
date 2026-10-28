@@ -13,7 +13,6 @@ import polars as pl
 import pytest
 from shapely.geometry import box
 
-from integrations.base_integration import BaseIntegration
 from integrations.co_lyon.chaussees_trottoirs.data_source_integration import (
     DataSourceIntegration,
     chain_segments,
@@ -30,7 +29,8 @@ from integrations.co_lyon.chaussees_trottoirs.regulation_key import (
     order_number,
 )
 from integrations.co_lyon.integration import Integration
-from integrations.shared.perimeter import Perimeter
+from run.organization import BaseIntegration
+from toolkit.transforms.perimeter import Perimeter
 
 FIXTURE = "tests/co_lyon/chaussees_trottoirs.csv"
 
@@ -346,7 +346,7 @@ def test_every_period_is_permanent_and_undated(clean_data):
 
     The start is left null, not set to the day of the run: the date is part of what the
     synchronization compares, and a run day made every order look modified each
-    morning. `integrations/sync/dating.py` dates it when DiaLog is written.
+    morning. `sync/dating.py` dates it when DiaLog is written.
     """
     assert clean_data["period_start_date"].null_count() == clean_data.height
     assert set(clean_data["period_is_permanent"]) == {True}
@@ -777,8 +777,8 @@ def test_compute_clean_data_uses_the_injected_perimeter(monkeypatch):
     from integrations.co_lyon.chaussees_trottoirs.data_source_integration import (
         DataSourceIntegration,
     )
-    from integrations.shared import perimeter as perimeter_module
-    from integrations.shared.perimeter import Perimeter
+    from toolkit.transforms import perimeter as perimeter_module
+    from toolkit.transforms.perimeter import Perimeter
 
     monkeypatch.setattr(
         perimeter_module.Perimeter, "fetch", lambda *a, **k: pytest.fail("fetch must not be called")

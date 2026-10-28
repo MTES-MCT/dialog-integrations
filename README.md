@@ -2,14 +2,14 @@
 
 Environnement d'exploration et d'intégration des arrêtés de circulation que les collectivités et les départements publient en open data, pour intégration dans la base [DiaLog](https://dialog.beta.gouv.fr/)
 
+Pour comprendre ce que deviennent les données, du producteur jusqu'à DiaLog : [Architecture](docs/architecture.md).
+
 ## Technologies
 
 * [Python](https://www.python.org/) `>=3.11`
 * [Polars](https://pola.rs/)
 
-
 ## Environnement et installation
-
 
 ### Installation de l'environnement python
 
@@ -63,6 +63,7 @@ Vérifier que la ligne de commande `dialog` fonctionne :
 dialog --help
 ```
 
+Pour exécuter une intégration en local, il faut aussi un fichier `.env` : voir [Configuration](docs/configuration.md).
 
 ## CLI Usage
 
@@ -77,155 +78,13 @@ L'organisation est le nom d'un dossier de `integrations/`.
 Exemples :
 * `dialog integrate co_brest --env=dev`
 * `dialog integrate dp_sarthe --env=prod --update-existing --identifiers=1,280,8,459,478,17`
-* `dialog integrate co_lyon --env=dev --dry-run` (voir « Synchronisation » ci-dessous)
+* `dialog integrate co_lyon --env=dev --dry-run` (voir [Synchronisation](docs/synchronisation.md#--dry-run))
 
+## Documentation
 
-## Synchronisation
-
-Sans réglage, la pipeline serait **additive** : elle créerait les arrêtés absents de DiaLog, sans rien mettre à jour ni toucher à ce qui a disparu de la source. Ce n'est plus permis par omission : une organisation déclare un `identifier_prefix`, ou `legacy_additive = True` pour dire qu'elle ne fait qu'ajouter (Brest, Sarthe, Issy, Rennes, intégrées avant les préfixes) ; sinon l'exécution refuse de démarrer. Une organisation active les autres opérations en surchargeant des attributs de classe dans son `integration.py` :
-
-```python
-class Integration(BaseIntegration):
-    identifier_prefix = "MGL-CHP-"   # borne toute opération hors création
-    update_changed = True               # republier ce qui a changé depuis l'envoi précédent
-    close_missing = True                # clore ce qui a disparu de la source (ou delete_missing = True pour le supprimer)
-    max_updates_per_run = 50
-    max_closures_per_run = 50           # ou max_deletions_per_run
-    max_creations_per_run = None        # plafond non armé
-```
-
-| Opération | Source de vérité |
-|---|---|
-| Création | `GET /api/organization/identifiers` — identifiant absent de DiaLog |
-| Suppression (`delete_missing`) | même endpoint — identifiant présent, **dans notre préfixe**, absent de la production du jour |
-| Clôture (`close_missing`) | même critère, mais l'arrêté **reste** : sa date de fin est ramenée à la veille de l'exécution (fin de journée, Europe/Paris). L'arrêté est relu dans DiaLog, reconstruit en corps d'écriture et renvoyé par `PUT` (`integrations/sync/closure.py`). Un arrêté déjà expiré n'est pas réécrit. Un chantier annulé avant d'avoir commencé se termine à sa date de début |
-| Mise à jour | l'**instantané** de ce qu'on a envoyé la fois précédente, via `PUT /api/regulations` — sauf pour un arrêté à emprises `zone`, que l'API refuse en PUT (500) : il est supprimé puis recréé par le flux zone |
-
-`delete_missing` et `close_missing` s'excluent. Une source qui est un instantané de chantiers en cours (Lyon) **clôt** : l'équipe veut garder l'historique des chantiers.
-
-Un plafond à `0` (`max_updates_per_run = 0`, `max_deletions_per_run = 0`) fait de la synchronisation un **rapport seul** : le diff est calculé et notifié chaque nuit, lot retenu, rien n'est appliqué tant qu'on ne lève pas le plafond (`--force-deletions` ne relâche que les suppressions et clôtures). L'Aveyron a tourné ainsi sur le staging, puis est passé à 5 pour la production.
-
-### Le préfixe, garde-fou principal
-
-Une organisation DiaLog reçoit souvent des arrêtés par d'autres canaux que ce dépôt. `identifier_prefix` borne le rayon d'action :
-
-* **sans préfixe, la suppression et la clôture sont refusées** (exception), pas seulement désactivées ;
-* un identifiant produit qui ne commence pas par le préfixe **arrête l'exécution** avant toute écriture : c'est le garde-fou contre un préfixe appliqué deux fois ou oublié dans une branche de la transformation.
-
-### Une source gelée
-
-Chaque source d'une organisation qui supprime ou clôt déclare son propre préfixe (`identifier_prefix = "AV-LV-"` sur la classe de la source), contenu dans celui de l'organisation. Une source est **gelée** pour la nuit — rien n'est clos ni supprimé sous son préfixe, ses arrêtés restent tels que DiaLog les détient — dans trois cas :
-
-* **elle a planté** : l'exception est journalisée et les autres sources de l'organisation écrivent normalement. La commande sort en erreur et Tchap affiche ❌ ;
-* **son volume s'est effondré** : elle produit moins de 70 % des arrêtés de la veille (`state/…/totals.json`). Un export vide ou tronqué se lirait sinon comme la disparition de tout son corpus, et sous le plafond tout serait clos ou supprimé. La référence reste le dernier volume de confiance jusqu'à ce qu'on relâche avec `--force-deletions` ;
-* **elle est en pause** dans `integrations.toml` (`paused = ["nom"]`) : elle n'est pas lue. Retirer une source de `data_sources` à la place ferait passer tout ce qu'elle a produit pour disparu.
-
-Une source sans préfixe propre gèle celui de l'organisation, donc toutes ses voisines : le test de contrat (`tests/contract/`) exige un préfixe par source dès qu'une organisation à plusieurs sources supprime ou clôt.
-
-### Les contrôles communs
-
-Après la transformation de la source et avant la construction des corps d'écriture, chaque ligne passe des contrôles communs (`integrations/checks.py`) : fin avant début, limitation de vitesse sans vitesse, emprise `rawGeoJSON` sans géométrie, coordonnées hors bornes ou en ordre (latitude, longitude). Un arrêté dont une ligne échoue est laissé de côté **en entier**, et laissé tel que DiaLog le détient : ni créé, ni mis à jour, ni clos. Il compte parmi les « écartés par la pipeline » de Tchap ; le motif est dans le journal du run.
-
-Une colonne nommée comme un champ du pivot (`location_…`, `vehicle_…`) sans y figurer est supprimée comme avant, mais signalée : une faute de frappe ou un champ que le pivot ne porte pas encore. Une colonne de travail d'une source commence par `_` (`_measure_kind`).
-
-### Les plafonds et les lots retenus
-
-Un lot au-dessus de son plafond est **retenu en entier** — rien n'est appliqué — et signalé « à revoir manuellement ». Son ancienne empreinte reste dans l'instantané : il est redétecté à l'identique le lendemain, jusqu'à ce qu'on le relâche.
-
-Pour relâcher, lire d'abord le rapport de la nuit (résumé du run GitHub), puis lancer le workflow `integrate` à la main, depuis l'onglet Actions : `organization` = l'organisation, `force_deletions` coché. Le run se fait avec les secrets et l'instantané de la CI, et laisse une trace. En local, réservé au staging :
-
-```shell
-uv run dialog integrate co_lyon --dry-run           # lire le rapport
-uv run dialog integrate co_lyon --force-deletions   # relâcher les suppressions ou les clôtures
-```
-
-`--force-deletions` ne relâche que le lot de ce qui a disparu de la source — suppressions ou clôtures, selon l'organisation.
-
-Ce qui a disparu de la source attend aussi, sans plafond atteint, dans deux cas : tant qu'un lot de créations ou de mises à jour est retenu, et la nuit où une création ou une mise à jour est restée sans réponse (panne, 5xx). Ces écritures portent peut-être ses tronçons : le retirer d'abord laisserait la route sans limite. Un refus de l'API (4xx) ne fait pas attendre. Les créations, elles, ne sont jamais retenues par un autre lot. Le rapport dit « en attente des lots ci-dessus », Tchap « lot retenu ». `--force-deletions` relâche dans tous les cas ; le rapport ne le propose que pour un lot au-dessus de son propre plafond.
-
-Un arrêté dont une mesure n'a pas pu être construite n'est ni créé, ni mis à jour, ni supprimé, ni clos, toutes ses tranches (`-01`, `-02`…) comprises : il reste tel que DiaLog le détient, et compte parmi les « écartés par la pipeline ».
-
-### L'instantané
-
-`state/{hôte cible}/{organisation}/{source}.json.gz` (l'hôte DiaLog écrit : ce qu'on a envoyé au staging ne dit rien de la prod ; l'ancien chemin `state/{organisation}/` est encore lu s'il manque le nouveau) : un digest par arrêté (titre, catégorie, objet, et par mesure le type, la vitesse, la période, le jeu de véhicules et la localisation). On compare à cette empreinte de **notre propre envoi**, jamais à une relecture de DiaLog : l'API réécrit une partie de ce qu'elle reçoit et une relecture republierait tout le corpus chaque jour.
-
-* `DIALOG_STATE_DIR` déplace le dossier (en CI il vit dans le cache GitHub Actions).
-* **Instantané absent = aucune mise à jour**, et il est reconstruit à la fin de l'exécution. Un cache perdu coûte une journée de mises à jour, jamais une réécriture de masse.
-* Seuls les arrêtés effectivement écrits y entrent ; les supprimés en sortent. Les arrêtés **clos** y restent, avec leur nouvelle date de fin : c'est ainsi que le lendemain les sait terminés sans les relire. Un arrêté disparu de la source et inconnu de l'instantané est relu dans DiaLog, et n'est réécrit que s'il court encore.
-
-### `--dry-run`
-
-```shell
-uv run dialog integrate co_lyon --env=dev --dry-run
-```
-
-Calcule tout — extraction, transformation, lots — et **n'écrit rien**, ni dans DiaLog ni dans l'instantané. Seule requête réseau vers DiaLog : le `GET /api/organization/identifiers`, en lecture. Le rapport donne l'entonnoir (lignes brutes, lignes nettoyées, arrêtés, mesures), les lots avec leurs plafonds, les identifiants concernés, un diff champ par champ pour chaque mise à jour, et les lots retenus. Le même rapport est journalisé avant écriture en exécution réelle.
-
-`--json` imprime le résultat de l'exécution sur la sortie standard (`{"success": true, "created": n, "updated": n, "deleted": n, "closed": n, "refused": n, "held": {…}, "source": {…}}` — `refused` compte les arrêtés que la pipeline elle-même a refusés (zone couvrant plusieurs routes parallèles), réessayés chaque nuit) ; les journaux restent sur la sortie d'erreur, donc `uv run dialog integrate co_lyon --json > result.json` produit un fichier propre. C'est ce que consomme la CI.
-
-### Volumétries source
-
-Une source de données peut publier ses propres volumétries en renseignant `self.metrics: dict[str, int]` pendant `fetch_raw_data` (par exemple `{"arrêtés du périmètre": 5297, "mesures": 11230}`). `BaseIntegration` les lit si elles existent, les affiche dans le rapport et les fait remonter dans le message Tchap. Les sources qui n'en déclarent pas ne sont pas concernées.
-
-## .env
-
-Pour exécuter une intégration en local, créer un fichier d'environnement à la racine correspondant à l'organisation :
-
-`.env.co_maville.dev` ou `.env.co_maville.prod`
-
-```text
-DIALOG_BASE_URL="https://dialog.beta.gouv.fr"
-DIALOG_CLIENT_ID="12345678-abcd-9876-5432-10abcdef1234"
-DIALOG_CLIENT_SECRET="XXXXXXXXXXXXXXXX-abcdefghijklmnopqrstuvwxyz"
-```
-
-### `.env.dev` — l'identité de travail par défaut (dev uniquement)
-
-Un fichier `.env.dev` est chargé **avant** le fichier de l'organisation. Il porte l'identité utilisée par défaut, quelle que soit l'organisation passée à la CLI.
-
-Ordre de priorité en dev, du plus faible au plus fort :
-
-1. `.env.dev` ;
-2. `.env.{organization}.dev` ;
-3. variables d'environnement du processus.
-
-
-## Ce qui tourne chaque nuit : `integrations.toml`
-
-Le registre liste les organisations du workflow `integrate`, leur cible (`prod` ou `staging`) et leurs sources en pause. Le workflow en génère sa matrice (`python3 registry.py matrix`) : ajouter, promouvoir ou mettre en pause une organisation ne touche plus le YAML. L'environnement GitHub et ses secrets restent à créer à la main (`{org}` pour la prod, `{org}-staging` sinon). La politique de synchronisation, elle, reste dans `integration.py`, à côté du code qui fabrique les identifiants.
-
-## Organisation des dossiers
-
-* `api` : dossier non-versionné contenant le sdk généré pour l'api
-* `integrations` : Chaque intégration est dans un dossier portant le nom de l'organisation. Ex `co_brest` ou `dp_sarthe` (ce sera le nom à spécifier dans la CLI pour l'intégration)
-
-```text
-co_maville
-├── __init__.py
-├── integration.py
-├── chantiers_routiers
-│   ├── __init__.py
-│   ├── schema.py
-│   └── data_source_integration.py
-├── limitations_vitesse
-│   ├── __init__.py
-│   ├── schema.py
-│   └── data_source_integration.py
-```
-
-* `integration.py` : fichier déclarant les intégrations actives et le statut par défaut de publication.
-* `schema.py` : schéma du fichier d'entrée attendu par le script d'intégration au format [Pandera](https://pandera.readthedocs.io/).
-* `data_source_integration.py` : fichier d'intégration pour 1 data-source donnée.
-
-
-## CI et qualité
-
-* [ruff](https://docs.astral.sh/ruff/)
-* [pytest](https://docs.pytest.org/)
-* [pyright](https://github.com/microsoft/pyright)
-
-### Utilitaires
-
-* `make app:prepare-commit` : prépare le code avant un commit
-* `make app:test` : lance la test suite
-* `make app:test-watch` : lance la test suite en "watch"
+* [Architecture : ce que deviennent les données](docs/architecture.md)
+* [Le modèle canonique et les contrôles](docs/modele-canonique.md)
+* [Synchronisation : créer, mettre à jour, clore, supprimer](docs/synchronisation.md)
+* [Configuration : .env, integrations.toml, CI](docs/configuration.md)
+* [Ajouter une source](docs/ajouter-une-source.md)
+* [Développement : tests et qualité](docs/developpement.md)

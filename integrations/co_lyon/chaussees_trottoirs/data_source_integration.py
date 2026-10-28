@@ -36,8 +36,8 @@ from api.dia_log_client.models import (
 from api.dia_log_client.models import (
     PostApiRegulationsAddBodyMeasuresItemVehicleSetType0RestrictedTypesType0Item as VehicleRestrictedTypeEnum,  # noqa: E501
 )
-from integrations.api import DialogApi
-from integrations.base_data_source_integration import BaseDataSourceIntegration
+from canonical.source import BaseDataSourceIntegration
+from dialog.calls import DialogApi
 from integrations.co_lyon.chaussees_trottoirs.regulation_key import (
     foreign_order_keys,
     is_project,
@@ -46,7 +46,7 @@ from integrations.co_lyon.chaussees_trottoirs.regulation_key import (
 )
 from integrations.co_lyon.chaussees_trottoirs.schema import LyonChausseesTrottoirsRawDataSchema
 from integrations.co_lyon.grand_lyon import fetch_layer
-from integrations.shared.perimeter import Perimeter, discard_outside_perimeter
+from toolkit.transforms.perimeter import Perimeter, discard_outside_perimeter
 
 WFS_LAYER = "pvo_patrimoine_voirie.pvochausseetrottoir"
 
@@ -109,7 +109,7 @@ ZTL_REPLACES_SPEED = False
 
 # The organisation as DiaLog knows it. DiaLog refuses any emprise whose geometry does not
 # intersect the organisation's territory, and one refused emprise takes the whole
-# regulation down (R-77). `integrations/shared/perimeter.py` rebuilds that territory and
+# regulation down (R-77). `toolkit/transforms/perimeter.py` rebuilds that territory and
 # drops upstream what DiaLog would refuse (recipe there, measurements under R-77).
 # Neither the road's name nor `domanialite` predicts a refusal; the position does.
 ORGANIZATION_PERIMETER = ("epci", "200046977")  # Métropole de Lyon, SIREN code of the EPCI
@@ -611,7 +611,7 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     The start is left null, not set to the run day: the date is part of what the
     synchronization compares, so a run day would make every order look modified each
-    morning. `integrations/sync/dating.py` resolves it when DiaLog is written: the run
+    morning. `sync/dating.py` resolves it when DiaLog is written: the run
     day on creation, "in force when we published it"; the date DiaLog already holds on
     update.
     """

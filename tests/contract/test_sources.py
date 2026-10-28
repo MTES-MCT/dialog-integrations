@@ -12,11 +12,11 @@ import polars as pl
 import pytest
 
 import registry
-from integrations import checks
-from integrations.base_data_source_integration import unknown_pivot_columns
-from integrations.base_integration import BaseIntegration
-from integrations.sync.state import compute_regulation_digest
+from canonical.regulation_measure import unknown_pivot_columns
+from checks import rows as checks
+from run.organization import BaseIntegration
 from settings import Organization
+from sync.digest import compute_regulation_digest
 
 ORGANIZATIONS = [o.name for o in Organization]  # type: ignore[attr-defined]
 
@@ -88,7 +88,7 @@ def _no_reference_downloads(monkeypatch):
     replaced by a stand-in that keeps everything: the fixture is the subject here."""
     from shapely.geometry import box
 
-    from integrations.shared.perimeter import Perimeter
+    from toolkit.transforms.perimeter import Perimeter
 
     whole_world = Perimeter.build("epci", "0", [box(-180, -90, 180, 90)])
     monkeypatch.setattr(Perimeter, "fetch", classmethod(lambda cls, *a, **k: whole_world))

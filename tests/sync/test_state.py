@@ -4,12 +4,8 @@ import gzip
 import json
 
 from api.dia_log_client.models import SaveVehicleSetDTO
-from integrations.sync.state import (
-    SnapshotStore,
-    compute_regulation_digest,
-    fingerprint,
-    state_dir,
-)
+from sync.digest import compute_regulation_digest, fingerprint
+from sync.snapshot import SnapshotStore, state_dir
 from tests.sync_fixtures import build_regulation, geometry
 
 

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from integrations.sync.state import organization_dirs, readable
+from sync.snapshot import organization_dirs, readable
 
 # No floor: chosen on 2026-09-29.
 SHIFT_SHARE = 0.05

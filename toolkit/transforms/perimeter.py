@@ -48,7 +48,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 from shapely.prepared import prep
 
-from integrations.shared.download import DOWNLOAD_TIMEOUT
+from toolkit.connectors.download import DOWNLOAD_TIMEOUT
 
 GEO_API_URL = "https://geo.api.gouv.fr"
 

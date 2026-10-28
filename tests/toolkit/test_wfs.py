@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import polars as pl
 import pytest
 
-from integrations.shared import wfs
-from integrations.shared.wfs import assert_lon_lat_bbox, features_to_dataframe, fetch_wfs_features
+from toolkit.connectors import wfs
+from toolkit.connectors.wfs import assert_lon_lat_bbox, features_to_dataframe, fetch_wfs_features
 
 LYON = (4.4, 45.4, 5.3, 46.0)
 
