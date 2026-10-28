@@ -1,8 +1,6 @@
 import hashlib
-import io
 
 import polars as pl
-import requests
 from loguru import logger
 
 from api.dia_log_client.models import (
@@ -13,7 +11,7 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from integrations.dp_sarthe.limitations_vitesse.schema import SartheRawDataSchema
-from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.connectors import opendatasoft
 from toolkit.transforms.local_time import start_of_local_day
 
 URL = (
@@ -28,13 +26,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "limitations_vitesse"
 
     def fetch_raw_data(self) -> pl.DataFrame:
-        logger.info(f"Downloading data from {URL}")
-        r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
-        r.raise_for_status()
-
-        return pl.read_csv(
-            io.BytesIO(r.content), separator=";", encoding="utf8", ignore_errors=True
-        )
+        return opendatasoft.read_export(URL, separator=";", encoding="utf8", ignore_errors=True)
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         return (

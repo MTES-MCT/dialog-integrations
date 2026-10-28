@@ -116,7 +116,7 @@ report/             ce que lisent les humains
   sync_report.py    le rapport de synchronisation
   notifier.py  summary.py  tchap_bot.py   message Tchap, résumé GitHub
 toolkit/            ce qu'une source peut appeler
-  connectors/       lire une plateforme (téléchargement, WFS)
+  connectors/       lire une plateforme : Opendatasoft, ArcGIS, WFS, téléchargement
   transforms/       heures locales, créneaux, périmètre de compétence
   rules/            à venir : une méthode par règle métier partagée entre sources
 integrations/       un dossier par organisation DiaLog, rien d'autre

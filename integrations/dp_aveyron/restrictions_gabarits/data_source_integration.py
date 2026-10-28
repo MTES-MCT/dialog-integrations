@@ -1,9 +1,6 @@
 """Aveyron: prescriptions-routieres-du-departement."""
 
-import io
-
 import polars as pl
-import requests
 from loguru import logger
 
 from api.dia_log_client.models import (
@@ -20,7 +17,7 @@ from canonical.source import BaseDataSourceIntegration
 from integrations.dp_aveyron.restrictions_gabarits.schema import (
     AveyronPrescriptionsRoutieresRawDataSchema,
 )
-from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.connectors import opendatasoft
 from toolkit.transforms.local_time import start_of_local_day
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/prescriptions-routieres-du-departement-aveyron/exports/parquet"
@@ -35,15 +32,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     # R-28: one measure per sign and value, carrying every stretch it applies to.
     group_locations_by_measure = True
 
-    def fetch_raw_data(self):
-        logger.info(f"Downloading data from {URL}")
-
-        r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
-        r.raise_for_status()
-
-        df = pl.read_parquet(io.BytesIO(r.content))
-
-        return df
+    def fetch_raw_data(self) -> pl.DataFrame:
+        return opendatasoft.read_export(URL)
 
     def compute_clean_data(self, raw_data):
         return (

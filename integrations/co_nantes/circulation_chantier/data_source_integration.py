@@ -2,7 +2,6 @@ import json
 
 import geopandas as gpd
 import polars as pl
-import requests
 from loguru import logger
 from shapely.geometry import mapping
 
@@ -13,7 +12,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from canonical.source import BaseDataSourceIntegration
-from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.connectors import arcgis
 from toolkit.transforms.local_time import from_epoch_ms
 
 from .schema import NantesCirculationChantierRawDataSchema
@@ -33,31 +32,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "circulation_chantier"
     identifier_prefix = IDENTIFIER_PREFIX
 
-    def fetch_raw_data(self):
-        all_features = []
-        offset = 0
-        page_size = 2000
-
-        while True:
-            params = {
-                "where": "1=1",
-                "outFields": "*",
-                "f": "geojson",
-                "outSR": "4326",
-                "resultOffset": offset,
-                "resultRecordCount": page_size,
-            }
-            logger.info(f"Downloading data from {URL} ({offset}-{page_size})")
-            r = requests.get(URL, params=params, timeout=DOWNLOAD_TIMEOUT).json()
-            features = r.get("features", [])
-            all_features.extend(features)
-            if len(features) < page_size:
-                break
-            offset += page_size
-
-        gdf = gpd.GeoDataFrame.from_features(all_features, crs="EPSG:4326")
-        gdf["geometry"] = gdf.geometry.to_wkt()
-        return pl.from_pandas(gdf)
+    def fetch_raw_data(self) -> pl.DataFrame:
+        return arcgis.read_layer(URL)
 
     def compute_clean_data(self, raw_data):
         return (

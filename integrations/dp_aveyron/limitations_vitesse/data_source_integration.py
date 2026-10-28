@@ -1,9 +1,6 @@
 """Aveyron: limitations-de-vitesse-du-departement."""
 
-import io
-
 import polars as pl
-import requests
 from loguru import logger
 
 from api.dia_log_client.models import (
@@ -17,7 +14,7 @@ from canonical.source import BaseDataSourceIntegration
 from integrations.dp_aveyron.limitations_vitesse.schema import (
     AveyronLimitationsVitesseRawDataSchema,
 )
-from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.connectors import opendatasoft
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/limitations-de-vitesse-du-departement-aveyron/exports/parquet"
 
@@ -37,14 +34,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
 
-    def fetch_raw_data(self):
-        logger.info(f"Downloading data from {URL}")
-
-        r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
-        r.raise_for_status()
-
-        df = pl.read_parquet(io.BytesIO(r.content))
-        return df
+    def fetch_raw_data(self) -> pl.DataFrame:
+        return opendatasoft.read_export(URL)
 
     def preprocess_raw_data(self, raw_data):
         """Drop rows whose milestones are not numeric.

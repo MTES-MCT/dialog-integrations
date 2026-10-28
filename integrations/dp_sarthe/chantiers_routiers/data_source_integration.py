@@ -1,7 +1,4 @@
-import io
-
 import polars as pl
-import requests
 from loguru import logger
 
 from api.dia_log_client.models import (
@@ -13,7 +10,7 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from integrations.dp_sarthe.chantiers_routiers.schema import SartheChantiersRoutiersSchema
-from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.connectors import opendatasoft
 from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_chantiers_routiers/exports/parquet"
@@ -24,15 +21,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     raw_data_schema = SartheChantiersRoutiersSchema
     name = "chantiers_routiers"
 
-    def fetch_raw_data(self):
-        logger.info(f"Downloading data from {URL}")
-
-        r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
-        r.raise_for_status()
-
-        df = pl.read_parquet(io.BytesIO(r.content))
-
-        return df
+    def fetch_raw_data(self) -> pl.DataFrame:
+        return opendatasoft.read_export(URL)
 
     def compute_clean_data(self, raw_data):
         return (
