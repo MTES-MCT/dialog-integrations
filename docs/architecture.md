@@ -22,7 +22,7 @@ flowchart TD
         A --> B --> C --> D --> E
     end
 
-    subgraph ORG["L'organisation — run/night.py"]
+    subgraph ORG["L'organisation — run/integrate.py"]
         F["Contrôles communs<br/>checks/rows.py"]
         G["Corps d'écriture de l'API<br/>payloads/"]
         H["Décider quoi écrire<br/>sync/plan.py<br/>créer · mettre à jour · clore · supprimer"]
@@ -109,7 +109,7 @@ sync/               décider quoi écrire, se souvenir de ce qui a été envoyé
   dating.py         dater un arrêté que la source ne date pas
 run/                l'exécution d'une organisation, une étape par fichier
   organization.py   ce que déclare un integration.py, et les points d'entrée
-  night.py          l'enchaînement des étapes de la nuit
+  integrate.py      ce que fait `dialog integrate`, étape par étape
   sources.py        exécuter chaque source, geler celle qui plante ou est en pause
   freeze.py         geler une source dont le volume s'effondre
   writes.py         créer, mettre à jour, clore, supprimer, et compter les échecs

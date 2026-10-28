@@ -1,4 +1,4 @@
-"""One organization's night, step by step: sources, plan, report, writes, memory."""
+"""What `dialog integrate` does for one organization, step by step."""
 
 from __future__ import annotations
 

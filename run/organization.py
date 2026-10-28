@@ -1,7 +1,7 @@
 """One organization: what its `integration.py` declares, and the entry points that run it.
 
 An organization's `integration.py` subclasses `BaseIntegration` and declares its data
-sources, default status and synchronization options. The night itself is `night.py`.
+sources, default status and synchronization options. The run itself is `integrate.py`.
 """
 
 from importlib import util as importlib_util
@@ -26,7 +26,7 @@ from dialog.client import build_client
 from dialog.zone_sections import MAX_SECTIONS_PER_LENGTH, MIN_SECTION_LENGTH_M
 from payloads.measures import build_location, build_measure, build_period, build_vehicle_set
 from payloads.regulations import build_regulations
-from run import night, writes
+from run import integrate, writes
 from settings import OrganizationSettings
 from sync.outcome import IntegrationOutcome
 
@@ -129,7 +129,7 @@ class BaseIntegration:
         our prefix only). `dry_run` computes everything and writes nothing — neither
         to DiaLog nor to the snapshot.
         """
-        return night.run(self, limit_to, update_existing, dry_run, force_deletions)
+        return integrate.run(self, limit_to, update_existing, dry_run, force_deletions)
 
     def publish_regulations(self) -> None:
         regulation_ids = self.fetch_regulation_ids()
