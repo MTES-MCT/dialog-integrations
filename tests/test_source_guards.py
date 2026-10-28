@@ -95,7 +95,7 @@ def test_a_failing_source_freezes_its_prefix_and_the_others_still_write(monkeypa
     assert _api(integration).deleted == [f"{A}gone"]
     assert outcome.frozen_sources == {"b": "failed"}
     assert outcome.failed_sources == ["b"]
-    assert outcome.error_causes == {"source en échec": 1}
+    assert outcome.errors == 0
     assert "export cut" in outcome.source_errors["b"]
 
 
@@ -271,4 +271,4 @@ def test_a_regulation_failing_a_check_is_left_whole_and_not_taken_for_gone(monke
 
     assert _api(integration).posted == [f"{A}new"]
     assert _api(integration).deleted == []
-    assert outcome.error_causes == {"contrôle : limitation sans vitesse": 1}
+    assert (outcome.refused, outcome.errors) == (1, 0)

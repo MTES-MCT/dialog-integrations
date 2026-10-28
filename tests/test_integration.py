@@ -777,7 +777,7 @@ def test_a_regulation_that_cannot_be_built_is_left_as_dialog_has_it(monkeypatch,
     outcome = integration.integrate_regulations()
 
     assert (api.posted, api.put, api.deleted) == ([], [kept], [])
-    assert outcome.error_causes == {"construction impossible": 3}
+    assert (outcome.refused, outcome.errors) == (3, 0)
     assert {i: d == snapshot[i] for i, d in _snapshot(tmp_path).items()} == {
         kept: False,
         whole: True,

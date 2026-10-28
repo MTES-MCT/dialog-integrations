@@ -116,7 +116,7 @@ Une organisation DiaLog reçoit souvent des arrêtés par d'autres canaux que ce
 
 Chaque source d'une organisation qui supprime ou clôt déclare son propre préfixe (`identifier_prefix = "AV-LV-"` sur la classe de la source), contenu dans celui de l'organisation. Une source est **gelée** pour la nuit — rien n'est clos ni supprimé sous son préfixe, ses arrêtés restent tels que DiaLog les détient — dans trois cas :
 
-* **elle a planté** : l'exception est journalisée, comptée « source en échec », et les autres sources de l'organisation écrivent normalement. La commande sort en erreur et Tchap affiche ❌ ;
+* **elle a planté** : l'exception est journalisée et les autres sources de l'organisation écrivent normalement. La commande sort en erreur et Tchap affiche ❌ ;
 * **son volume s'est effondré** : elle produit moins de 70 % des arrêtés de la veille (`state/…/totals.json`). Un export vide ou tronqué se lirait sinon comme la disparition de tout son corpus, et sous le plafond tout serait clos ou supprimé. La référence reste le dernier volume de confiance jusqu'à ce qu'on relâche avec `--force-deletions` ;
 * **elle est en pause** dans `integrations.toml` (`paused = ["nom"]`) : elle n'est pas lue. Retirer une source de `data_sources` à la place ferait passer tout ce qu'elle a produit pour disparu.
 
@@ -124,7 +124,7 @@ Une source sans préfixe propre gèle celui de l'organisation, donc toutes ses v
 
 ### Les contrôles communs
 
-Après la transformation de la source et avant la construction des corps d'écriture, chaque ligne passe des contrôles communs (`integrations/checks.py`) : fin avant début, limitation de vitesse sans vitesse, emprise `rawGeoJSON` sans géométrie, coordonnées hors bornes ou en ordre (latitude, longitude). Un arrêté dont une ligne échoue est laissé de côté **en entier**, et laissé tel que DiaLog le détient : ni créé, ni mis à jour, ni clos. Il compte en erreur sous « contrôle : {motif} ».
+Après la transformation de la source et avant la construction des corps d'écriture, chaque ligne passe des contrôles communs (`integrations/checks.py`) : fin avant début, limitation de vitesse sans vitesse, emprise `rawGeoJSON` sans géométrie, coordonnées hors bornes ou en ordre (latitude, longitude). Un arrêté dont une ligne échoue est laissé de côté **en entier**, et laissé tel que DiaLog le détient : ni créé, ni mis à jour, ni clos. Il compte parmi les « écartés par la pipeline » de Tchap ; le motif est dans le journal du run.
 
 Une colonne nommée comme un champ du pivot (`location_…`, `vehicle_…`) sans y figurer est supprimée comme avant, mais signalée : une faute de frappe ou un champ que le pivot ne porte pas encore. Une colonne de travail d'une source commence par `_` (`_measure_kind`).
 
@@ -143,7 +143,7 @@ uv run dialog integrate co_lyon --force-deletions   # relâcher les suppressions
 
 Ce qui a disparu de la source attend aussi, sans plafond atteint, dans deux cas : tant qu'un lot de créations ou de mises à jour est retenu, et la nuit où une création ou une mise à jour est restée sans réponse (panne, 5xx). Ces écritures portent peut-être ses tronçons : le retirer d'abord laisserait la route sans limite. Un refus de l'API (4xx) ne fait pas attendre. Les créations, elles, ne sont jamais retenues par un autre lot. Le rapport dit « en attente des lots ci-dessus », Tchap « lot retenu ». `--force-deletions` relâche dans tous les cas ; le rapport ne le propose que pour un lot au-dessus de son propre plafond.
 
-Un arrêté dont une mesure n'a pas pu être construite n'est ni créé, ni mis à jour, ni supprimé, ni clos, toutes ses tranches (`-01`, `-02`…) comprises : il reste tel que DiaLog le détient, et compte comme une erreur « construction impossible ».
+Un arrêté dont une mesure n'a pas pu être construite n'est ni créé, ni mis à jour, ni supprimé, ni clos, toutes ses tranches (`-01`, `-02`…) comprises : il reste tel que DiaLog le détient, et compte parmi les « écartés par la pipeline ».
 
 ### L'instantané
 

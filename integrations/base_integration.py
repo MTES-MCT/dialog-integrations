@@ -54,8 +54,6 @@ from settings import OrganizationSettings
 
 # A zone regulation is updated by DELETE then POST: when the POST fails, it is gone.
 LOST_ON_UPDATE = "arrêté supprimé, nouvelle version non créée"
-UNBUILT = "construction impossible"
-SOURCE_FAILED = "source en échec"
 
 
 class BaseIntegration:
@@ -199,7 +197,6 @@ class BaseIntegration:
                 # DiaLog stays as it is: an exception says nothing about what left it.
                 logger.exception(f"Data source {name} failed, its regulations are left as is")
                 outcome.frozen_sources[name] = FAILED
-                outcome.error_causes[SOURCE_FAILED] = outcome.error_causes.get(SOURCE_FAILED, 0) + 1
                 outcome.source_errors[name] = repr(error)[:300]
                 continue
 
@@ -317,7 +314,7 @@ class BaseIntegration:
                 f"{len(not_built)} regulations could not be built, left as DiaLog has them: "
                 f"{sorted(not_built)[:10]}"
             )
-            outcome.error_causes[UNBUILT] = len(not_built)
+            outcome.refused += len(not_built)
         outcome.regulations = outcome.produced = len(regulations)
         outcome.measures = sum(len(r.measures or []) for r in regulations.values())
         counted = [funnel.raw_rows for funnel in funnels if funnel.raw_rows is not None]
@@ -377,7 +374,7 @@ class BaseIntegration:
         outcome.created = len(created)
         outcome.updated = len(updated)
         outcome.deleted = len(deleted)
-        outcome.refused = len(refused)
+        outcome.refused += len(refused)
         failed = (
             (unwritten - set(lost))
             | (set(deletions) - set(deleted))
@@ -451,20 +448,20 @@ class BaseIntegration:
         """Leave out, whole, every regulation with a row failing a common check.
 
         They go into `checked_out`, then into `unbuilt`: neither sent nor taken for gone.
+        Counted with what the pipeline leaves out; the reasons are in the log only.
         """
         failing = checks.failing_rows(clean_data)
         if failing.is_empty():
             return clean_data
         for (reason,), group in failing.group_by("reason", maintain_order=True):
             identifiers = group["regulation_identifier"].unique().to_list()
-            cause = f"contrôle : {reason}"
-            outcome.error_causes[cause] = outcome.error_causes.get(cause, 0) + len(identifiers)
             logger.warning(
                 f"{name}: {len(identifiers)} regulations left out ({reason}), left as "
                 f"DiaLog has them: {sorted(identifiers)[:5]}"
             )
         left_out = set(failing["regulation_identifier"].to_list())
         checked_out |= left_out
+        outcome.refused += len(left_out)
         return clean_data.filter(
             ~pl.col("regulation_identifier").cast(pl.Utf8).is_in(list(left_out))
         )

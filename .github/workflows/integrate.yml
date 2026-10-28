@@ -29,7 +29,7 @@ jobs:
       matrix: ${{ steps.registry.outputs.matrix }}
       organizations: ${{ steps.registry.outputs.organizations }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Read integrations.toml
         id: registry
         # Inputs go through the environment, never pasted into the script.
@@ -57,8 +57,8 @@ jobs:
     environment: ${{ matrix.target == 'prod' && matrix.organization || format('{0}-{1}', matrix.organization, matrix.target) }}
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
 
       # The snapshot of what was last sent, used to detect updates. A missing snapshot
       # costs one day of updates, never a mass rewrite: the run rebuilds it.
@@ -66,7 +66,7 @@ jobs:
       # yesterday's. Caches are evicted after 7 days without use. The target is part of
       # the key: what was sent to staging says nothing about production.
       - name: Restore synchronization state for ${{ matrix.organization }} (${{ matrix.target }})
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: state
           key: dialog-state-${{ matrix.organization }}-${{ matrix.target }}-${{ github.run_id }}
@@ -115,7 +115,7 @@ jobs:
           printf '%s' "$result" > "result_${org}.json"
       - name: Upload the result for the notify job
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: result-${{ matrix.organization }}
           path: result_*.json
@@ -123,7 +123,7 @@ jobs:
           retention-days: 7
       - name: Upload the run summary for the notify job
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: summary-${{ strategy.job-index }}-${{ matrix.organization }}
           path: summary-*.md
@@ -139,8 +139,8 @@ jobs:
     # Not when the plan itself failed: there is no list of organizations to report on.
     if: always() && needs.plan.result == 'success'
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
 
       - name: Install dependencies
         run: make app:build-ci
@@ -150,7 +150,7 @@ jobs:
 
       - name: Gather the summaries of every organization
         if: always()
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: summary-*
           path: summaries
@@ -158,7 +158,7 @@ jobs:
 
       - name: Gather the results of every organization
         if: always()
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: result-*
           path: results
@@ -186,7 +186,7 @@ jobs:
 
       - name: Upload the report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.report.outputs.name }}
           path: ${{ steps.report.outputs.path }}

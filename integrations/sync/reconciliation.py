@@ -152,8 +152,8 @@ class IntegrationOutcome:
     # command itself exits non-zero.
     error_causes: dict[str, int] = field(default_factory=dict)
     rejections: int = 0
-    # Regulations the pipeline itself refused (a zone covering parallel roads): not an
-    # API failure, retried every day until the source changes.
+    # Regulations the pipeline itself left out (a zone over parallel roads, a failed check,
+    # a measure it cannot build): not an API failure, retried every day.
     refused: int = 0
     planned: dict[str, int] = field(default_factory=dict)
     held: dict[str, int] = field(default_factory=dict)
