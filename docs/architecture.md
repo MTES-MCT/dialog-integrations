@@ -22,7 +22,7 @@ flowchart TD
         A --> B --> C --> D --> E
     end
 
-    subgraph ORG["L'organisation — run/organization.py"]
+    subgraph ORG["L'organisation — run/night.py"]
         F["Contrôles communs<br/>checks/rows.py"]
         G["Corps d'écriture de l'API<br/>payloads/"]
         H["Décider quoi écrire<br/>sync/plan.py<br/>créer · mettre à jour · clore · supprimer"]
@@ -107,8 +107,14 @@ sync/               décider quoi écrire, se souvenir de ce qui a été envoyé
   totals.py         les volumes d'une nuit à l'autre, et la garde de volume
   closure.py        clore un arrêté sorti de la source
   dating.py         dater un arrêté que la source ne date pas
-run/
-  organization.py   l'exécution d'une organisation, de bout en bout
+run/                l'exécution d'une organisation, une étape par fichier
+  organization.py   ce que déclare un integration.py, et les points d'entrée
+  night.py          l'enchaînement des étapes de la nuit
+  sources.py        exécuter chaque source, geler celle qui plante ou est en pause
+  freeze.py         geler une source dont le volume s'effondre
+  writes.py         créer, mettre à jour, clore, supprimer, et compter les échecs
+  state.py          ce que la nuit laisse à la suivante : instantané et volumes
+  datasets.py       les lignes par jeu de données du message Tchap
 report/             ce que lisent les humains
   sync_report.py    le rapport de synchronisation
   notifier.py  summary.py  tchap_bot.py   message Tchap, résumé GitHub
