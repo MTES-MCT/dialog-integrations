@@ -12,8 +12,8 @@ class Schema(pa.DataFrameModel):
     LIBCO: str | None = pa.Field(nullable=True)
     geometry: str | None = pa.Field(nullable=True)
     SENS: int | None = pa.Field(nullable=True)
-    VELO: bool  # After boolean casting
-    CYCLO: bool  # After boolean casting
+    VELO: bool
+    CYCLO: bool
     VITEMAX: int | None = pa.Field(nullable=True)
     POIDS: float | None = pa.Field(nullable=True)
     HAUTEUR: float | None = pa.Field(nullable=True)

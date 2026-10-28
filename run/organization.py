@@ -38,21 +38,16 @@ class BaseIntegration:
     organization_settings: OrganizationSettings
     data_sources: list[type[BaseDataSourceIntegration]]
 
-    # When True, a regulation whose locations are zones is created through
-    # `zone_flow.create_zone_regulation`: four calls that republish only the street
-    # sections worth publishing, and refuse a zone covering several parallel roads.
+    # Zones go through `zone_flow`: only the street sections worth publishing are kept,
+    # and a zone over several parallel roads is refused.
     resolve_zones_to_sections: bool = False
     min_section_length_m: float = MIN_SECTION_LENGTH_M
     max_sections_per_length: float = MAX_SECTIONS_PER_LENGTH
 
-    # --- Synchronization, opt-in per organization ---------------------------------
-    # Defaults are purely additive: create what is missing, never update, never delete.
-    #
-    # `identifier_prefix` bounds every destructive operation to the regulations this
-    # pipeline owns; without it deletion is refused, not merely disabled. An organization
-    # without one sets `legacy_additive`: what it creates stays in DiaLog for good, which
-    # has to be a decision, not an omission.
+    # --- Synchronization: additive unless the organization opts in -----------------
+    # Bounds deletion and closure to what this pipeline owns; without it they are refused.
     identifier_prefix: str | None = None
+    # No prefix on purpose: what it creates stays in DiaLog for good.
     legacy_additive: bool = False
     # Set from `integrations.toml`, never in an `integration.py`.
     paused_sources: frozenset[str] = frozenset()
@@ -60,9 +55,8 @@ class BaseIntegration:
     max_closures_per_run: int | None = None
     max_updates_per_run: int | None = None
     max_creations_per_run: int | None = None
-    # What happens to a regulation that left the source: deleted, or closed — its end
-    # date brought back to the day before the run, the regulation itself kept
-    # (`sync/closure.py`). At most one of the two.
+    # What left the source is deleted, or closed (its end date brought back to the day
+    # before the run); never both.
     delete_missing: bool = False
     close_missing: bool = False
     update_changed: bool = False
@@ -122,13 +116,7 @@ class BaseIntegration:
         dry_run: bool = False,
         force_deletions: bool = False,
     ) -> IntegrationOutcome:
-        """Make DiaLog match what the data sources produce today.
-
-        Four operations: create what DiaLog does not have, update what changed since
-        the snapshot of our last send, delete or close what left the source (inside
-        our prefix only). `dry_run` computes everything and writes nothing — neither
-        to DiaLog nor to the snapshot.
-        """
+        """Make DiaLog match what the sources produce today; `dry_run` writes nothing."""
         return integrate.run(self, limit_to, update_existing, dry_run, force_deletions)
 
     def publish_regulations(self) -> None:
@@ -173,9 +161,7 @@ class BaseIntegration:
         return writes.create_one(self, regulation)
 
     # --- payloads -------------------------------------------------------------------
-    # `create_regulations` and `create_measure` are the override points. The three
-    # `create_save_*_dto` below are called by nobody: `build_measure` calls
-    # `build_period` & co. directly, so overriding them has no effect.
+    # The `create_save_*_dto` are called by nobody: overriding them has no effect.
 
     def create_regulations(
         self,
@@ -183,10 +169,9 @@ class BaseIntegration:
         source: BaseDataSourceIntegration | type[BaseDataSourceIntegration] | None = None,
         unbuilt: set[str] | None = None,
     ) -> list[PostApiRegulationsAddBody]:
-        """The source decides how its rows fold into measures and regulations.
+        """Fold the rows into regulations the way the source asks.
 
-        Only class attributes are read, so the class itself does as well as an instance
-        (tests build payloads without instantiating a source).
+        Only class attributes are read: tests pass the class, not an instance.
         """
         return build_regulations(
             clean_data,

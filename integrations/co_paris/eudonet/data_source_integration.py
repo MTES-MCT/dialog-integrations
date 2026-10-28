@@ -45,10 +45,8 @@ from .vehicles import compute_vehicle_fields
 
 CREDENTIALS_ENV_VAR = "EUDONET_PARIS_CREDENTIALS"
 
-# The police prefecture signs about a third of the acts in Eudonet, on Paris streets, under
-# its own authority. R-73 by analogy: another authority is not published under the City's
-# name without the City's agreement. Published on staging (decision of 2026-09-23, Q-36),
-# never on the production host whatever this says, until Paris agrees.
+# The police prefecture signs about a third of the acts, under its own authority (R-73 by
+# analogy): staging only (2026-09-23), never the production host until Paris agrees.
 PUBLISH_POLICE_PREFECTURE = True
 PRODUCTION_HOST = "dialog.beta.gouv.fr"
 

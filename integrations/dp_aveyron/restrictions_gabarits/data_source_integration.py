@@ -1,4 +1,4 @@
-"""Data source integration for Aveyron : prescriptions-routieres-du-departement"""
+"""Aveyron: prescriptions-routieres-du-departement."""
 
 import io
 
@@ -28,14 +28,11 @@ LOCAL_FILE = "explorations/dp_aveyron/data/prescriptions-routieres-du-departemen
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
-    """Data source for Prescription Routière du Département"""
-
     raw_data_schema = AveyronPrescriptionsRoutieresRawDataSchema
     name = "restrictions_gabarits"
     identifier_prefix = "AV-GB-"
 
-    # R-28: one arrete carries one measure per distinct sign-and-value, and that measure
-    # carries every stretch it applies to.
+    # R-28: one measure per sign and value, carrying every stretch it applies to.
     group_locations_by_measure = True
 
     def fetch_raw_data(self):
@@ -56,8 +53,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(filter_unrelevant)
             .pipe(compute_measure_fields)
             .pipe(compute_location_fields)
-            # The period comes after the regulation: a measure carries one period, so
-            # dating it needs to know which group of rows it gathers (R-28).
+            # After the regulation: a measure carries one period over its group of rows (R-28).
             .pipe(compute_regulation_fields)
             .pipe(compute_period_fields)
             .pipe(compute_vehicle_fields)
@@ -117,22 +113,14 @@ MEASURE_UNITS = {
 
 
 def sign_value() -> pl.Expr:
-    """`3.5`, `19` — the value the sign states, without the float's trailing zero.
-
-    The producer stores tonnages and heights as floats, so 19 t arrives as `19.0`. It
-    reaches a human in the title of a regulation and a GPS through the rebroadcast, and
-    neither reads `19.0 t` as a tonnage.
-    """
+    """`3.5`, `19`: the sign's value without the float's trailing zero, for titles."""
     return pl.col("panneau_value").cast(pl.String).str.replace(r"\.0$", "")
 
 
 def measure_group_key() -> pl.Expr:
-    """`B13-3-5` — the sign and the value it states, which is exactly what the measure is.
+    """`B13-3-5`: rows sharing it in one regulation collapse into one measure (R-28).
 
-    Two stretches share it only when they carry the same sign at the same value. Rows
-    sharing it inside one regulation collapse into a single measure carrying N emprises
-    (R-28). The decimal point becomes a hyphen so the key survives a URL path, where the
-    identifier of a fallback regulation travels.
+    The decimal point becomes a hyphen: the key ends up in fallback identifiers, in URL paths.
     """
     return (
         pl.when(pl.col("panneau_value").is_null())
@@ -142,7 +130,7 @@ def measure_group_key() -> pl.Expr:
 
 
 def measure_label() -> pl.Expr:
-    """`Limitation de tonnage 3.5 t` — the same measure, spelled out for a human."""
+    """`Limitation de tonnage 3.5 t`: the measure spelled out for a human."""
     label = (
         pl.col("panneau_type")
         .replace_strict(PANNEAUX, default=None, return_dtype=pl.Utf8)
@@ -157,8 +145,7 @@ def measure_label() -> pl.Expr:
 
 
 def compute_measure_fields(df: pl.DataFrame):
-    """Every row left by filter_unrelevant carries a sign, so every measure is a
-    prohibition. This source holds no speed limit, and no measure_max_speed."""
+    """Every remaining row carries a sign, so every measure is a prohibition."""
     return df.with_columns(
         pl.lit(MeasureTypeEnum.NOENTRY.value).alias("measure_type_"),
         measure_group_key().alias("measure_group_key"),
@@ -168,25 +155,11 @@ def compute_measure_fields(df: pl.DataFrame):
 def compute_period_fields(df: pl.DataFrame):
     """Permanent, every day, no end; the start is the day the arrete was signed, or null.
 
-    The producer writes dd/mm/yyyy, with a few dd/mm/yy. Inferring the format lets polars
-    read "12/01/18" as year 18, so both formats are stated explicitly.
-
-    **A measure carries one period and N emprises (R-28)**, so the date has to be uniform
-    over the group:
-
-    - a *numbered* arrete has one signature date, and the group takes the earliest of its
-      rows: when the producer writes two, the earliest is the day from which the measure
-      has demonstrably applied;
-    - a *grouped fallback* gathers stretches from different acts (one spans 2003 to 2019).
-      Picking one member's date would assert a commencement date for the other N-1 that
-      nothing supports. R-39: no date at all.
-
-    Rows with no readable date are left undated either way: signed, signposted and in
-    force, only the day of signature is missing. `sync/dating.py` resolves
-    the null when DiaLog is written: the day of the run on creation ("this applies now"),
-    the date DiaLog already holds on update. Dating them the day of the run here would
-    make them look modified each morning.
+    A measure carries one period (R-28): a numbered arrete takes the earliest date of its
+    rows; a grouped fallback mixes acts from 2003 to 2019, so it gets none (R-39).
+    `sync/dating.py` fills the nulls when DiaLog is written.
     """
+    # Some dates are dd/mm/yy, which inference would read as year 18.
     parsed = (
         pl.when(pl.col("date_darre").str.len_chars() <= 8)
         .then(pl.col("date_darre").str.to_date("%d/%m/%y", strict=False))
@@ -217,10 +190,7 @@ def compute_period_fields(df: pl.DataFrame):
 
 
 def compute_location_fields(df: pl.DataFrame):
-    """Departmental-road location: `route` 12_D98 -> D98, PR from prd/abd to prf/abf.
-
-    `geo_shape` is not sent: DiaLog geocodes the stretch from its milestones.
-    """
+    """Departmental-road location; `geo_shape` is not sent, DiaLog geocodes the milestones."""
 
     return df.with_columns(
         [
@@ -242,7 +212,7 @@ def compute_location_fields(df: pl.DataFrame):
 
 MAX_IDENTIFIER_LENGTH = 60  # API contract
 
-# See `limitations_vitesse` for why the batch is prefixed (R-29). `GB` is this source.
+# Prefixed so our batch stays recognisable and removable in one go (R-29).
 IDENTIFIER_PREFIX = "AV-GB"
 # What the producer writes when there is no arrete to refer to. Treated as an absence,
 # otherwise every one of them lands in a single catch-all regulation.
@@ -253,39 +223,17 @@ OTHER_CATEGORY_TEXT = "Restriction de gabarit"
 
 
 def normalize_reference(reference: pl.Expr) -> pl.Expr:
-    """Reduce a producer reference to what survives a URL path unescaped.
-
-    Identifiers travel in the path of DELETE /api/regulations/{identifier} and of the
-    publish endpoint, so anything that is not a letter or a digit becomes a single hyphen.
-    """
+    """Reduce a producer reference to what survives a URL path (DELETE, publish)."""
     return reference.str.replace_all(r"[^A-Za-z0-9]+", "-").str.strip_chars("-")
 
 
 def compute_regulation_fields(df: pl.DataFrame):
-    """Identifier, title and category of the permanent regulation (R-28; R-20 level 3,
-    written out here per R-23).
+    """Identifier, title and category of the permanent regulation (R-28, R-20, R-23).
 
-        AV-GB-{numero_dar}   when the producer gives an arrete number — every stretch
-                             citing it becomes an emprise of that arrete
-        AV-GB-{B13-3-5}      otherwise, one departmental arrete per sign-and-value,
-                             carrying N emprises
-
-    Some rows carry no number, or write "0 arrete" to say there is none. Identifying
-    those by the stretch itself fabricates one legal act per section of road, a falsehood
-    that travels to the satnavs that rebroadcast us. Both forms stay under the
-    60-character cap, and neither carries the road or the commune: grouping
-    geographically would move the identifier the first time the producer redraws a
-    trace, orphaning the arrete and duplicating it.
-
-    Nothing is dropped here. One arrete can carry several panneaux, so the title lists
-    every prescription of the group: the API keeps the title of the first row only, and a
-    single panneau would misdescribe the rest. `prescripti` is too long to serve as
-    otherCategoryText once joined (the API caps it at 100), so that field states the
-    subject instead.
-
-    `_has_reference` is carried out of here for `compute_period_fields`, which dates a
-    numbered arrete and a grouped fallback differently. The underscore keeps it out of
-    the pivot: `select_regulation_measure_fields` drops it.
+    `AV-GB-{numero_dar}`, or `AV-GB-{B13-3-5}`: one grouped arrete per sign and value for the
+    rows citing none. Identifying by stretch would invent one legal act per section and move
+    with every redrawn trace. The title lists every prescription, as the API keeps the first
+    row's only; joined, they exceed otherCategoryText's 100 characters.
     """
     reference = normalize_reference(pl.col("numero_dar"))
     is_placeholder = (
@@ -301,6 +249,7 @@ def compute_regulation_fields(df: pl.DataFrame):
         logger.info(f"Identifying {n_reconstructed}/{df.height} rows by their stretch")
 
     df = df.with_columns(
+        # For compute_period_fields; the underscore keeps it out of the canonical model.
         has_reference.alias("_has_reference"),
         (
             pl.lit(f"{IDENTIFIER_PREFIX}-")
@@ -321,9 +270,7 @@ def compute_regulation_fields(df: pl.DataFrame):
     title = (
         pl.when(has_reference)
         .then(reference + pl.lit(" - ") + prescriptions.over("regulation_identifier"))
-        # A grouped fallback is named after what it does: every stretch the department
-        # signs with this sign at this value, without citing an arrete. Naming one of its
-        # stretches would describe one emprise and misdescribe the other N-1.
+        # Naming one stretch would misdescribe the N-1 others of the fallback.
         .otherwise(
             measure_label()
             + pl.lit(" - Département de l'Aveyron (")
@@ -350,7 +297,6 @@ def compute_regulation_fields(df: pl.DataFrame):
 
 
 def compute_vehicle_fields(df: pl.DataFrame):
-    """Every measure targets a category of vehicle, named by its sign (see PANNEAUX)."""
     return df.with_columns(
         [
             pl.lit(False).alias("vehicle_all_vehicles"),

@@ -1,8 +1,7 @@
 """Tests for the Issy-les-Moulineaux integration (travaux de voirie).
 
-The fixture reproduces the types the Opendatasoft API actually returns (multivalued
-`mesure_titre` / `mesures`, dates as strings, `geolocalisation` as a lon/lat struct):
-past regressions came from them.
+The fixture keeps the types the Opendatasoft API returns (multivalued measures, string
+dates, lon/lat struct): regressions came from them.
 """
 
 import importlib.util
@@ -63,7 +62,6 @@ RAW_RECORDS = [
         "geolocalisation": {"lon": 2.25, "lat": 48.82},
         "url": None,
     },
-    # No geolocation: must be dropped.
     {
         "reference": "ACP/2026/002",
         "type_travaux": "Arrêté provisoire de restriction de la circulation",
@@ -77,8 +75,7 @@ RAW_RECORDS = [
         "geolocalisation": {"lon": None, "lat": None},
         "url": None,
     },
-    # No end date: must be dropped, or the measure would stay active forever.
-    # Publishable otherwise (parking + point).
+    # Publishable but for its missing end date.
     {
         "reference": "ACP/2026/004",
         "type_travaux": "Arrêté provisoire de restriction de la circulation",
@@ -92,7 +89,6 @@ RAW_RECORDS = [
         "geolocalisation": {"lon": 2.27, "lat": 48.84},
         "url": None,
     },
-    # No measure: must be dropped.
     {
         "reference": "ACP/2026/003",
         "type_travaux": "Arrêté provisoire de restriction de la circulation",
@@ -127,11 +123,7 @@ def test_une_ligne_par_mesure_publiable(clean_data):
 
 
 def test_types_reserves_aux_troncons_ecartes(clean_data):
-    """The source gives a point only: parking prohibition is the only type published.
-
-    "Limitation vitesse" and "Barrage de voie" are understood by MEASURE_TYPE_BY_LABEL
-    but dropped: a speed limit or a closure applies to a segment, not a point.
-    """
+    """The source gives a point only: a speed limit or a closure needs a segment."""
     module = _load_module()
     assert module.PUBLISHED_MEASURE_TYPES == [MeasureTypeEnum.PARKINGPROHIBITED.value]
 
@@ -141,27 +133,19 @@ def test_types_reserves_aux_troncons_ecartes(clean_data):
 
 
 def test_mesure_sans_date_de_fin_ecartee(clean_data):
-    """A measure with no end would stay active forever: nothing closes it afterwards.
-
-    The arrete is otherwise publishable (parking + point): only the missing `date_fin`
-    drops it.
-    """
+    """A measure with no end would stay active forever: nothing closes it afterwards."""
     assert "ACP/2026/004" not in set(clean_data["regulation_identifier"])
     assert None not in set(clean_data["period_end_date"])
 
 
-def test_measure_type_survit_au_pivot(clean_data):
+def test_measure_type_survit_au_modele_canonique(clean_data):
     """Guard: RegulationMeasure silently drops any column it does not declare."""
     assert "measure_type_" in clean_data.columns
     assert "measure_max_speed" in clean_data.columns
 
 
 def test_aucune_vitesse_portee_par_une_mesure_de_stationnement(clean_data):
-    """A speed read from the text must not follow a measure of another type.
-
-    Regression: the measures' texts used to be concatenated per arrete, and a parking
-    measure left with the 30 km/h of the neighbouring limitation.
-    """
+    """A speed read from the text must not follow a measure of another type."""
     assert clean_data["measure_max_speed"].to_list() == [None, None]
 
 

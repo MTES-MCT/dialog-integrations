@@ -1,27 +1,13 @@
 """Decide what to create, update, close and delete on a given run.
 
-Four operations, three sources of truth (`ai/docs/synchronisation.md`):
+Creations and what left the source come from DiaLog's identifiers, updates from the snapshot
+of what we sent last. Two guard rails:
 
-| Operation | Source of truth                                                          |
-|-----------|--------------------------------------------------------------------------|
-| create    | `GET /api/organization/identifiers` — identifier missing from DiaLog      |
-| delete    | same endpoint — present in DiaLog, **inside our prefix**, absent today    |
-| close     | same as delete, but the regulation stays and its end date is brought back |
-| update    | the snapshot of what we sent last time (`sync/snapshot.py`)                  |
-
-An organization chooses what happens to a regulation that left its source: nothing
-(the default), deletion, or closure (`sync/closure.py`) — never both. A closed
-regulation that has already ended, according to the snapshot, is left alone.
-
-Two guard rails:
-
-- `identifier_prefix` bounds every destructive operation. Without a prefix deletion
-  and closure are *refused*, not merely disabled: an organization usually also
-  receives regulations from channels outside this repository.
-- a batch over its cap is held **whole** and flagged for manual review; its previous
-  digest stays in the snapshot so it is detected again, identically, the next day.
-  While creations or updates are held, what left the source is held too: they may
-  carry its segments, and removing it first would leave them without a limit.
+- `identifier_prefix` bounds deletion and closure, refused without one: an organization
+  usually also receives regulations from channels outside this repository.
+- a batch over its cap is held whole for a human, and found again the next day. While
+  creations or updates are held, what left the source is held too: they may carry its
+  segments, and removing it first would leave them without a limit.
 """
 
 from __future__ import annotations
@@ -41,9 +27,8 @@ DELETE = "delete"
 CLOSE = "close"
 
 
-# "none": never update. "changed": update what differs from the snapshot (the class
-# attribute `update_changed`). "all": update everything already in DiaLog — what the
-# historical `--update-existing` flag did, kept for manual runs.
+# "changed": what differs from the snapshot; "all": everything already in DiaLog, for
+# manual runs.
 UpdateMode = Literal["none", "changed", "all"]
 
 
@@ -129,9 +114,8 @@ class ReconciliationPlan:
 def assert_identifiers_in_prefix(identifiers: Iterable[str], prefix: str | None) -> None:
     """Refuse to write anything when a produced identifier misses the prefix.
 
-    Catches the two mistakes that would otherwise be silent: a prefix applied twice,
-    and a prefix forgotten in one branch of the transformation. Both would make the
-    deletion pass blind to regulations we own.
+    A prefix applied twice, or forgotten in one branch, would silently make the deletion
+    pass blind to regulations we own.
     """
     if not prefix:
         return
@@ -163,10 +147,9 @@ def reconcile(
 ) -> ReconciliationPlan:
     """Split today's production into its batches.
 
-    `force_deletions` releases the batch of what left the source — deletions or
-    closures, whichever the organization chose — when it is held. What is missing because
-    it could not be built (`unbuilt`, slices included) or sits under a frozen prefix is
-    not taken for gone, and `--force-deletions` does not release the latter.
+    `force_deletions` releases a held batch of deletions or closures. What could not be
+    built (`unbuilt`, slices included) or sits under a frozen prefix is not taken for gone,
+    even with `force_deletions`.
     """
     assert_identifiers_in_prefix(produced.keys(), identifier_prefix)
     if delete_missing and close_missing:
@@ -191,8 +174,7 @@ def reconcile(
         to_update = tuple(
             identifier
             for identifier in already_there
-            # Absent from the snapshot means "we do not know what we sent": no update,
-            # the snapshot is rebuilt from today's digest instead.
+            # Absent from the snapshot: we do not know what we sent, the snapshot is rebuilt.
             if identifier in snapshot
             and fingerprint(snapshot[identifier]) != fingerprint(produced[identifier])
         )
@@ -237,7 +219,6 @@ def reconcile(
     return ReconciliationPlan(
         creations=creations,
         updates=updates,
-        # --force-deletions releases the deletion batch only.
         deletions=_batch(DELETE, to_delete, max_deletions, force_deletions, waiting),
         unchanged=unchanged,
         closures=closures,

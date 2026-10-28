@@ -13,10 +13,8 @@ from .locations import SCOPE_POINT
 from .text import plain_text
 from .vocabulary import COMPLEMENT_CONNECTORS, WHOLE_LOCATION_COMPLEMENTS
 
-# DiaLog refuses a whole regulation when it cannot geocode one of its locations (13 % of
-# the regulations sent to the staging on 2026-09-23), and its answer does not say which. A
-# location fixed in Eudonet keeps its `FileId` and stays dropped until the list is probed
-# again.
+# DiaLog refuses a whole regulation over one location it cannot geocode, without saying which
+# (13 % of the regulations on staging, 2026-09-23); the list is kept until probed again.
 REFUSED_LOCATIONS_PATH = Path(__file__).with_name("refused_locations.json")
 # R-05: a temporary filter, to switch off the day the back drops the location it cannot
 # geocode instead of refusing the whole regulation.
@@ -71,8 +69,7 @@ def discard_location_complements(df: pl.DataFrame) -> pl.DataFrame:
 def discard_points_beyond_parking(df: pl.DataFrame) -> pl.DataFrame:
     """Drop a single-point location that carries anything but a parking ban (R-74).
 
-    A ban, a speed or a gauge stands on a stretch of road; on one house number DiaLog draws
-    a point a GPS cannot follow (decision of 2026-10-26, Q-56).
+    On one house number DiaLog draws a point a GPS cannot follow (decided 2026-10-26).
     """
     beyond = (pl.col("l_scope") == SCOPE_POINT) & (
         pl.col("measure_type_") != MeasureTypeEnum.PARKINGPROHIBITED.value

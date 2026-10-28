@@ -1,38 +1,14 @@
-"""Métropole de Lyon integration.
+"""Métropole de Lyon: two Grand Lyon layers, each with its own identifier prefix.
 
-Two Grand Lyon layers, each its own data source and identifier namespace:
+`chantiers_perturbants` (`MGL-CHP-`) is a snapshot of temporary work sites;
+`chaussees_trottoirs` (`MGL-CT-`) the permanent regulation of the road network. A
+regulation that leaves either is closed, never deleted: the team wants the history kept.
 
-- `chantiers_perturbants` (`MGL-CHP-`): disruptive work sites, temporary, one
-  regulation per site;
-- `chaussees_trottoirs` (`MGL-CT-`): the permanent regulation of the road network,
-  one regulation per order (or per measure for the unnumbered stretches).
-
-The work-site layer is a snapshot: a site that ends, or is withdrawn, disappears from
-it. The regulation is then **closed, never deleted** — its end date is brought back to
-the day before the run and it stays in DiaLog, because the team wants the history of
-work sites kept. A site that ends on its announced date needs no write at all: the
-regulation expired on its own, on the right day. The same policy applies to the road
-network layer for want of a per-source one: a stretch that leaves it is closed, and
-a batch of more than 50 updates or closures is held for review.
-
-`PUBLISHED` is deliberate: a draft is not visible on staging, and this source is
-being shown to the team there. It also means that flipping `co_lyon` to `target: prod`
-in `.github/workflows/integrate.yml` publishes every regulation to production on the
-next nightly run, with no ceiling on creations. Three questions are open and none of
-them belongs to this file — settle them before flipping it:
-
-- the footprints are polygons, not centrelines. They are sent as DiaLog `zone`s, so
-  DiaLog itself turns each polygon into the street segments it covers. Roughly a
-  third of the footprints cover more than one street (up to 31), and a `noEntry` on
-  such a zone closes every street inside it. Does the polygon outline the works or
-  the area they disrupt?
-- `validite` reads "A vérifier" on 100 % of rows: the producer states the data is
-  unvalidated, and we would be redistributing it to satnavs;
-- nothing here deletes, so expired regulations pile up — by design, as history.
-  Whether DiaLog filters them out when it redistributes is a question for the back
-  end, and it decides whether that pile is noise or merely volume.
-
-Measurements behind all three: `explorations/co_lyon/`.
+With `PUBLISHED`, flipping `co_lyon` to `target: prod` in `.github/workflows/integrate.yml`
+publishes everything on the next nightly run, with no cap on creations. Open before that:
+do the footprints outline the works or the area they disrupt (a `noEntry` zone closes
+every street inside, up to 31)? `validite` reads "A vérifier" on 100 % of rows. Does
+DiaLog filter out the expired regulations that pile up as history?
 """
 
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
@@ -49,15 +25,12 @@ from .chaussees_trottoirs.data_source_integration import (
 class Integration(BaseIntegration):
     status = PostApiRegulationsAddBodyStatus.PUBLISHED
 
-    # The footprints are polygons: DiaLog clips every street it intersects, down to
-    # slivers of a few metres on neighbouring streets. Read the computed sections back
-    # and republish only the ones ≥ 5 m (four calls per regulation, `zone_flow.py`).
+    # DiaLog clips every street a polygon touches, down to slivers of a few metres: only the
+    # computed sections ≥ 5 m are republished (four calls per regulation).
     resolve_zones_to_sections = True
 
-    # Synchronization policy: see the module docstring. Updates and closures stay
-    # inside the `MGL-` prefix (`MGL-CHP-`, `MGL-CT-`): the organization also holds
-    # ~800 regulations from another channel (`LYON_…`) that are not ours. The caps
-    # hold a batch whole for review; a real day moves a handful of sites.
+    # The organization also holds ~800 `LYON_…` regulations from another channel. A real
+    # day moves a handful of sites, so a larger batch is held whole for review.
     identifier_prefix = "MGL-"
     update_changed = True
     close_missing = True

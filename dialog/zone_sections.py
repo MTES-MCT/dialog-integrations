@@ -1,32 +1,9 @@
 """From the street sections DiaLog computes for a zone to the ones worth publishing.
 
-A `zone` location is a polygon; DiaLog turns it into the BD TOPO road sections it
-intersects, **clipped at the polygon's edge**, and exposes the result as the location's
-effective `geometry`. Two things make that result say more than the producer did:
-
-- **slivers**: any street whose centreline enters the polygon by a couple of metres
-  yields a piece of a couple of metres, and a `noEntry` on that piece closes the
-  neighbouring street for a satnav;
-- **parallel roads**: a polygon wide enough to hold the street it is about *and* the
-  ones running alongside closes them all.
-
-Nothing in the API lets us filter what the zone computes, so the integration reads the
-computed geometry back and:
-
-1. republishes the location as `rawGeoJSON` holding only the pieces at least
-   `MIN_SECTION_LENGTH_M` long (metres, after projection to RGF93 / Lambert-93,
-   EPSG:2154);
-2. refuses the regulation altogether when a zone's sections add up to more than
-   `MAX_SECTIONS_PER_LENGTH` times the polygon's length (half its perimeter): the
-   polygon then covers several roads side by side, and nothing tells which one the
-   restriction is about. The threshold sits between an ordinary dual carriageway
-   (up to ~1.95 on Lyon's work sites) and the first parallel-road cases (2.3);
-   crossing streets and junctions never bring the ratio near it.
-
-Measurements behind both thresholds: `ai/docs/vers-l-equipe.md` (S-15, and the
-"routes parallèles" row). Everything is computed from the polygon and the geometry
-DiaLog returned: no further call, no street naming — naming was tried and flagged
-crossings and dead ends as often as real overlaps.
+DiaLog clips the sections at the polygon's edge: a street entering it by two metres yields a
+two-metre piece, and a `noEntry` on it closes that street for a satnav. A polygon wide
+enough also holds the roads running alongside, and nothing tells which one is meant.
+Street names are not used: they flagged crossings and dead ends as often as real overlaps.
 """
 
 import json
@@ -36,6 +13,8 @@ from shapely.geometry import LineString, MultiLineString, shape
 from shapely.ops import transform
 
 MIN_SECTION_LENGTH_M = 5.0
+# Between a dual carriageway (up to ~1.95 on Lyon's work sites) and the first parallel
+# roads (2.3); crossing streets never bring the ratio near it.
 MAX_SECTIONS_PER_LENGTH = 2.1
 
 _TO_METRES = Transformer.from_crs("EPSG:4326", "EPSG:2154", always_xy=True).transform
@@ -69,11 +48,8 @@ def long_pieces(
 
 
 def sections_of(geometry: str | None, min_length_m: float = MIN_SECTION_LENGTH_M) -> str | None:
-    """The pieces of `geometry` at least `min_length_m` long, as a MultiLineString.
-
-    Returns None when nothing is long enough: the caller then keeps the zone as it is,
-    which is what DiaLog would have published anyway.
-    """
+    """The pieces of `geometry` at least `min_length_m` long, as a MultiLineString; None
+    when nothing is long enough, and the caller keeps the zone as DiaLog computed it."""
     kept = long_pieces(geometry, min_length_m)
     if not kept:
         return None
@@ -87,9 +63,8 @@ def sections_per_length(
 ) -> float:
     """How many road lengths the polygon holds: sections linear over polygon length.
 
-    The polygon's length is half its perimeter, a fair estimate for the elongated
-    footprints work sites are drawn as. 1 is one road, a dual carriageway stays under
-    2, beyond that several roads side by side.
+    The polygon's length is half its perimeter, fair for the elongated footprints of work
+    sites. 1 is one road, a dual carriageway stays under 2.
     """
     if not polygon:
         return 0.0

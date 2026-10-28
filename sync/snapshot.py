@@ -1,17 +1,10 @@
 """Snapshot of what the pipeline last sent to DiaLog, used to detect updates.
 
-Update detection never re-reads DiaLog: the API rewrites part of what it receives
-(`startTime` read back in Europe/Paris, `documentUrl` dropped, `timeSlots` dated to
-1970). Comparing against a re-read would report differences that are not ours and
-republish the whole corpus every day. We compare against a digest of our own payload.
-
-The snapshot lives in `state/{target}/{organization}/{source}.json.gz`: what was sent to
-the staging says nothing about production. `DIALOG_STATE_DIR` moves it (in CI it is
-restored from the Actions cache). The older path, without the target, is still read when
-the new one is missing, so the move costs no day of updates.
-
-Missing snapshot means *no update at all*, and the snapshot is rebuilt from what we
-produced. A lost cache costs one day of updates, never a mass rewrite.
+Never a re-read of DiaLog: the API rewrites part of what it receives (`timeSlots` dated
+1970, `documentUrl` dropped), and the whole corpus would be republished every day. A
+missing snapshot means no update and a rebuild: a lost cache costs one day of updates,
+never a mass rewrite. Kept per target: what was sent to the staging says nothing about
+production.
 """
 
 from __future__ import annotations
@@ -29,8 +22,8 @@ from sync.digest import Digest
 
 STATE_DIR_ENV = "DIALOG_STATE_DIR"
 DEFAULT_STATE_DIR = "state"
-# 2: an undated permanent period is digested as null, not as the day of the run. A
-# version-1 snapshot carries run days and would flag every such regulation.
+# 2: undated permanent periods digested as null; version 1 carried run days and would
+# flag every such regulation.
 SNAPSHOT_VERSION = 2
 
 
@@ -82,11 +75,8 @@ class SnapshotStore:
         return readable(self.path, self.legacy_path).exists()
 
     def load(self) -> dict[str, Digest] | None:
-        """Return the stored digests, or None when there is no usable snapshot.
-
-        An unreadable snapshot is treated as absent: that costs a day of updates,
-        whereas guessing its content could cost a mass rewrite.
-        """
+        """The stored digests, or None when there is no usable snapshot: guessing an
+        unreadable one could cost a mass rewrite."""
         path = readable(self.path, self.legacy_path)
         if not path.exists():
             logger.info(f"No snapshot at {path}: no update will be detected this run")
@@ -105,8 +95,7 @@ class SnapshotStore:
             return None
         version = payload.get("version")
         if version != SNAPSHOT_VERSION:
-            # Digests of another version are not comparable to today's: every regulation
-            # would look changed. One day without update detection instead.
+            # Not comparable to today's digests: every regulation would look changed.
             logger.warning(
                 f"Snapshot {self.path} has version {version}, this pipeline writes "
                 f"{SNAPSHOT_VERSION}: treated as missing and rebuilt today"
@@ -125,8 +114,7 @@ class SnapshotStore:
             "regulations": dict(digests),
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Write then rename: an interrupted run must not leave a truncated snapshot,
-        # which would be read as "missing" and skip a day of updates.
+        # Write then rename: a truncated snapshot would cost a day of updates.
         temporary = self.path.with_suffix(".tmp")
         with gzip.open(temporary, "wt", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, sort_keys=True)

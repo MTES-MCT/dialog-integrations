@@ -10,14 +10,11 @@ from .restrictions_gabarits.data_source_integration import (
 class Integration(BaseIntegration):
     status = PostApiRegulationsAddBodyStatus.PUBLISHED
 
-    # Every identifier we create starts with `AV-` (`AV-GB-`, `AV-LV-`): what the
-    # organisation holds outside it is not ours and is never touched.
+    # What the organisation holds outside this prefix is not ours and is never touched.
     identifier_prefix = "AV-"
 
-    # The source changes a few times a year (last edited 2026-02-09): a handful of
-    # updates or deletions goes through, more is held for manual review. Creations are
-    # not capped. Both sources are permanent regulations, so what leaves them is a
-    # deletion, not a closure.
+    # The source changes a few times a year (last edited 2026-02-09): more than a handful
+    # of updates or deletions is held for review. Permanent regulations: deleted, not closed.
     update_changed = True
     delete_missing = True
     max_updates_per_run = 5

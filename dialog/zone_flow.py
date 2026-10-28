@@ -1,29 +1,12 @@
 """Creating a regulation whose locations are zones, in four calls instead of one.
 
-A `zone` location is a polygon; DiaLog turns it into the BD TOPO street sections it
-intersects and publishes those. Two things make that result say more than the producer
-did — clipped slivers of neighbouring streets, and polygons wide enough to hold several
-roads side by side — and nothing in the API lets us filter what the zone computes
-(`dialog/zone_sections.py` has the measurements). So the regulation is created in four
-calls:
+DiaLog turns a zone polygon into the street sections it intersects, slivers of neighbouring
+streets and parallel roads included, and the API cannot filter them. So: POST a draft, GET
+its computed sections, DELETE it, POST it again with each zone as a `rawGeoJSON` of its long
+enough sections. Not a PUT: it answers 500 on any regulation holding a zone.
 
-1. POST as a draft, with the zones, so that DiaLog does the polygon → sections
-   conversion;
-2. GET the regulation back: each location now carries the sections as its effective
-   geometry;
-3. DELETE the draft;
-4. POST the same regulation, with the target status, where each zone became a
-   `rawGeoJSON` of its sections at least `min_length_m` long.
-
-Four and not three: `PUT /api/regulations` answers 500 on any regulation holding a zone
-(S-14), while it works on the others.
-
-A zone whose sections add up to more than `max_sections_per_length` times the polygon's
-length covers several parallel roads; nothing says which one is closed, so the
-regulation is **refused**: draft deleted, nothing created. Fallbacks keep the regulation
-on the platform whatever else fails after the draft: sections unreadable or draft not
-deletable → the draft is published as it is (zone as computed); recreation refused → the
-original zone payload is recreated.
+A zone covering parallel roads is refused. Whatever fails after the draft, the regulation
+stays on the platform: as the computed zone, or recreated from the original payload.
 """
 
 import json
@@ -61,11 +44,7 @@ def create_zone_regulation(
     min_length_m: float,
     max_sections_per_length: float,
 ) -> Outcome:
-    """The four calls, with their fallbacks. `regulation` carries the target status.
-
-    The thresholds are the caller's: `BaseIntegration` holds their defaults, an
-    organization may override them, `dialog/zone_sections.py` defines them.
-    """
+    """The four calls, with their fallbacks. `regulation` carries the target status."""
     identifier = str(regulation.identifier)
     target_status = regulation.status
 
@@ -117,11 +96,9 @@ def zones_as_sections(
 ) -> dict:
     """The regulation payload with every zone replaced by its filtered sections.
 
-    `sections` comes from the GET of the freshly created draft, indexed like the
-    payload's measures and locations — the API returns them in the order they were
-    sent. A mismatch in shape, or a zone whose sections are all too short, keeps that
-    zone untouched. A zone whose sections add up to more than
-    `max_sections_per_length` times its own length raises `ZoneCoversParallelRoads`.
+    `sections` is indexed like the payload: the API returns locations in the order sent. A
+    zone with no matching or long enough section is kept; one covering parallel roads raises
+    `ZoneCoversParallelRoads`.
     """
     payload = json.loads(json.dumps(payload))  # deep copy
     for m, measure in enumerate(payload.get("measures") or []):

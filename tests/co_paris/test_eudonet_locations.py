@@ -407,7 +407,7 @@ def test_a_bound_numbered_on_the_crossing_street_drops_the_location():
     assert out["location_road_name"].to_list() == ["Villa Patrice Boudart"]
 
 
-def test_every_location_column_is_a_pivot_key():
+def test_every_location_column_is_a_canonical_key():
     produced = {name for name in locations.LOCATION_COLUMNS if not name.startswith("_")}
     assert produced <= set(RegulationMeasure.__annotations__)
 

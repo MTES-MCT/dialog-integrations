@@ -1,16 +1,9 @@
-"""Close a regulation that left its source, instead of deleting it.
+"""Close a regulation that left its source, instead of deleting it and its history.
 
-Some sources are snapshots of what is live: a work site that ends, or is withdrawn,
-simply disappears. Deleting the regulation would erase the history of that site;
-closing it keeps the regulation in DiaLog and only brings its end date back to the
-last day the source still listed it — the day before the run.
-
-The source no longer has the row, so the regulation is rebuilt from what DiaLog
-returns on `GET /api/regulations/{identifier}` and sent back through
-`PUT /api/regulations`. The read format is not the write format: dates come back in
-UTC, time slots dated 1970, vehicle types as objects, and `allVehicles` is not
-returned at all. `save_payload_from_read` does that translation and refuses what it
-cannot translate faithfully, rather than sending a regulation that lost a detail.
+The source no longer has the row, so the regulation is rebuilt from DiaLog's GET and sent
+back by PUT. The read format is not the write format (UTC dates, vehicle types as objects,
+no `allVehicles`): what cannot be translated faithfully is refused, rather than sending a
+regulation that lost a detail.
 """
 
 from __future__ import annotations
@@ -34,11 +27,8 @@ class ClosureNotRebuildable(Exception):
 
 
 def closing_instant(now: datetime | None = None) -> datetime:
-    """The end date given to a closed regulation: the end of yesterday, Europe/Paris.
-
-    The previous run saw the regulation in the source, today's run does not; the last
-    moment it is known to have applied is the end of the previous day.
-    """
+    """The end date given to a closed regulation: the end of yesterday, Europe/Paris, the
+    last moment the source is known to have listed it."""
     now = (now or datetime.now(tz=PARIS)).astimezone(PARIS)
     yesterday = now.date() - timedelta(days=1)
     return datetime.combine(yesterday, time(23, 59, 59), tzinfo=PARIS)
@@ -60,10 +50,8 @@ def save_payload_from_read(read: Mapping[str, Any]) -> dict:
 def close_payload(payload: Mapping[str, Any], closed_at: datetime) -> tuple[dict, bool]:
     """A copy of the payload with every period ending at `closed_at` at the latest.
 
-    A permanent period becomes a temporary one ending at `closed_at`. A period that had
-    not started yet ends when it starts: the site was cancelled, the regulation keeps
-    its dates and applies for no time at all. Returns the copy and whether anything
-    moved; nothing moving means the regulation had already ended on its own.
+    A period that had not started yet ends when it starts: the site was cancelled. Returns
+    the copy and whether anything moved.
     """
     closed = json.loads(json.dumps(payload))
     changed = False
@@ -85,9 +73,7 @@ def close_payload(payload: Mapping[str, Any], closed_at: datetime) -> tuple[dict
 def is_ended(digest: Mapping[str, Any], closed_at: datetime) -> bool:
     """True when every period of a snapshot digest ends at or before `closed_at`.
 
-    Used to skip, without a single API call, the regulations that already expired on
-    their own. Unknown shapes are reported as not ended: the closure then reads the
-    regulation and decides on what DiaLog actually holds.
+    Unknown shapes are not ended: the closure then reads what DiaLog actually holds.
     """
     periods = [
         period
@@ -118,9 +104,8 @@ def _measure_from_read(measure: Mapping[str, Any]) -> dict:
 
 
 def _vehicle_set_from_read(vehicle_set: Any) -> dict:
-    """`{restrictedTypes: [{name}], exemptedTypes: [{name}], maxCharacteristics: []}`
-    back to the save DTO. Dimensions and "other" types are not translated: their read
-    format has not been observed, and guessing would silently drop a restriction."""
+    """Dimensions and "other" types are refused: their read format has not been observed,
+    and guessing would silently drop a restriction."""
     if not isinstance(vehicle_set, Mapping):
         return {"allVehicles": True}
     if vehicle_set.get("maxCharacteristics"):
@@ -151,8 +136,7 @@ def _type_names(items: Any) -> list[str]:
 
 
 def _period_from_read(period: Mapping[str, Any]) -> dict:
-    """UTC instants back to Europe/Paris ISO strings, which is how the pipeline writes
-    them; the time slots go back as read (the API returns them as it stores them)."""
+    """UTC instants back to Europe/Paris ISO strings; time slots come back as stored."""
     start = _parse(period.get("startDateTime"))
     end = _parse(period.get("endDateTime"))
     rebuilt: dict[str, Any] = {
@@ -174,13 +158,11 @@ def _period_from_read(period: Mapping[str, Any]) -> dict:
 
 
 def _location_from_read(location: Mapping[str, Any]) -> dict:
-    """Locations keep their type, except a `zone` and a named street, sent back as the
-    geometry DiaLog computed for them — the effective geometry does not change.
+    """Locations keep their type, except a zone and a named street, sent back as the
+    geometry DiaLog computed for them.
 
-    A zone: DiaLog already turned it into street sections, and `PUT` answers 500 on a
-    zone. A named street (read as `lane`): the read leaves out the city code,
-    the direction and the bound types the write needs (staging, 2026-10-19), and
-    sending it as a street again would have DiaLog geocode it a second time."""
+    `PUT` answers 500 on a zone. A named street is read without the city code, direction
+    and bound types the write needs (staging, 2026-10-19), and would be geocoded again."""
     road_type = location.get("roadType")
     geometry = location.get("geometry")
     if road_type == ROAD_TYPE_RAW_GEOJSON:

@@ -23,11 +23,8 @@ def load_fixture(path: Path = FIXTURE) -> dict[str, list[dict[str, Any]]]:
 
 
 def read_eudonet_from_the_fixture(monkeypatch, path: Path = FIXTURE) -> None:
-    """Make `fetch_raw_data` read the frozen extract instead of calling Eudonet and DiaLog.
-
-    The numbers published elsewhere come from the frozen list alone, as no public export
-    is read.
-    """
+    """Make `fetch_raw_data` read the frozen extract instead of calling Eudonet and DiaLog;
+    the numbers published elsewhere come from the frozen list alone."""
     monkeypatch.setattr(DataSourceIntegration, "_credentials", lambda self: {})
     monkeypatch.setattr(
         data_source_integration, "extract_tables", lambda client, today: load_fixture(path)

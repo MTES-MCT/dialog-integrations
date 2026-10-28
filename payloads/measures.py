@@ -19,13 +19,7 @@ from canonical.regulation_measure import RegulationMeasure
 def build_measure(
     measure: RegulationMeasure, locations: list[RegulationMeasure] | None = None
 ) -> SaveMeasureDTO:
-    """One measure: its type, one period, one vehicle set, and its locations.
-
-    `measure` carries the measure, period and vehicle fields. `locations` optionally
-    carries the rows whose locations belong to this measure: one measure covering N
-    road segments, which is what a SIG-sourced regulation looks like. When omitted,
-    the measure gets the single location held by `measure` itself.
-    """
+    """One measure, located by the `locations` rows if given, else by `measure` itself."""
     location_rows = locations if locations is not None else [measure]
     params = {
         "type_": MeasureTypeEnum(measure["measure_type_"]),
@@ -44,13 +38,8 @@ def build_measure(
 def build_period(measure: RegulationMeasure) -> SavePeriodDTO:
     """The `period_*` columns, prefix stripped.
 
-    `startTime` and `endTime` are mirrored from the dates. The API splits a single
-    instant across two fields: it takes the day from `startDate` and the clock from
-    `startTime`, and reads that clock in Europe/Paris.
-
-    `period_time_slots` is the one period field that is not a scalar: it carries the
-    daily slots, which the API expects as `SaveTimeSlotDTO` objects rather than plain
-    mappings. Absent or null, the measure applies around the clock.
+    The API takes the day from `startDate` and the clock, read in Europe/Paris, from
+    `startTime`: both are given the same value. No time slot means around the clock.
     """
     period_fields = _fields_with_prefix(measure, "period_")
     period_fields["start_time"] = period_fields.get("start_date")
@@ -76,8 +65,7 @@ def build_location(measure: RegulationMeasure) -> SaveLocationDTO:
             raw_geo_json=SaveRawGeoJSONDTO(**location_fields),
         )
     if road_type == RoadTypeEnum.ZONE:
-        # A polygon drawn by the producer; DiaLog computes the street sections it
-        # covers. Same fields as rawGeoJSON: a label and a GeoJSON geometry.
+        # DiaLog computes the street sections the polygon covers.
         return SaveLocationDTO(road_type=road_type, zone=SaveZoneDTO(**location_fields))
     if road_type in (RoadTypeEnum.DEPARTMENTALROAD, RoadTypeEnum.NATIONALROAD):
         numbered = SaveNumberedRoadDTO(**location_fields)

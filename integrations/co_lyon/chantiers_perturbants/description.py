@@ -1,16 +1,10 @@
-"""What the free-text description says, and whether we read all of it.
+"""Reading a work site's free-text description, all or nothing (R-78).
 
-`descripchantierinternet` is the only place where the producer nuances a restriction:
-its hours (`7h-17h`), an exemption (`Sauf riverains`), but also a direction (`Sens
-Sud/Nord`), a weekend reopening, a closure "par périodes de 15 minutes". We can express
-the first two in DiaLog and none of the others — and a zone cannot carry a direction at
-all. Publishing a row whose description we only half read means publishing a stronger
-restriction than the producer states (R-78).
-
-So the reading is all-or-nothing: hours and a resident exemption are extracted, and
-whatever remains once they are removed must be nothing but connectors. The threshold
-sits between the longest legitimate residue measured, `entreet` (7 characters without
-spaces), and the shortest illegitimate one, `SensNord/Sud` (12) — see R-78.
+DiaLog can express its hours and a resident exemption, not a direction, a weekend
+reopening or 15-minute closures: a half-read description would publish a stronger
+restriction than stated. The residual threshold sits between the longest legitimate
+residue measured, `entreet` (7 non-space characters), and the shortest illegitimate one,
+`SensNord/Sud` (12).
 """
 
 import re

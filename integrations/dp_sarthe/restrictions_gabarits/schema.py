@@ -4,8 +4,6 @@ import pandera.polars as pa
 
 
 class SartheRestrictionGabaritsRawDataSchema(pa.DataFrameModel):
-    """Schema for the raw Sarthe restriction gabarits data."""
-
     objectid: int
     localisation_curviligne: str | None = pa.Field(nullable=True)
     communes: str | None = pa.Field(nullable=True)
@@ -28,7 +26,5 @@ class SartheRestrictionGabaritsRawDataSchema(pa.DataFrameModel):
     geo_point_2d: str | None = pa.Field(nullable=True)
 
     class Config(pa.DataFrameModel.Config):
-        """Config for the schema."""
-
         strict = False  # Allow extra columns in raw data
         coerce = True  # Allow type coercion during validation

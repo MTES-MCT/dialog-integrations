@@ -42,8 +42,7 @@ def run(
 
     production = sources.run_all(integration, outcome, limit_to)
 
-    # The snapshot only exists for organizations that opted into update detection
-    # or closure: both need to know what was last sent.
+    # Only update detection and closure need to know what was last sent.
     snapshot_by_source: dict[str, dict[str, Digest]] = {}
     snapshot = (
         state.load_snapshot(production.stores, snapshot_by_source)
@@ -136,9 +135,8 @@ def run(
 def update_mode(integration: BaseIntegration, update_existing: bool | None) -> UpdateMode:
     """Reconcile the CLI flag with the organization's own setting.
 
-    `--update-existing` keeps its historical meaning — replace everything already in
-    DiaLog, whatever the snapshot says — because it is used by hand together with
-    `--identifiers`. `update_changed` is the daily, snapshot-driven mode.
+    `--update-existing` replaces everything already in DiaLog, whatever the snapshot
+    says: it is used by hand with `--identifiers`.
     """
     if update_existing is True:
         return "all"

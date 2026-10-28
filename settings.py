@@ -69,11 +69,9 @@ class OrganizationSettings:
     client_secret: str | None = None
     eudonet_paris_credentials: str | None = None
 
-    # Every organization must carry these to talk to the DiaLog API.
     REQUIRED_VALUES = ("base_url", "client_id", "client_secret")
 
-    # Which environment the settings were loaded for; only used to label reports and
-    # to print a copy-pastable command line.
+    # Only labels reports and the printed command line.
     env: str = "dev"
 
     def __init__(self, settings: Settings, organization: str, env: str = "dev"):
@@ -90,6 +88,5 @@ class OrganizationSettings:
 
     @classmethod
     def from_env(cls, organization: str, env: str = "dev") -> "OrganizationSettings":
-        """Create OrganizationSettings from organization and environment."""
         settings = Settings(organization=organization, env=env)
         return cls(settings, organization, env=env)

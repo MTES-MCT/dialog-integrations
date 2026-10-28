@@ -109,7 +109,7 @@ def test_a_restricted_type_means_not_all_vehicles():
 
 
 def test_a_zone_is_written_back_as_its_computed_sections():
-    """PUT answers 500 on a zone (S-14); its sections are what DiaLog applies anyway."""
+    """PUT answers 500 on a zone; its sections are what DiaLog applies anyway."""
     read = {**READ, "measures": [dict(READ["measures"][0])]}
     read["measures"][0]["locations"] = [
         {

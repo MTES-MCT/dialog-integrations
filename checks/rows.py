@@ -1,4 +1,4 @@
-"""Checks every source's pivot rows must pass before a payload is built.
+"""Checks every source's canonical rows must pass before a payload is built.
 
 A regulation with one failing row is left out whole, as DiaLog has it: sending the rest
 would drop a measure, taking it for gone would close or delete it. What the API refuses
@@ -75,7 +75,7 @@ def _flag(df: pl.DataFrame, mask: pl.Series, reason: str) -> pl.DataFrame:
 
 
 def _parse(value) -> datetime | None:
-    """A period bound as the pivot carries it: ISO text, a date or a datetime."""
+    """A period bound as the canonical model carries it: ISO text, a date or a datetime."""
     if value is None:
         return None
     if isinstance(value, datetime):

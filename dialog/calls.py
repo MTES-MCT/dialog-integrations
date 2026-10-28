@@ -1,11 +1,5 @@
-"""The DiaLog API as the pipeline uses it: one method per call, logging and status
-handling in one place.
-
-The generated client (`api/dia_log_client`, rebuilt from `api/spec.json`) is verbose:
-every call returns a `Response` whose status has to be checked, and raises on any
-status the spec does not document. This wrapper turns each write into a boolean the
-orchestration can count, and keeps the error messages consistent.
-"""
+"""The DiaLog API as the pipeline uses it: each write becomes a boolean the run can count,
+with status handling and logging in one place."""
 
 import json
 
@@ -84,12 +78,9 @@ class DialogApi:
 
     def public_identifiers(self, insee_code: str) -> list[tuple[str, str]]:
         """(identifier, organization name) of every regulation the public export lists for
-        one municipality, whatever its validity and whichever organization published it.
-        Raises when a page is unreadable.
+        one municipality, from any organization. Raises when a page is unreadable.
 
-        `/api/organization/identifiers` only sees our own organization; this is how another
-        organization's regulations are read. Filtered by municipality: the whole export
-        takes ~37 s a page (2026-10-17), one municipality well under a second.
+        Filtered by municipality: the whole export takes ~37 s a page (2026-10-17).
         """
         found: list[tuple[str, str]] = []
         page = 1
@@ -131,10 +122,8 @@ class DialogApi:
     def add(self, regulation: PostApiRegulationsAddBody) -> bool:
         """POST a regulation; True when the API answered 201, or when it exists anyway.
 
-        A 5xx or a transport error says nothing about what the back end did: the router
-        can answer 504 while the back end commits (D-20). Such an answer is followed by a
-        GET, and the regulation counts as created when it is there. A 4xx is a refusal:
-        no GET.
+        The router can answer 504 while the back end commits, so a 5xx or a lost answer is
+        followed by a GET.
         """
         identifier = str(regulation.identifier)
         try:
@@ -155,9 +144,9 @@ class DialogApi:
         return True
 
     def update(self, regulation: PostApiRegulationsAddBody) -> bool:
-        """PUT a regulation — a full replacement; True when the API answered 2xx.
+        """PUT a regulation, a full replacement; True when the API answered 2xx.
 
-        Not for a regulation holding a zone: the API answers 500 on those (S-14).
+        Not for a regulation holding a zone: the API answers 500 on those.
         """
         identifier = str(regulation.identifier)
         body = PutApiRegulationsUpdateBody.from_dict(regulation.to_dict())
@@ -172,11 +161,7 @@ class DialogApi:
         return True
 
     def delete(self, identifier: str, *, missing_is_gone: bool = False) -> bool:
-        """DELETE a regulation; True when the API answered 204.
-
-        With `missing_is_gone`, a 404 counts as success: the goal state — the regulation
-        is not there — is reached.
-        """
+        """DELETE a regulation; True on 204, or on 404 with `missing_is_gone`."""
         try:
             resp = delete_regulation(identifier=identifier, client=self.client)
         except Exception as e:
@@ -193,8 +178,7 @@ class DialogApi:
     def publish(self, identifier: str) -> bool:
         """Publish a draft; True unless the call raised.
 
-        A documented non-200 status (404, 400) is not reported as a failure here, as
-        `publish_regulations` always did.
+        A documented non-200 status (404, 400) is not reported as a failure.
         """
         try:
             publish_regulation(identifier=identifier, client=self.client)

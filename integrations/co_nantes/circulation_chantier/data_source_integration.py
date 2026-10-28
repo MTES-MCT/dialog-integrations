@@ -123,15 +123,10 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
     """One regulation per `numero_chantier`, one measure per street it covers.
 
-    `gid` and `objectid` cannot identify a regulation: the producer reloads the layer
-    every working day and renumbers both, so the whole source came back under new
-    identifiers each time (3 907 regulations on staging for 793 produced, 2026-09-29).
-    `numero_chantier` is the order number and survives the reload. Measured on
-    2026-10-07: 547 numbers for 818 retained rows, with the same dates, motive and
-    constraint on every row of a number; `(numero_chantier, voie, commune)` is unique.
-
-    Rows are sorted so that the measures, and the title read on the first row, come out
-    in the same order whatever order the layer is served in.
+    The producer renumbers `gid` and `objectid` on every working-day reload;
+    `numero_chantier` survives it (2026-10-07: 547 numbers for 818 rows, same dates, motive
+    and constraint within a number). Sorted so the measures and the first-row title do not
+    depend on the order the layer is served in.
     """
     return df.sort(["numero_chantier", "commune", "voie"], nulls_last=True).with_columns(
         [

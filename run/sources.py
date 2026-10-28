@@ -154,9 +154,8 @@ def apply_checks(
 def compute_clean_data(source: BaseDataSourceIntegration) -> tuple[pl.DataFrame, int | None]:
     """Run the source pipeline, counting the raw rows it read on the way.
 
-    The count is taken by wrapping the instance's `fetch_raw_data`, so a source that
-    overrides `compute_data_regulations` is measured just the same, and no data
-    source has to know about the report.
+    Wrapping `fetch_raw_data` measures a source that overrides `compute_data_regulations`
+    just the same, and keeps the report out of the sources.
     """
     raw_rows: list[int] = []
     original_fetch = source.fetch_raw_data
@@ -177,12 +176,7 @@ def compute_clean_data(source: BaseDataSourceIntegration) -> tuple[pl.DataFrame,
 
 
 def source_metrics(source: BaseDataSourceIntegration) -> dict[str, int]:
-    """Read the optional `metrics` a data source may expose.
-
-    A source that measures its own volumes sets `self.metrics: dict[str, int]` while
-    fetching. Keys are the French labels shown in the Tchap message. Sources that
-    define nothing are unaffected.
-    """
+    """The optional `metrics` a source sets while fetching, keyed by their Tchap label."""
     metrics = getattr(source, "metrics", None)
     if not isinstance(metrics, dict):
         return {}

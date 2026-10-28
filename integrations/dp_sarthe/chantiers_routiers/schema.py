@@ -8,8 +8,6 @@ class SartheChantiersRoutiersSchema(pa.DataFrameModel):
     objectid: int
     longueur: int | None = pa.Field(nullable=True)
     loc_txt: str | None = pa.Field(nullable=True)
-    # commentaires: str | None = pa.Field(nullable=True)
-    # maitre_ouvrage: str | None = pa.Field(nullable=True)
     date_fin: pl.Datetime(time_unit="ms", time_zone="Europe/Berlin")  # type: ignore
     nature_trvx: str | None = pa.Field(nullable=True)
     mode_exp: str | None = pa.Field(nullable=True)

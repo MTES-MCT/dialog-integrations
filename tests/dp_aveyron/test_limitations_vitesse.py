@@ -37,8 +37,7 @@ def stretches(**overrides):
     return (
         pl.DataFrame(data)
         .with_columns(pl.col("num_arrete").cast(pl.Utf8), pl.col("agglo").cast(pl.Utf8))
-        # As compute_measure_fields leaves it, so the grouping key is never hand-typed
-        # out of step with the speed a test overrides.
+        # Derived, so the key never drifts from the speed a test overrides.
         .with_columns(measure_group_key().alias("measure_group_key"))
     )
 
@@ -141,11 +140,7 @@ def test_identifier_is_url_path_safe():
 
 
 def test_identifier_stays_within_the_api_cap():
-    """Both forms fit. The producer reference is the only half that can grow.
-
-    Nothing here truncates — an over-long reference is reported as an error, because a
-    silently shortened identifier would orphan the arrete at the next run.
-    """
+    """Nothing truncates: a shortened identifier would orphan the arrete at the next run."""
     df = stretches(
         num_arrete=["A21R0188 - A21R0232", None],
         agglo=[None, None],
@@ -164,11 +159,7 @@ def test_identifier_stays_within_the_api_cap():
 
 
 def test_default_limits_without_an_arrete_are_kept_and_grouped_by_speed():
-    """50 km/h in an agglomeration and 90 km/h outside one are published (R-70).
-
-    They restate the law, but a satnav needs them all the same. Each speed gathers
-    under one grouped fallback.
-    """
+    """R-70: they restate the law, but a satnav needs them all the same."""
     df = stretches(
         num_arrete=[None] * 4,
         agglo=["RODEZ", None, None, "RODEZ"],
@@ -367,12 +358,7 @@ def test_an_unknown_side_falls_back_to_both_ways():
 
 
 def test_the_period_is_permanent_and_undated():
-    """R-39: the source carries no date, so none is presumed.
-
-    The start used to be the day of the run; that made every limit look modified each
-    morning, the date being part of what the synchronization compares. It is now left
-    null and dated by `sync/dating.py` when DiaLog is written.
-    """
+    """R-39: no date is presumed; `sync/dating.py` dates it when DiaLog is written."""
     result = compute_period_fields(stretches())
 
     assert result["period_start_date"].to_list() == [None]
@@ -420,7 +406,7 @@ def test_the_blocklist_matches_on_the_whole_stretch_not_a_prefix():
 
 
 def test_only_what_applies_both_ways_is_sent_while_production_ignores_the_direction():
-    """D-19: a one-way limit would be broadcast both ways. Lifted by deleting one pipe."""
+    """Production ignores the direction: a one-way limit would be broadcast both ways."""
     df = pl.DataFrame(
         {
             "location_road_number": ["D1", "D2", "D3"],
@@ -436,8 +422,8 @@ def test_only_what_applies_both_ways_is_sent_while_production_ignores_the_direct
 
 
 def test_only_a_limit_true_both_ways_and_for_every_vehicle_leaves_the_pipeline():
-    """D-19 and D-21 through `compute_clean_data`, where their order matters: D840 PR 17,
-    `50 PL` on one side only, must not come out as "every vehicle at 90, both ways"."""
+    """Order matters: D840 PR 17, `50 PL` on one side only, must not come out as "every
+    vehicle at 90, both ways"."""
     raw = pl.DataFrame(
         {
             "route": ["12_D1", "12_D1", "12_D2", "12_D2", "12_D3"],

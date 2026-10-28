@@ -180,7 +180,7 @@ def test_a_measure_dialog_does_not_hold_is_new_and_dated_today():
 
 def test_a_dimension_limit_is_matched_on_what_dialog_reads_back():
     # Posted as restrictedTypes + heavyweightMaxWeight, read back as maxCharacteristics
-    # with an empty restrictedTypes (api-dialog.md, piège 5).
+    # with an empty restrictedTypes.
     tonnage = _measure(
         type_=MeasureTypeEnum.NOENTRY,
         max_speed=None,

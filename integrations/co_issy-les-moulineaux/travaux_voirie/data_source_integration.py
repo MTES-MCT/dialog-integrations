@@ -60,7 +60,6 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         return pl.DataFrame(records)
 
     def preprocess_raw_data(self, raw_data):
-        """Parse the ISO date strings and type `url` as a string."""
         return raw_data.with_columns(
             [
                 pl.col("date_debut").cast(pl.Utf8).str.to_date("%Y-%m-%d"),

@@ -1,10 +1,7 @@
-"""Paris / Eudonet: the closed lookup tables between Eudonet catalogs and the DiaLog model.
+"""Closed lookup tables between Eudonet catalog labels and the DiaLog model.
 
-Eudonet describes a measure with catalogued labels, not codes we can rely on: a measure
-name (catalog `1202`), and up to nine (parameter name, parameter value) pairs whose names
-come from catalogs `1218`/`1221` and whose values come from `1219`/`1222`. Everything this
-module holds was read from the catalogs as the API served them on 2026-09-08
-(`GET /Catalog/{descId}`), and cross-checked against the 26 325 measures extracted that day.
+Read from `GET /Catalog/{descId}` on 2026-09-08 and cross-checked against the 26 325
+measures extracted that day.
 """
 
 from dataclasses import dataclass
@@ -28,17 +25,15 @@ REGULATION_CATEGORY_BY_LABEL: dict[str, str] = {
 # for the codes, the replay of a frozen extract filters on the labels.
 TYPE_CODE_BY_LABEL: dict[str, str] = {TYPE_PERMANENT_LABEL: "7", TYPE_TEMPORARY_LABEL: "8"}
 
-# `1107` État (label → `DBValue`), by `1108` Type, recomputed by Eudonet every night at
-# 00:30. A permanent is kept only "En vigueur": "Signé" may carry no date of effect, so it is
-# not known to apply yet.
+# `1107` État (label → `DBValue`), recomputed by Eudonet nightly. A signed permanent may
+# carry no date of effect, so it is not known to apply yet.
 ACCEPTED_STATES_BY_TYPE: dict[str, dict[str, str]] = {
     TYPE_PERMANENT_LABEL: {"En vigueur": "96"},
     TYPE_TEMPORARY_LABEL: {"En vigueur": "8640", "Publié": "13789", "Signé": "8642"},
 }
 
-# `1202` Nom de la mesure — the 32 values of the catalog, none omitted.
-# `None` means "outside the five DiaLog types" (R-30): the measure is dropped and counted,
-# never bent into an approaching type (R-02).
+# All 32 values of catalog `1202`. `None`: outside the five DiaLog types (R-30), dropped and
+# counted, never bent into an approaching type (R-02).
 MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
     # R-71: the producer names the area, so it is published as `noEntry` + `desserteLocale`
     # plus a 5 km/h twin (`add_pedestrian_area_speed`).
@@ -131,15 +126,12 @@ IGNORED_PARAMETERS = frozenset({"caractère aggravant"})
 
 SPEED_PARAMETER = "valeur de la vitesse"
 
-# Time slots, as free text. A filled one drops the measure (R-78): the only value seen on a
-# mappable measure, "de 20h00 à 7h00 ainsi que les dimanches et jours fériés", names public
-# holidays, which DiaLog cannot express.
+# A filled time slot drops the measure (R-78): the only value seen on a mappable measure
+# names public holidays, which DiaLog cannot express.
 TIME_SLOT_PARAMETERS = frozenset({"Jours et Horaires"})
 
-# The lane a measure applies to. A filled one drops the measure (R-78): it narrows the
-# measure to one lane of the street ("sur la voie unidirectionnelle réservée aux véhicules
-# de transports en commun"), and DiaLog would close the whole street. 19 filled values on
-# the extraction of 2026-09-08, all naming a single lane.
+# A filled lane drops the measure (R-78): DiaLog would close the whole street, not the one
+# lane named (19 values on 2026-09-08, all a single lane).
 LANE_PARAMETERS = frozenset({"voie concernée"})
 
 WHOLE_LOCATION_COMPLEMENTS = frozenset(
@@ -187,9 +179,8 @@ EXEMPTED_COMMERCIAL = "commercial"
 EXEMPTED_TAXI = "taxi"
 EXEMPTED_OTHER = "other"
 
-# Restriction values with no DiaLog equivalent, published as "other" + the label: the
-# closed list decided on 2026-10-26 (Q-58). Any other value drops its measure until a human
-# qualifies it, "cycles" included (R-34: pedestrians and cycles are never restricted).
+# Published as "other" + the label (closed list, 2026-10-26). Any other unmapped value drops
+# its measure, "cycles" included (R-34: pedestrians and cycles are never restricted).
 RESTRICTIONS_KEPT_AS_OTHER = frozenset(
     {
         "aux véhicules de plus de 2 mètres",

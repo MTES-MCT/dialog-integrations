@@ -56,9 +56,8 @@ def perimeter_criteria(today: date) -> dict[str, Any]:
 def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[str, Any]]]:
     """The three tables of the perimeter, as flat rows keyed by table number.
 
-    Measures are filtered on their parent's fields, which the API accepts one level up but
-    not two: locations are therefore fetched by batches of measure identifiers, and only
-    for the measures DiaLog can carry.
+    The API filters on a parent's fields one level up, not two: locations are fetched by
+    batches of identifiers of the measures DiaLog can carry.
     """
     where = perimeter_criteria(today)
 

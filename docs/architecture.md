@@ -74,9 +74,6 @@ module commun. Seuls les contrôles de `checks/rows.py` valent pour toutes les s
 Les règles qu'appliquent plusieurs sources iront dans `toolkit/rules/` : une banque de
 méthodes qu'une source appelle pendant sa transformation, une méthode par règle.
 
-Dans le code, le modèle canonique s'appelle encore souvent le « pivot »
-(`unknown_pivot_columns`, `PIVOT_FAMILIES`) : c'est le même objet.
-
 ## Où vit chaque étape
 
 ```text

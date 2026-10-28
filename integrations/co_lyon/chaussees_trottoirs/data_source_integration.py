@@ -1,22 +1,9 @@
-"""Data source integration for Métropole de Lyon: chaussées et trottoirs.
+"""Métropole de Lyon: chaussées et trottoirs, the GIS inventory of the road network.
 
-The layer is a GIS inventory of the road network — 37 569 segments, one row per segment.
-A row is **not** an order: it is a piece of road carrying whatever is in force there.
-One regulation per row would fabricate 37 569 administrative acts, so rows are grouped
-instead (R-28):
-
-- when the free-text field yields an order number, the rows citing it become emprises of
-  that order — for **every measure present on all of them**, whatever municipality they
-  fall in (`measures_carried_by_each_order`); a measure missing from one segment is not
-  something the act can be said to decide, and joins the fallback below;
-- everything else groups *by measure*: one metropolitan-wide regulation per distinct
-  measure — one "30 km/h across the Métropole de Lyon" holding N emprises.
-
-A row can feed several measures at once: its speed limit, its dimension limit, and for a
-pedestrian area the ban and the walking-pace limit. They are qualified separately, so
-discarding one never discards the other, and the same segment legitimately appears in
-two regulations — its speed under its order, its tonnage under the metropolitan
-regulation of that tonnage. Two distinct restrictions at one place.
+A row is a road segment (37 569), not an order, so rows are grouped (R-28): under the
+order number they cite for the measures present on all its segments, otherwise into one
+metropolitan-wide regulation per distinct measure. A segment's measures are qualified
+separately, so one segment can sit in two regulations.
 """
 
 import json
@@ -50,82 +37,45 @@ from toolkit.transforms.perimeter import Perimeter, discard_outside_perimeter
 
 WFS_LAYER = "pvo_patrimoine_voirie.pvochausseetrottoir"
 
-# Every identifier we create is prefixed, so our batch stays isolable and removable as a
-# block (R-29). The organisation already holds ~800 Lyon orders pushed by a channel absent
-# from this repository (Litteralis), whose identifiers use 52 municipality prefixes for
-# ~40 municipalities — there is no convention to align with (P-04 still open). `MGL` is
-# the stem of the whole organisation (`MGL-CHP-` for the work sites): one stem, one block.
+# Prefixed so our batch stays removable as a block (R-29). The ~800 orders another channel
+# pushed to the organisation follow no convention to align with (52 municipality prefixes).
 IDENTIFIER_PREFIX = "MGL-CT"
-# Everything under the stem is ours; any other identifier in the organisation belongs to
-# that other channel, and an order number it already carries is not created again
-# (`foreign_order_keys`).
+# Any identifier outside the stem belongs to that other channel (`foreign_order_keys`).
 ORGANISATION_STEM = "MGL-"
 
-# Default speeds — 50 km/h in a built-up area, 80 outside — are published like any other
-# limit (R-70: a satnav needs the default limit as much as a decided one). The 50 becomes
-# one metropolitan-wide `MGL-CT-V50`, split into slices of `MAX_LOCATIONS_PER_REGULATION`.
-
-# A road managed by someone other than the Métropole or its municipalities is not the
-# Métropole's to regulate, and is not published under its name without an agreement
-# (R-73, 2026-09-14; scope settled by Thibaut on 2026-10-10). Only the managers we are
-# sure of are dropped: the State (A7, A42, A43, A46, Rocade Est: 747 segments on
-# 2026-10-10) and a third public body managing a Métropole road (1 segment). The
-# Rhône département ("Conseil Général", 80 segments) is kept: within the Métropole's
-# territory the two are nearly one authority, and the producer vouches for what it
-# publishes. Private roads are not "another manager" either. The Métropole said on
-# 2026-10-05 that it does not vouch for the State's data (A43): the answer that would
-# bring those segments back is the Métropole's.
+# Roads of a manager we are sure is not the Métropole's to regulate, unpublished without an
+# agreement (R-73; scope settled on 2026-10-10): the State, 747 segments on 2026-10-10, and
+# 1 segment of a third public body. The Rhône département (80 segments) is kept: on this
+# territory the two are nearly one authority. On 2026-10-05 the Métropole said it does not
+# vouch for the State's data.
 ROAD_MANAGERS_WITHOUT_AGREEMENT = ("État", "Métropole gestion tiers public")
 
-# The source files a pedestrian area as a 5 km/h speed limit. A pedestrian area is first
-# a ban on driving, and "5 km/h" alone would read as a speed advisory on a GPS: it is
-# published as `noEntry` with the ZTL's `desserteLocale` exemption — one enters to reach
-# an address, not to drive through (R-71) — **and**, since 2026-09-22, as the walking-pace
-# limit the Code de la route attaches to the area, in the same regulation
-# (`add_pedestrian_area_speed`). A 5 km/h segment the source does not label never yields
-# either: neither the ban nor the speed.
+# The source files a pedestrian area as 5 km/h, which alone would read as an advisory: it
+# goes out as `noEntry` except local access (R-71) plus the walking-pace limit.
 PEDESTRIAN_AREA_SPEED = "5"
 PEDESTRIAN_AREA_SPEED_KEY = "AIRE_PIETONNE_V5"
 
-# …but 5 km/h alone does not make a pedestrian area. `reglementationzca` is the producer's
-# own word for the zone, and it agrees with the speed exactly wherever it is filled:
-# "Zone 30" is always 30, "Zone de rencontre" always 20, "Aire Piétonne" always 5. It is
-# filled on a minority of the 5 km/h segments only, so inferring the area from the speed
-# would state a driving ban on streets the source never calls pedestrian — Rue du Pavé,
-# Place de Milan. We publish what the producer asserts and drop the rest (R-35, R-71:
-# 3 332 unlabelled 5 km/h segments on 2026-09-22, the volume is logged at each run).
+# Only the producer's label makes a 5 km/h segment a pedestrian area: inferring it from the
+# speed would ban driving on streets such as Rue du Pavé (R-35, R-71; 3 332 unlabelled
+# segments on 2026-09-22).
 PEDESTRIAN_AREA_LABEL = "Aire Piétonne"
 
-# `vehicleSet.heavyweightMaxWeight` is capped at 44 by the API — the French legal maximum
-# for a heavy goods vehicle. Anything above is a structure's load capacity that landed in
-# the same column.
+# API cap, the French legal maximum for a heavy goods vehicle: anything above is a
+# structure's load capacity that landed in the same column.
 MAX_HEAVYWEIGHT_TONNES = 44
 
-# False publishes the speed the source files inside a zone à trafic limité next to the
-# ban, like the walking-pace limit of a pedestrian area (R-72, decided on 2026-10-01 with
-# the DiaLog team: 338 segments). True would publish the ban alone; see
-# `explode_into_measures`.
+# Speed kept next to the ZTL ban, like a pedestrian area's walking pace (R-72, decided on
+# 2026-10-01 with the DiaLog team, 338 segments).
 ZTL_REPLACES_SPEED = False
 
-# The organisation as DiaLog knows it. DiaLog refuses any emprise whose geometry does not
-# intersect the organisation's territory, and one refused emprise takes the whole
-# regulation down (R-77). `toolkit/transforms/perimeter.py` rebuilds that territory and
-# drops upstream what DiaLog would refuse (recipe there, measurements under R-77).
-# Neither the road's name nor `domanialite` predicts a refusal; the position does.
+# DiaLog refuses an emprise outside the organisation's territory, and one refusal takes the
+# whole regulation down (R-77). Neither the road's name nor `domanialite` predicts it.
 ORGANIZATION_PERIMETER = ("epci", "200046977")  # Métropole de Lyon, SIREN code of the EPCI
 
-# A pedestrian area only means something to a satnav if it sits on a road a vehicle could
-# otherwise have driven on. The source files as "aire piétonne" things that are not roads:
-# towpaths, rural tracks, park promenades, private condominium lanes, nameless segments.
-#
-# What is deliberately **kept**: `Rue Saint Jean` (Vieux Lyon), `Quai Rambaud`,
-# `Rue Victor Hugo`, `Rue Moncey`, `Place de la Mairie` — real pedestrian streets a driver
-# must not enter. So the measure is filtered, not dropped whole.
-#
-# The filter reads the road's name, and a name is a weak predictor. It is defensible here
-# because it qualifies business content rather than guessing an API behaviour, and because
-# each motive is separately arguable. It stays coarse: `Chemin de la Digue` and `Voie
-# Communale 6 des Carrières` survive it, and may well deserve to go too.
+# The source files towpaths, park promenades, private lanes and nameless segments as
+# pedestrian areas, which mean nothing to a satnav off a drivable road. Read on the name,
+# a weak but arguable predictor; it keeps real ones (Rue Saint Jean, Rue Victor Hugo) and
+# lets `Chemin de la Digue` through.
 PEDESTRIAN_AREA_PRIVATE = r"(?i)priv"
 PEDESTRIAN_AREA_NAMELESS = r"(?i)sans d[ée]nomination|sans nom"
 PEDESTRIAN_AREA_NOT_A_ROAD = (
@@ -133,34 +83,24 @@ PEDESTRIAN_AREA_NOT_A_ROAD = (
     r"|contre.all[ée]e|passerelle|halage)"
 )
 
-# Ceiling on the locations of one POST. The API dies on a server-side timeout between
-# 1 500 and 2 000 locations, and the ceiling is per regulation, not per measure (probes
-# of 2026-09-04, R-76). 1 000 is the working margin agreed with the team; it is
-# a stopgap until the API can take a larger batch (S-10 / S-11).
+# The API times out between 1 500 and 2 000 locations per regulation (probes of 2026-09-04,
+# R-76); 1 000 is the margin agreed with the team until it takes larger batches.
 MAX_LOCATIONS_PER_REGULATION = 1000
 
-# Size of the latitude bands used to keep a split regulation geographically coherent:
-# 0.01° is roughly 1.1 km north-south.
+# Latitude bands that keep a split regulation together: 0.01° is about 1.1 km.
 GEOGRAPHIC_CELL_DEGREES = 0.01
 
-# First coordinate pair of a serialized GeoJSON geometry, used as the segment's
-# representative point. Cheaper than decoding 37 569 geometries, and precise enough to
-# sort segments by neighbourhood.
+# Stands for the segment: cheaper than decoding 37 569 geometries, enough to sort by
+# neighbourhood.
 FIRST_COORDINATE = r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)"
 
-# `precisionreglementation` sometimes qualifies a restriction instead of naming its order.
-# R-78: a free text that nuances a restriction is read in full, or the row is dropped.
-#
-# What DiaLog can say: "sauf service public", typed after the Feyzin heavy goods order
-# `0_AR_2018.0018` on 517 segments (2026-10-10). The API has no public-service type, so it
-# goes out as `other` with its text, as Brest's "cyclomoteur" does; it applies to the
-# dimension measure of the row, the only one the order decides.
+# Typed after the Feyzin heavy goods order on 517 segments (2026-10-10). No public-service
+# type in the API: it goes out as `other` with its text, on the dimension measure only.
 PUBLIC_SERVICE_EXEMPTION = r"(?i)\bsauf\s+services?\s+publics?\b"
 PUBLIC_SERVICE_EXEMPTION_TEXT = "Services publics"
 PUBLIC_SERVICE_EXEMPTION_KEY = "_SAUF_SP"
-# What it cannot: a direction ("ZCA : 2020 sens NS", "50km/h dans le sens SN") or a part
-# of the segment ("entre n°88 et n°70", "du n° 67 à rue Jean Macé"). The segment would be
-# published both ways and end to end: 10 segments on 2026-10-10, all speed limits.
+# A direction or a part of the segment, which DiaLog cannot say (R-78): 10 segments on
+# 2026-10-10, all speed limits.
 UNEXPRESSED_QUALIFIER = (
     r"(?i)\bsens\s+(?:NS|SN|EO|OE|nord|sud|est|ouest)\b|\bentre\s+n\s*°|\bdu\s+n\s*°\s*\d"
 )
@@ -174,21 +114,16 @@ DIMENSION_COLUMNS = {
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
-    """Data source for the Métropole de Lyon roadway inventory."""
-
     name = "chaussees_trottoirs"
     identifier_prefix = f"{IDENTIFIER_PREFIX}-"
     raw_data_schema = LyonChausseesTrottoirsRawDataSchema
 
-    # One measure carries every segment it applies to, rather than one measure per
-    # segment: that is what makes "30 km/h across the metropolitan area" a single act.
+    # Makes "30 km/h across the metropolitan area" a single act.
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
 
-    # Loaded with the source and reused by `compute_clean_data`; tests inject their own.
     perimeter: Perimeter | None = None
-    # Order numbers the organisation already holds under another channel's identifiers;
-    # None when they could not be read, in which case no number is held back.
+    # None when they could not be read: no number is held back.
     foreign_order_keys: frozenset[str] | None = None
 
     def fetch_raw_data(self) -> pl.DataFrame:
@@ -198,11 +133,10 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         return df
 
     def fetch_foreign_order_keys(self) -> frozenset[str] | None:
-        """Read the organisation's identifiers and keep the order numbers that are not ours.
+        """Order keys the other channel already published, or None when unreadable.
 
-        The check is a courtesy to the other channel, not a condition of the run: offline
-        (a funnel measurement) or when the API is unreadable, the pipeline goes on without
-        it and says so, rather than failing the whole integration on a read.
+        A courtesy to that channel, not a condition of the run: offline or on an API error
+        the pipeline goes on without it.
         """
         try:
             identifiers = DialogApi(self.client).identifiers()
@@ -231,13 +165,11 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             raw_data.pipe(read_order_number)
             .pipe(discard_impossible_tonnages)
             .pipe(explode_into_measures)
-            # One row per restriction a segment states: the unit of the retention rate.
             .pipe(self.count_dataset_restrictions)
-            # After the explosion, so the segments outside the perimeter count as stated
-            # and not retained. It drops rows on their geometry alone: the order is free.
+            # After the counter, so the segments outside count as stated and not retained.
             .pipe(self.discard_outside_perimeter)
-            # Before R-28 judges the orders: a segment we do not publish must not keep an
-            # order from carrying a measure present on all the others.
+            # Before R-28 judges the orders: a dropped segment must not keep an order from
+            # carrying a measure present on all the others.
             .pipe(discard_roads_of_other_managers)
             .pipe(discard_unexpressed_qualifiers)
             .pipe(compute_measure_fields)
@@ -247,24 +179,21 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
             .pipe(compute_regulation_fields, self.foreign_order_keys)
-            # Before the chaining: it merges rows, it discards none.
             .pipe(self.count_retained_restrictions)
-            # After the counters: the walking-pace limit is the second face of one stated
-            # restriction, not a restriction of its own. After the identifier: it sits in
-            # the regulation of its ban, whichever that is.
+            # After the counters (not a restriction of its own) and the identifier (it
+            # joins the regulation of its ban).
             .pipe(add_pedestrian_area_speed)
-            # After the identifier: chaining groups by (regulation, measure, street).
+            # Groups by (regulation, measure, street), so after the identifier.
             .pipe(merge_contiguous_segments)
             .pipe(compute_geographic_split_order)
         )
 
 
 def read_order_number(df: pl.DataFrame) -> pl.DataFrame:
-    """Read the order number, its grouping key, and the annotation that qualifies it.
+    """Read the order number, its grouping key, and whether it cites a project.
 
-    Rows annotated "Proposition zone apaisable" lose their attachment — the number they
-    cite belongs to a project — but they lose nothing else: their measures are real and
-    join the metropolitan-wide fallbacks.
+    A project's rows lose their order key only: their measures are real and join the
+    metropolitan-wide fallbacks.
     """
     text = pl.col("precisionreglementation")
     df = df.with_columns(
@@ -288,18 +217,9 @@ def read_order_number(df: pl.DataFrame) -> pl.DataFrame:
 def discard_unlabelled_pedestrian_areas(df: pl.DataFrame) -> pl.DataFrame:
     """Keep the pedestrian areas the producer labels as such, drop the rest.
 
-    Applied **after** the measures are qualified, so it only ever touches
-    `AIRE_PIETONNE`: the tonnage or height limit of the same segment is unaffected, and a
-    5 km/h segment inside a ZTL keeps its ban.
-
-    What it drops is not noise — it is the part we cannot vouch for. A segment at 5 km/h
-    with no `reglementationzca` may be a pedestrian area the producer has not labelled
-    yet, or a road genuinely limited to walking pace. Nothing in the layer separates the
-    two, and the error is not symmetric: publishing `noEntry` on an open street sends a
-    GPS elsewhere, while publishing nothing merely stays silent about a restriction.
-    The volume dropped is logged at each run (3 332 segments on 2026-09-22). The question
-    that would settle it is the producer's: is `reglementationzca` exhaustive, or only
-    filled on recent zones?
+    An unlabelled 5 km/h segment may be an area or a road limited to walking pace, and the
+    error is not symmetric: `noEntry` on an open street sends a GPS elsewhere, silence only
+    omits a restriction. Only `AIRE_PIETONNE` is touched, not the segment's other measures.
     """
     is_area = pl.col("measure_group_key") == pl.lit("AIRE_PIETONNE")
     labelled = pl.col("reglementationzca") == pl.lit(PEDESTRIAN_AREA_LABEL)
@@ -315,20 +235,11 @@ def discard_unlabelled_pedestrian_areas(df: pl.DataFrame) -> pl.DataFrame:
     return df.filter(~discarded)
 
 
-# Runs **after** the label filter above: of the labelled pedestrian areas, it drops the
-# ones on a private domain, the nameless ones and those named as something other than a
-# road (volumes logged at each run).
-# Decision of Thibaut, 2026-09-17: a ban published on a private lane or in a park is
-# noise for a satnav, even when the producer labels it. Esplanade Fernand Rude and
-# Jardin de la Grande Côte fall out with it; narrowing to the private motive alone is a
-# one-line change in the `discarded` predicate below.
 def discard_pedestrian_areas_off_the_road_network(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop the pedestrian areas that are not on a road, keep those that are.
+    """Drop the labelled pedestrian areas that are not on a road.
 
-    Applied **after** the measures are qualified, so it only ever touches
-    `AIRE_PIETONNE`: a segment's speed limit or tonnage limit is unaffected by its
-    pedestrian status. See `PEDESTRIAN_AREA_*` for what the three motives are and why the
-    measure is filtered rather than dropped whole.
+    Decided on 2026-09-17: a ban on a private lane or in a park is noise for a satnav, even
+    when labelled (Esplanade Fernand Rude, Jardin de la Grande Côte fall out with it).
     """
     is_area = pl.col("measure_group_key") == pl.lit("AIRE_PIETONNE")
     name = pl.col("nomvoie1").fill_null("")
@@ -350,10 +261,9 @@ def discard_pedestrian_areas_off_the_road_network(df: pl.DataFrame) -> pl.DataFr
 
 
 def discard_roads_of_other_managers(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop the segments of a road manager the Métropole cannot publish for (R-73).
+    """Drop every measure on the roads of a manager the Métropole cannot publish for (R-73).
 
-    Every measure of the segment goes: speed, dimensions, ZTL alike. The measures stay
-    counted as stated by the dataset, so the retention rate shows what R-73 costs.
+    They stay counted as stated, so the retention rate shows what the rule costs.
     """
     discarded = pl.col("domanialite").is_in(ROAD_MANAGERS_WITHOUT_AGREEMENT).fill_null(False)
     dropped = df.filter(discarded)
@@ -370,12 +280,9 @@ def discard_roads_of_other_managers(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def discard_unexpressed_qualifiers(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop the segments whose free text qualifies a restriction in a way DiaLog cannot.
+    """Drop the segments whose free text states a direction or a part of the segment (R-78).
 
-    A direction, or a stretch between two house numbers: publishing the segment's speed
-    limit both ways and end to end would state more than the source (R-78). The whole
-    row goes, as R-78 has it; on 2026-10-10 those rows carried a speed limit and nothing
-    else.
+    Published both ways and end to end, they would state more than the source.
     """
     discarded = (
         pl.col("precisionreglementation").str.contains(UNEXPRESSED_QUALIFIER).fill_null(False)
@@ -398,19 +305,10 @@ def exempts_public_services() -> pl.Expr:
 
 
 def discard_impossible_tonnages(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop the tonnage values no vehicle can carry — they are not vehicle limits.
+    """Drop the tonnages no vehicle can carry (50 to 230 t): a structure's load capacity.
 
-    `limitationtonnage` mixes two grandeurs. Most values are what they look like, a limit
-    on the weight of a lorry; a handful read 50, 70, 100, 120, 200 and 230 t, which is the
-    load-bearing capacity of a structure, not a restriction on traffic. The API says the
-    same thing in its own words — `vehicleSet.heavyweightMaxWeight` must be ≤ 44, the
-    French legal maximum for a heavy goods vehicle — and refused 6 regulations over it on
-    2026-09-07.
-
-    Only the tonnage is dropped, never the row: a segment limited to 200 t *and* to 4 m of
-    height keeps its height limit. A row left with no dimension at all simply stops being
-    a dimension measure. R-35: we do not invent a threshold, and we do not publish a false
-    one either.
+    The API refused 6 regulations over them on 2026-09-07. Only the tonnage goes, so the
+    row keeps its other dimension limits (R-35).
     """
     impossible = pl.col("limitationtonnage") > MAX_HEAVYWEIGHT_TONNES
     n_impossible = df.select(impossible.fill_null(False).sum()).item()
@@ -434,17 +332,9 @@ def discard_impossible_tonnages(df: pl.DataFrame) -> pl.DataFrame:
 def explode_into_measures(df: pl.DataFrame) -> pl.DataFrame:
     """Turn one row per road segment into one row per (segment, measure).
 
-    A segment limited to 30 km/h *and* closed to vehicles over 3.5 t states two measures.
-    Qualifying them separately is what lets a segment carry its speed under one
-    regulation and its tonnage under another. Every speed is published, default ones
-    included (R-70); only a row with no speed at all yields no speed measure.
-
-    A **zone à trafic limité** is a measure of its own — no entry, except local access —
-    and the speed the source files for its segments (5, 20 or 30 km/h depending on the
-    street) is how one drives once let in. Both are published, like the ban and the
-    walking pace of a pedestrian area (R-72, 2026-10-01); a ZTL segment at 5 km/h is a
-    speed limit there, never a second, pedestrian-area `noEntry`
-    (`compute_measure_fields`). Set `ZTL_REPLACES_SPEED` to True to publish the ban alone.
+    Every speed is published, default 50 and 80 km/h included: a satnav needs them as much
+    as decided ones (R-70). A ZTL is a ban of its own, and its speed is how one drives once
+    let in (R-72).
     """
     is_ztl = pl.col("ztl").fill_null(False)
 
@@ -455,9 +345,8 @@ def explode_into_measures(df: pl.DataFrame) -> pl.DataFrame:
         & (~is_ztl if ZTL_REPLACES_SPEED else pl.lit(True))
     ).with_columns(pl.lit("speed").alias("_measure_kind"))
 
-    # The dimension limit keeps the row's order number like the speed does: whether the
-    # order carries it is decided downstream, on all the segments citing that number
-    # (`measures_carried_by_each_order`), not on a word of the free text.
+    # Keeps the order number: whether the order carries it is decided on all the segments
+    # citing it (`measures_carried_by_each_order`).
     dimensions = df.filter(
         pl.any_horizontal(pl.col(column).is_not_null() for column in DIMENSION_COLUMNS)
     ).with_columns(pl.lit("dimensions").alias("_measure_kind"))
@@ -475,15 +364,8 @@ def explode_into_measures(df: pl.DataFrame) -> pl.DataFrame:
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Measure type, speed, and the key that collapses identical measures into one.
 
-    - `measure_type_`: `speedLimitation`, except for pedestrian areas and dimension
-      limits which are `noEntry` (R-33 for the dimensions).
-    - `measure_max_speed`: the source speed, on speed limits only.
-    - `measure_group_key`: the measure's signature. Two rows sharing it inside the same
-      regulation become one measure carrying both locations. A dimension limit exempting
-      public services is another measure than the same limit without the exemption.
-
-    Inside a ZTL, 5 km/h is the speed of the zone, not a pedestrian area: the ZTL already
-    bans entry (R-71, R-72).
+    Dimension limits are `noEntry` (R-33). Inside a ZTL, 5 km/h is the zone's speed, not a
+    pedestrian area: the ZTL already bans entry (R-71, R-72).
     """
     is_ztl = pl.col("_measure_kind") == "ztl"
     is_pedestrian_area = (
@@ -516,11 +398,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def dimension_signature() -> pl.Expr:
-    """`GABARIT_T3_5_H4_1` — the dimension limits of the row, in a stable order.
-
-    Two segments share it only when they carry exactly the same limits, which is what
-    "the same measure" means for a vehicle dimension restriction.
-    """
+    """`GABARIT_T3_5_H4_1`: the row's dimension limits, in a stable order."""
     parts = [
         pl.when(pl.col(column).is_not_null())
         .then(
@@ -537,13 +415,7 @@ def dimension_signature() -> pl.Expr:
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Vehicle set of each measure.
-
-    Speed limits and pedestrian areas apply to every vehicle. Dimension limits restrict
-    heavy goods vehicles (with their tonnage) and/or the dimensions themselves — never
-    invented, only carried over (R-35) — and exempt public services when the free text
-    says so (D-26).
-    """
+    """Vehicle set of each measure: dimension limits are carried over, never invented (R-35)."""
     is_dimension = pl.col("_measure_kind") == "dimensions"
     has_tonnage = pl.col("limitationtonnage").is_not_null()
     has_size = pl.any_horizontal(
@@ -566,10 +438,8 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
         .otherwise(pl.lit([VehicleRestrictedTypeEnum.DIMENSIONS.value]))
     )
 
-    # `desserteLocale` is what tells a ZTL, or a pedestrian area, from a plain closure:
-    # one does not drive through, but one enters to reach an address. Without it we would
-    # publish a barred street where the Métropole lets residents, deliveries and services
-    # in. Pedestrian areas carry it since 2026-09-17.
+    # One enters a ZTL or a pedestrian area to reach an address: without this exemption the
+    # street would read as barred to residents, deliveries and services.
     is_ztl = pl.col("_measure_kind") == "ztl"
     is_pedestrian_area = pl.col("measure_group_key") == "AIRE_PIETONNE"
     exempted = (
@@ -604,16 +474,9 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Permanent period, left undated.
 
-    The source carries no commencement date for most rows, and the one hiding in the
-    free text is the date of a calmed-traffic zone, not of the measure. R-39: we never
-    presume a past date. An invented date is *false* — it claims an order applied when
-    nothing says it did.
-
-    The start is left null, not set to the run day: the date is part of what the
-    synchronization compares, so a run day would make every order look modified each
-    morning. `sync/dating.py` resolves it when DiaLog is written: the run
-    day on creation, "in force when we published it"; the date DiaLog already holds on
-    update.
+    The date in the free text is the calmed-traffic zone's, not the measure's, and a past
+    date is never presumed (R-39). Not the run day either: the sync compares dates, so every
+    order would look modified each morning. `sync/dating.py` fills it when writing.
     """
     return df.with_columns(
         pl.lit(None, dtype=pl.String).alias("period_start_date"),
@@ -626,10 +489,7 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Location of each measure, as a raw GeoJSON LineString.
 
-    `rawGeoJSON` is the only road type that accepts a geometry of our own. It has a
-    cost: `SaveRawGeoJSONDTO` carries a label and a geometry, and nothing else, so
-    `senscirculation` cannot be transmitted — there is no `direction` on this road type.
-    Harmless for a speed limit, which applies both ways; it would be blocking the day a
+    `rawGeoJSON` carries no direction: harmless for a speed limit, blocking the day a
     one-way ban has to be expressed (R-32).
     """
     df = df.filter(pl.col("geometry").is_not_null())
@@ -646,25 +506,11 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def measures_carried_by_each_order(df: pl.DataFrame) -> pl.DataFrame:
-    """The measures each order number actually decides: those on **all** its segments.
+    """One row per `(order_key, measure_group_key)` present on **all** the order's segments.
 
-    A numbered order's number is typed in `precisionreglementation` on every segment of
-    its zone, and those segments also carry whatever else applies there — a 7.5 t limit
-    on two of them, a 20 km/h stretch, a pedestrian area. Keeping everything made
-    `MGL-CT-2024RP44520` a regulation holding 30 km/h *and* noEntry *and* two tonnage
-    limits: an act saying seven things it never said. Keeping the majority measure
-    (the rule until 2026-09-22) attributed a speed to acts another reader of the same
-    acts publishes as tonnage limits — 15 of the 19 numbers shared with the other
-    channel (`foreign_order_keys`).
-
-    R-28 as Thibaut settled it on 2026-09-22: an order carries a measure only when every
-    segment citing the number carries it; speed, dimensions, ZTL and pedestrian area are
-    judged one by one, so an order can carry several (`2022-080`: 20 km/h and 3.5 t) or
-    none at all. What falls short goes to the metropolitan fallback of its own measure,
-    still published, only not under the act's name. The rule is a set intersection:
-    no threshold, no tie-break, the same answer from one run to the next (R-20).
-
-    Returns one row per `(order_key, measure_group_key)` the order carries.
+    The segments citing a number also carry whatever else applies there, and a majority
+    rule credited acts with measures they never decided (decided 2026-09-22, R-28). A set
+    intersection gives the same answer from one run to the next (R-20).
     """
     numbered = df.filter(pl.col("order_key").is_not_null())
     segments = numbered.group_by("order_key").agg(
@@ -700,29 +546,10 @@ def compute_regulation_fields(
 ) -> pl.DataFrame:
     """Identifier, category, subject and title of each regulation.
 
-    The identifier rule, in full (R-23):
-
-        MGL-CT-{order key}          when the free-text field yields an order number *and*
-                                    this measure sits on every segment citing it —
-                                    `MGL-CT-2024RP44520`
-        MGL-CT-{measure signature}  everything else, one metropolitan-wide regulation per
-                                    distinct measure — `MGL-CT-V30`, `MGL-CT-GABARIT_T3_5`
-
-    The second line covers three populations that behave alike: segments carrying no
-    order number at all, the measures of a numbered segment that its order cannot be
-    said to decide (`measures_carried_by_each_order`), and the orders whose number the
-    organisation already holds under another channel's identifier (`foreign_order_keys`,
-    P-04) — one act, one name, so ours steps aside. All are real measures with no act of
-    their own to belong to here, so all are gathered by what they do. A segment
-    legitimately appears twice — once in its order's regulation for the speed, once in a
-    metropolitan regulation for its tonnage limit — because those are two distinct
-    restrictions at the same place.
-
-    The municipality is deliberately absent from the key. Lyon's "Ville 30" order spills
-    onto 12 neighbouring municipalities for a handful of boundary segments; prefixing by
-    municipality would split one real order into 13. The price is that 61 short numbers
-    (`845`, `956`) could merge two orders from two municipalities — one such case is
-    known, and the arbitration of 2026-09-04 is to merge rather than to split.
+    `MGL-CT-{order key}` when the order carries the measure and no other channel holds the
+    number, else `MGL-CT-{measure signature}`, one metropolitan-wide regulation (R-23).
+    No municipality in the key: Lyon's "Ville 30" would split into 13 orders. 61 short
+    numbers (`845`) could merge two municipalities' orders; merging was chosen on 2026-09-04.
     """
     df = df.join(
         measures_carried_by_each_order(df), on=["order_key", "measure_group_key"], how="left"
@@ -738,8 +565,7 @@ def compute_regulation_fields(
                 f"{held_back.height} emprises join the metropolitan regulations (P-04): "
                 f"{sorted(held_back['order_key'].unique().to_list())}"
             )
-        # `_is_own_measure` also drives the title: a measure kept out of its order must
-        # not keep the order's name, or a metropolitan regulation would read "Arrêté n°…".
+        # Also drives the title, or a metropolitan regulation would read "Arrêté n°…".
         df = df.with_columns((pl.col("_is_own_measure") & ~foreign).alias("_is_own_measure"))
 
     displaced = df.filter(pl.col("order_key").is_not_null() & ~pl.col("_is_own_measure"))
@@ -769,16 +595,8 @@ def compute_regulation_fields(
 def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:
     """Give every published pedestrian area its walking-pace limit, in the same regulation.
 
-    The Code de la route (R. 110-2) defines the area by both: only the vehicles serving
-    it may enter, and they drive at walking pace. The ban alone left the 5 km/h the
-    source files unsaid; the speed alone would read as an advisory. Decision of the team
-    on 2026-09-14, applied on 2026-09-22.
-
-    The limit is a twin of the ban — same segment, same regulation identifier and title,
-    hence the same act or the same metropolitan fallback — so it never creates a
-    regulation of its own and inherits every filter the ban went through: an unlabelled
-    5 km/h segment, or a labelled one off the road network, yields neither. It applies
-    to every vehicle, with no exemption: the ones let in still drive at walking pace.
+    The Code de la route (R. 110-2) defines the area by both (team decision, 2026-09-14).
+    A twin of the ban, it inherits its filters; no exemption, as those let in still walk.
     """
     bans = df.filter(pl.col("measure_group_key") == pl.lit("AIRE_PIETONNE"))
     if not bans.height:
@@ -794,12 +612,7 @@ def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def regulation_title() -> pl.Expr:
-    """Human-readable title, never blocking, always fabricated (R-24).
-
-    A numbered regulation is named after its order; a fallback is named after what it
-    does, because that is literally all it is: every 30 km/h limit the metropolitan area
-    publishes without an order number, gathered into one act.
-    """
+    """Human-readable title, never blocking, always fabricated (R-24)."""
     numbered = pl.format("Arrêté n°{} – Métropole de Lyon", pl.col("order_number"))
     fallback = (
         pl.when(pl.col("measure_type_") == pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value))
@@ -852,19 +665,9 @@ def dimension_label() -> pl.Expr:
 def chain_segments(segments: list[list]) -> list[list]:
     """Join the segments that meet end to end: `AB` + `BC` becomes `AC`.
 
-    The layer cuts a street into as many rows as it has stretches of pavement, so one
-    30 km/h street arrives as 43 emprises describing one continuous line. Joining them
-    changes nothing about what is covered and everything about how many objects say it.
-
-    Joining happens **only at a point where exactly two segments meet**. Where three or
-    more meet, the point is a junction and choosing which branch continues which would be
-    arbitrary — so the chain stops there. Two disjoint stretches of the same street never
-    join, because no endpoint is shared: this is a topological merge, not a merge by name.
-
-    Endpoints are compared exactly. Measured on the 2026-09-07 draw: 13 533 shared
-    endpoints, and the count is identical whether coordinates are rounded to 5 or to 8
-    decimals — the producer's geometries already close on each other, so no tolerance is
-    invented here.
+    Only where exactly two meet: at a junction, which branch continues would be arbitrary.
+    Endpoints are compared exactly: on 2026-09-07, 13 533 shared endpoints whether rounded
+    to 5 or 8 decimals.
     """
     alive = {index: list(segment) for index, segment in enumerate(segments)}
     ends: dict[tuple, set[int]] = {}
@@ -887,8 +690,7 @@ def chain_segments(segments: list[list]) -> list[list]:
                 head = head[::-1]
             if tuple(tail[-1]) == point:
                 tail = tail[::-1]
-            # A segment whose two ends are the same point is a loop: it meets itself and
-            # has nothing to be joined to.
+            # A loop meets itself and has nothing to be joined to.
             if tuple(head[-1]) != point or tuple(tail[0]) != point:
                 continue
 
@@ -921,11 +723,8 @@ MERGE_KEY = ["regulation_identifier", "measure_group_key", "location_label"]
 def merge_contiguous_segments(df: pl.DataFrame) -> pl.DataFrame:
     """Collapse the touching segments of one street under one measure into one emprise.
 
-    The key is `(regulation, measure, street)`: two segments only ever join if they state
-    the same measure, on the same named street, inside the same regulation. Every other
-    field of the group is identical by construction — the measure signature fixes the
-    vehicle set and the measure type, and the period is the same permanent undated one —
-    so the first row carries them for the whole chain.
+    The other fields are identical within a group by construction, so the first row's are
+    kept.
     """
     others = [column for column in df.columns if column not in MERGE_KEY + ["location_geometry"]]
     merged = (
@@ -953,15 +752,8 @@ def merge_contiguous_segments(df: pl.DataFrame) -> pl.DataFrame:
 def compute_geographic_split_order(df: pl.DataFrame) -> pl.DataFrame:
     """Rank the rows so that a regulation too large for one POST splits into neighbours.
 
-    A regulation above `MAX_LOCATIONS_PER_REGULATION` is cut into slices. Cutting it in
-    source order would scatter each slice across the whole metropolitan area; cutting it
-    along this ranking keeps a slice inside a municipality, and inside a municipality
-    inside a ~1 km latitude band.
-
-    The ranking is deliberately cheap: the first coordinate of the geometry stands for
-    the segment, municipalities are ordered by their own centre, and segments are ordered
-    within a municipality by band then longitude. It is a bin-packing heuristic, not a
-    territorial statement — the slices carry no administrative meaning.
+    By municipality, then ~1 km latitude band, then longitude: a cheap bin-packing
+    heuristic, the slices carry no administrative meaning.
     """
     df = df.with_columns(
         pl.col("location_geometry")

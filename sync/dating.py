@@ -1,27 +1,11 @@
 """Date the undated permanent periods at the moment of writing (R-39).
 
-A permanent regulation whose source records no commencement date leaves `startDate`
-null all the way through the pivot, the payload, the digest and the snapshot: "in
-force, since a day nobody recorded". Null on both sides of the comparison, the date can
-never register as a change — dated with the day of the run, every such regulation
-looked modified each morning.
+The start date stays null up to the snapshot, so it never reads as a change: dated with the
+run day earlier, every such regulation would look modified each morning. A creation takes
+the run day; an update keeps the date DiaLog holds for the matching measure.
 
-The null is resolved only when DiaLog is written:
-
-- a **creation** is dated the day of the run, at French midnight: "in force when we
-  published it";
-- an **update** keeps the date DiaLog already holds for that measure, read back through
-  `GET /api/regulations/{identifier}`. A measure DiaLog does not hold is new and takes
-  the day of the run.
-
-A regulation is matched to its read counterpart measure by measure: directly when both
-hold a single one (Lyon's inventory, most of Aveyron), by signature otherwise — type,
-speed, exemptions and dimension limits. The written and read forms of a vehicle set
-differ (`ai/docs/api-dialog.md`, piège 5: the restricted types come back empty and the
-dimensions move to `maxCharacteristics`), so the restricted types stay out of it.
-
-Only the periods left undated are touched. A period the source dated keeps its date,
-and a temporary period is never undated.
+Measures are matched by signature (type, speed, exemptions, dimensions) unless both sides
+hold a single one. Restricted types stay out of it: DiaLog reads them back empty.
 """
 
 from __future__ import annotations
@@ -37,7 +21,7 @@ from sync.closure import _parse, _to_paris_iso
 
 PARIS = ZoneInfo("Europe/Paris")
 
-# Dimension limits as the save DTO names them → as `maxCharacteristics` names them.
+# Save DTO name → `maxCharacteristics` name.
 DIMENSION_ATTRIBUTES = (
     ("heavyweight_max_weight", "weight"),
     ("max_height", "height"),
@@ -47,11 +31,8 @@ DIMENSION_ATTRIBUTES = (
 
 
 def run_day(now: datetime | None = None) -> str:
-    """French midnight of the day, carrying the real offset of that day.
-
-    `2026-09-19T00:00:00+02:00`: the one shape DiaLog reads without shifting it
-    (`toolkit/transforms/local_time.py`).
-    """
+    """French midnight of the day with that day's offset (`2026-09-19T00:00:00+02:00`): the
+    one shape DiaLog reads without shifting it."""
     instant = (now or datetime.now(PARIS)).astimezone(PARIS)
     return datetime.combine(instant.date(), time(), tzinfo=PARIS).isoformat(timespec="seconds")
 
@@ -72,11 +53,8 @@ def date_creation(regulation: PostApiRegulationsAddBody, day: str) -> int:
 
 
 def date_update(regulation: PostApiRegulationsAddBody, read: Mapping[str, Any], day: str) -> int:
-    """Date every undated period on what DiaLog holds for its measure, else on `day`.
-
-    `read` is the `GET /api/regulations/{identifier}` response of the regulation being
-    replaced. Returns how many periods were dated.
-    """
+    """Date every undated period on what DiaLog holds (`read`, the GET of the regulation
+    being replaced) for its measure, else on `day`; return how many were dated."""
     measures = list(regulation.measures or [])
     read_measures = [m for m in read.get("measures") or [] if isinstance(m, Mapping)]
     matched = _match_measures(measures, read_measures)
@@ -108,9 +86,8 @@ def _date_measure(measure: Any, day: str) -> int:
 def _match_measures(sent: Sequence[Any], read: list[Mapping[str, Any]]) -> dict[int, Mapping]:
     """Which read measure each sent measure corresponds to, by index of the sent one.
 
-    One measure on both sides is the same measure, whatever its shape: the regulation
-    is the unit of identity, not the measure. Otherwise a sent measure takes the first
-    read measure of the same signature not taken yet; one with no counterpart is new.
+    One measure on both sides is the same measure, whatever its shape: the regulation is the
+    unit of identity. A sent measure with no counterpart is new.
     """
     if len(sent) == 1 and len(read) == 1:
         return {0: read[0]}

@@ -1,10 +1,6 @@
 """Tests for the Métropole de Lyon roadway integration.
 
-The fixture is twenty-six hand-written segments, one per case the source really contains:
-a numbered order spanning several segments, one carrying two measures on all of them, one
-whose measures disagree from segment to segment, a pedestrian area labelled or not, a
-dimension limit sitting on a 50 km/h road or on an 80 km/h one, an order number annotated
-as a mere project, a zone à trafic limité, and a segment without geometry.
+The fixture is twenty-six hand-written segments, one per case the source really contains.
 """
 
 import json
@@ -91,9 +87,7 @@ def test_order_number_absorbs_the_observed_spellings(text, expected):
 @pytest.mark.parametrize(
     "text,expected",
     [
-        # The field stacks the regulatory layers of a segment, newest first. The first
-        # citation is the order in force, whatever separates it from the next one: a full
-        # stop, a dash or a line break.
+        # Orders stack newest first: the first is in force, whatever the separator.
         (
             "ZCA : 2022 - Arrêté N°2024RP44520. ZCA : 2019 - Arrêté N°2019RP36023 le 25/07/19",
             "2024RP44520",
@@ -110,12 +104,11 @@ def test_order_number_absorbs_the_observed_spellings(text, expected):
             "ZCA : Arrêté n° 2025RP47402\r\n2022 - Arrêté N°2024RP44520. ZCA : 2019",
             "2025RP47402",
         ),
-        # …but a dash inside the number is not a separator. A bare dash delimiter would
-        # truncate these into another regulation.
+        # …but a dash inside the number is not a separator.
         ("Arrêté n°VOI-2023 - 120 du 28/06/23", "VOI-2023 - 120"),
         ("ZCA : 2023 - Arrêté n°PV 2023 - 478 du 02/11/23", "PV 2023 - 478"),
-        # And when the second citation is tied to a measure rather than to a vintage, it
-        # is the one that governs: these rows carry the height limit, not the Ville 30.
+        # A second citation tied to a measure rather than a vintage governs: these rows
+        # carry the height limit, not the Ville 30.
         (
             "ZCA : 2022 - Arrêté N°2024RP44520 / Lim hauteur - Arrêté N°2022RP40610 du 04/03/2022",
             "2022RP40610",
@@ -139,7 +132,7 @@ def test_a_project_annotation_is_recognised():
 
 
 def test_foreign_order_keys_read_the_number_behind_any_municipality_prefix():
-    """The other channel's identifiers are `{MUNICIPALITY}_{number}`, 52 spellings (P-04)."""
+    """The other channel's identifiers are `{MUNICIPALITY}_{number}`, 52 spellings."""
     keys = foreign_order_keys(
         [
             "LYON_2022RP40610",
@@ -159,11 +152,7 @@ def test_foreign_order_keys_read_the_number_behind_any_municipality_prefix():
 
 
 def test_foreign_order_keys_cut_at_underscores_only():
-    """`2019` is a year typed in front of `TASSIN_2019_145`, not an order of its own.
-
-    The trailing-substring match tried on 2026-08-12 produced three such false
-    positives; cutting at underscores keeps the number whole.
-    """
+    """`2019` is a year typed in front of `TASSIN_2019_145`, not an order of its own."""
     keys = foreign_order_keys(["TASSIN_2019_145", "VENISSIEUX_2024_0213RGC"], "MGL-")
 
     assert "2019145" in keys and "145" in keys
@@ -181,22 +170,14 @@ def test_rows_sharing_an_order_number_land_in_one_regulation(clean_data):
 
 
 def test_a_numbered_order_carries_every_measure_present_on_all_its_segments(clean_data):
-    """Rue Germain's 2022-080: 20 km/h and 3.5 t on both segments — the order says both.
-
-    Judged one by one, so the tonnage does not compete with the speed: an act can decide
-    several things, as long as every segment citing it carries each of them (R-28).
-    """
+    """Rue Germain's 2022-080: 20 km/h and 3.5 t on both segments, the order says both (R-28)."""
     order = clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-2022080")
     assert set(order["measure_group_key"]) == {"V20", "GABARIT_T3_5"}
     assert set(order["regulation_title"]) == {"Arrêté n°2022-080 – Métropole de Lyon"}
 
 
 def test_a_measure_missing_from_one_segment_leaves_the_order(clean_data):
-    """2025-100: 30 km/h on both segments, 3.5 t on one only.
-
-    The act can be said to decide the 30; nothing says it decides the tonnage. The
-    tonnage joins the metropolitan regulation of its own measure, under that name.
-    """
+    """2025-100: 30 km/h on both segments, 3.5 t on one only, which goes metropolitan."""
     order = clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-2025100")
     assert set(order["measure_group_key"]) == {"V30"}
     assert order.height == 2
@@ -207,11 +188,7 @@ def test_a_measure_missing_from_one_segment_leaves_the_order(clean_data):
 
 
 def test_an_order_whose_segments_disagree_carries_nothing(clean_data):
-    """2025-200: 30 km/h on one segment, 20 on the other — no majority, no tie-break.
-
-    Both measures are published, each under the metropolitan regulation of its speed;
-    the act's name is used for neither.
-    """
+    """2025-200: 30 km/h on one segment, 20 on the other — no majority, no tie-break."""
     assert clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-2025200").height == 0
     thirty = clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-V30")["location_label"]
     twenty = clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-V20")["location_label"]
@@ -220,11 +197,7 @@ def test_an_order_whose_segments_disagree_carries_nothing(clean_data):
 
 
 def test_a_number_already_published_by_another_channel_is_not_created_again():
-    """`ALBIGNY-SUR-SAONE_2022-080` is already in the organisation: one act, one name.
-
-    Our reading of 2022-080 steps aside for the metropolitan regulations of its measures,
-    which keep their generic titles (P-04).
-    """
+    """`ALBIGNY-SUR-SAONE_2022-080` is already in the organisation: one act, one name."""
     source = offline_source()
     source.foreign_order_keys = foreign_order_keys(
         ["ALBIGNY-SUR-SAONE_2022-080", "TASSIN_2019_145"], "MGL-"
@@ -236,7 +209,6 @@ def test_a_number_already_published_by_another_channel_is_not_created_again():
     germain = clean.filter(pl.col("location_label").str.contains("Rue Germain"))
     assert set(germain["regulation_identifier"]) == {"MGL-CT-V20", "MGL-CT-GABARIT_T3_5"}
     assert not any(title.startswith("Arrêté") for title in germain["regulation_title"])
-    # The other numbered orders are untouched.
     assert clean.filter(pl.col("regulation_identifier") == "MGL-CT-2025100").height == 2
 
 
@@ -257,11 +229,7 @@ def test_a_project_annotation_detaches_the_order_but_keeps_the_measure(clean_dat
 
 
 def test_the_default_urban_speed_is_published_as_one_metropolitan_regulation(clean_data):
-    """A satnav needs the default speed as much as a decided one (R-70).
-
-    It groups under `MGL-CT-V50` like any unnumbered speed; the tonnage on the same
-    segment keeps its own regulation.
-    """
+    """A satnav needs the default speed as much as a decided one (R-70)."""
     fifty = clean_data.filter(pl.col("measure_group_key") == "V50")
     assert set(fifty["regulation_identifier"]) == {"MGL-CT-V50"}
     assert set(fifty["measure_type_"]) == {"speedLimitation"}
@@ -284,12 +252,7 @@ def test_the_default_rural_speed_is_published_too(clean_data):
 
 
 def test_a_segment_can_feed_two_measures_of_one_order(clean_data):
-    """One segment, a speed limit and a dimension limit, one order citing it.
-
-    Both measures sit on every segment of the order — there is only one — so the order
-    carries both, as two distinct measures of one regulation. The word "Tonnage" in the
-    text plays no part: what the act decides is read off its segments, not its wording.
-    """
+    """What the order decides is read off its segments, not the word "Tonnage" in its text."""
     numbered = clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-0AR20180018")
     assert set(numbered["measure_group_key"]) == {"GABARIT_T19_0_H4_5", "V70"}
     assert all("Rue du Pont" in label for label in numbered["location_label"])
@@ -303,10 +266,7 @@ def test_a_dimension_limit_without_an_order_joins_the_metropolitan_regulation(cl
 
 
 def test_a_pedestrian_area_is_a_ban_and_a_walking_pace_limit_in_one_regulation(clean_data):
-    """R. 110-2: only the vehicles serving the area enter, and they drive at walking pace.
-
-    Two measures, one regulation — never a `MGL-CT-V5` of its own (decision of 2026-09-22).
-    """
+    """R. 110-2: only the vehicles serving the area enter, and they drive at walking pace."""
     ban = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")
     assert ban.height == 2  # Victor Hugo, Saint Jean — labelled, and on a street
     assert set(ban["measure_type_"]) == {"noEntry"}
@@ -342,12 +302,7 @@ def test_a_segment_without_geometry_is_dropped(clean_data):
 
 
 def test_every_period_is_permanent_and_undated(clean_data):
-    """R-39: we never presume a commencement date the source does not carry.
-
-    The start is left null, not set to the day of the run: the date is part of what the
-    synchronization compares, and a run day made every order look modified each
-    morning. `sync/dating.py` dates it when DiaLog is written.
-    """
+    """R-39: we never presume a commencement date; `sync/dating.py` fills it when writing."""
     assert clean_data["period_start_date"].null_count() == clean_data.height
     assert set(clean_data["period_is_permanent"]) == {True}
     assert clean_data["period_end_date"].null_count() == clean_data.height
@@ -499,10 +454,7 @@ def test_segments_that_do_not_touch_stay_apart():
 
 
 def test_a_junction_stops_the_chain():
-    """Three segments meeting: which one continues which would be arbitrary.
-
-    The merge is topological, so it stops where the topology stops deciding.
-    """
+    """Three segments meeting: which one continues which would be arbitrary."""
     segments = [
         [[0.0, 0.0], [1.0, 0.0]],
         [[1.0, 0.0], [2.0, 0.0]],
@@ -548,12 +500,7 @@ def test_a_ztl_is_a_ban_with_a_local_access_exemption(clean_data):
 
 
 def test_the_ztl_publishes_its_speed_beside_the_ban(clean_data):
-    """The source files the Presqu'île at 5, 20 or 30 km/h — how one drives once let in.
-
-    Published beside the ban, like the walking pace of a pedestrian area (R-72). At
-    5 km/h it stays a speed limit: the ZTL already bans entry, a second `noEntry` as a
-    pedestrian area would say it twice.
-    """
+    """The ZTL's speed is how one drives once let in (R-72); at 5 km/h it is no second ban."""
     labels = clean_data.filter(pl.col("measure_group_key") == "V30")["location_label"]
     assert any("Mercière" in label for label in labels)
 
@@ -594,23 +541,14 @@ def test_a_labelled_pedestrian_area_is_kept(clean_data):
 
 
 def test_a_labelled_area_off_the_road_network_is_dropped_all_the_same(clean_data):
-    """Esplanade Fernand Rude is labelled a pedestrian area, and is not a street.
-
-    The label filter and the name-based filter are chained: a ban in a park or on a
-    private lane is noise for a satnav, whatever the producer files.
-    """
+    """Esplanade Fernand Rude is labelled a pedestrian area, and is not a street."""
     labels = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")["location_label"]
 
     assert not any("Fernand Rude" in label for label in labels)
 
 
 def test_five_kilometres_per_hour_alone_is_not_a_pedestrian_area(clean_data):
-    """Segments filed at 5 km/h without the label are never published (R-71).
-
-    Allée des Tilleuls, Voie sans dénomination and Chemin Rural 20 all read 5 km/h and
-    carry no `reglementationzca`. Publishing a `noEntry` there would state a driving ban
-    the source never states.
-    """
+    """Segments filed at 5 km/h without the label are never published (R-71)."""
     labels = list(
         clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")["location_label"]
     )
@@ -621,11 +559,7 @@ def test_five_kilometres_per_hour_alone_is_not_a_pedestrian_area(clean_data):
 
 
 def test_an_unlabelled_five_kilometre_segment_is_not_published_as_a_speed_limit(clean_data):
-    """Dropping the ban must not turn it into a "5 km/h" advisory instead.
-
-    The walking-pace limit is the twin of a published ban, never of a dropped one; the
-    only plain 5 km/h is the speed of a ZTL, next to its ban.
-    """
+    """Dropping the ban must not turn it into a "5 km/h" advisory instead."""
     fives = clean_data.filter(pl.col("measure_group_key") == "V5")["location_label"]
     assert all("Tupin" in label for label in fives)
     assert not any("Tilleuls" in label for label in clean_data["location_label"])
@@ -635,11 +569,7 @@ def test_an_unlabelled_five_kilometre_segment_is_not_published_as_a_speed_limit(
 
 
 def test_the_filter_only_touches_pedestrian_areas(clean_data):
-    """A private or nameless road keeps its speed limit and its tonnage limit.
-
-    The filter runs after the measures are qualified, so it can only ever remove an
-    `AIRE_PIETONNE`: being private says nothing about whether a 30 km/h limit is real.
-    """
+    """A private or nameless road keeps its speed limit and its tonnage limit."""
     others = clean_data.filter(pl.col("measure_group_key") != "AIRE_PIETONNE")
 
     assert others.height > 0
@@ -650,10 +580,7 @@ def test_the_filter_only_touches_pedestrian_areas(clean_data):
 
 
 def test_the_name_based_rule_drops_private_nameless_and_non_road_areas():
-    """`discard_pedestrian_areas_off_the_road_network`, alone on the qualified measures.
-
-    It drops what its name says — and, as the fixture shows, one labelled area too.
-    """
+    """The name-based rule alone also drops one labelled area."""
     source = DataSourceIntegration.__new__(DataSourceIntegration)
     qualified = source.validate_raw_data(pl.read_csv(FIXTURE)).pipe(_qualified_measures)
 
@@ -676,12 +603,11 @@ def _qualified_measures(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-# --- What the free text and the road manager say (D-26, R-73, R-78) -----------------
+# --- What the free text and the road manager say (R-73, R-78) -----------------------
 
 
 def clean_with(**overrides) -> pl.DataFrame:
-    """What the pipeline publishes on one extra segment: 20 km/h and 3.5 t, like Rue
-    Germain, on a street of its own, with the given fields."""
+    """What the pipeline publishes on one extra segment like Rue Germain's, with these fields."""
     raw = pl.read_csv(FIXTURE)
     fields = {"codetroncon": "X001", "nomvoie1": "Rue Témoin", "precisionreglementation": None}
     fields.update(overrides)
@@ -698,8 +624,7 @@ FEYZIN = "Arrêté N°0_AR_2018.0018 du 11/09/2019 sauf service public"
 
 
 def test_a_public_service_exemption_in_the_text_reaches_the_tonnage_limit():
-    """D-26: Feyzin's 3.5 t order exempts public services; publishing it without the
-    exemption bans more vehicles than the source does."""
+    """Without the exemption, Feyzin's 3.5 t order would ban more vehicles than it does."""
     clean = clean_with(precisionreglementation=FEYZIN)
     tonnage = clean.filter(pl.col("measure_group_key") == "GABARIT_T3_5_SAUF_SP")
 

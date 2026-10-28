@@ -1,16 +1,9 @@
-"""Paris / Eudonet: the acts another channel already published in DiaLog (R-80).
+"""The acts another channel already published in DiaLog (R-80).
 
-On the prod export of 2026-09-08: "Paris (préfecture)" holds `Paris_{1101}` (78 of our
-numbers, pedestrian areas of the City), the former PHP channel posts the bare `1101` into
-"Paris" (2).
-
-The bare numbers are read live from the public export, the only route that sees another
-organization, municipality by municipality (~30 s): the commune code, then the twenty
-arrondissements our own locations are sent with. The `Paris_` ones carry raw geometries
-with no municipality, which that filter never returns, and reading the whole export takes
-~1 h (~37 s a page, one page answering 500, staging of 2026-10-17). They are frozen in
-`published_elsewhere.json` instead: 100 permanent pedestrian areas, the same on the prod
-of 2026-09-08 and the staging of 2026-10-17. A `Paris_` regulation added since is missed.
+Bare `1101` numbers (the former PHP channel, into "Paris") are read live from the public
+export, municipality by municipality. The `Paris_{1101}` ones ("Paris (préfecture)", 100
+permanent pedestrian areas) carry no municipality and the whole export takes ~1 h
+(2026-10-17): they are frozen in `published_elsewhere.json`, so one added since is missed.
 """
 
 import json
@@ -119,9 +112,7 @@ def _describe_failure(error: Exception) -> str:
 def index_by_eudonet_number(identifiers: Iterable[tuple[str, str]]) -> dict[str, str]:
     """`1101` numbers behind the identifiers of other channels → "organization: identifier".
 
-    `Paris_2024P12345` or `paris_2024P12345` gives `2024P12345`; a bare identifier is taken
-    whole, since the former PHP channel posts `1101` as is. Ours (`PARIS-EUDO-`) are
-    skipped.
+    The `Paris_` prefix is stripped, a bare identifier is taken whole; ours are skipped.
     """
     numbers: dict[str, str] = {}
     for identifier, organization in identifiers:

@@ -21,8 +21,6 @@ LOCAL_FILE = "explorations/dp_sarthe/data/227200029_chantiers_routiers.parquet"
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
-    """Data source for Sarthe chantiers routiers (road works)."""
-
     raw_data_schema = SartheChantiersRoutiersSchema
     name = "chantiers_routiers"
 
@@ -47,17 +45,10 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute measure fields from `mode_exp` (the traffic arrangement during the works).
+    """Measure type from `mode_exp`, the traffic arrangement during the works.
 
-    Mapping, value by value (case-insensitive):
-    - contains "alternat" (Alternat, Alternat feux, Alternat manuel) -> ALTERNATEROAD
-    - "Route barrée avec déviation" -> NOENTRY
-    - "Déviation 2 sens" -> NOENTRY (traffic diverted in both directions: the section is closed)
-
-    Any other value is dropped and counted. The source has no speed column, so a
-    "Limitation de vitesse" cannot be published as a speed limitation and is dropped too.
-    Never fall back to NOENTRY: a wrongly published road closure is broadcast to GPS apps.
+    Unknown values are dropped and counted, never defaulted to NOENTRY: a wrong road closure
+    is broadcast to GPS apps. "Limitation de vitesse" is dropped too, with no speed column.
     """
     mode_exp = pl.col("mode_exp").str.to_lowercase().str.strip_chars()
 
@@ -67,6 +58,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
             .then(pl.lit(MeasureTypeEnum.ALTERNATEROAD.value))
             .when(mode_exp.str.starts_with("route barrée"))
             .then(pl.lit(MeasureTypeEnum.NOENTRY.value))
+            # Traffic diverted both ways: the section is closed.
             .when(mode_exp == "déviation 2 sens")
             .then(pl.lit(MeasureTypeEnum.NOENTRY.value))
             .otherwise(pl.lit(None))
@@ -87,13 +79,6 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_period_fields(df: pl.DataFrame):
-    """
-    Compute all period fields for SavePeriodDTO.
-    - period_start_date: date_debut at 00:00:00 Paris
-    - period_end_date: date_fin at 23:59:59 Paris
-    - period_recurrence_type: everyDay
-    - period_is_permanent: True
-    """
     return df.with_columns(
         [
             start_of_local_day(df, "date_debut").alias("period_start_date"),

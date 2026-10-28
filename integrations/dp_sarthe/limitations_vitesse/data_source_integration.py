@@ -24,8 +24,6 @@ URL = (
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
-    """Data source for Sarthe limitations vitesse CSV data."""
-
     raw_data_schema = SartheRawDataSchema
     name = "limitations_vitesse"
 
@@ -49,8 +47,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         )
 
     def compute_regulation_fields(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Identify each row by md5(loc_txt | speed | longueur); rows sharing a hash are
-        all dropped (D-07)."""
+        """Identify each row by md5(loc_txt | speed | longueur); rows sharing one are dropped."""
 
         def deterministic_hash(s: str) -> str:
             return hashlib.md5(s.encode()).hexdigest()

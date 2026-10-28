@@ -4,11 +4,7 @@ import pandera.polars as pa
 
 
 class AveyronLimitationsVitesseRawDataSchema(pa.DataFrameModel):
-    """Schema for the raw Aveyron limitations de vitesse data.
-
-    The producer ships every numeric column as a string. Declaring the target types here
-    makes `coerce` do the conversion once, and fail loudly if a value is not convertible.
-    """
+    """The producer ships numbers as strings: `coerce` converts them, or fails loudly."""
 
     geo_point_2d: bytes | None = pa.Field(nullable=True)
     geo_shape: bytes | None = pa.Field(nullable=True)
@@ -21,13 +17,10 @@ class AveyronLimitationsVitesseRawDataSchema(pa.DataFrameModel):
     abf: float | None = pa.Field(nullable=True)
     agglo: str | None = pa.Field(nullable=True)
     limit: int | None = pa.Field(nullable=True)
-    # Free text qualifying `limit`: a second limit for a vehicle class ("50 PL>12t") or
-    # a condition ("70 chaussee mouillee"). Read by `discard_vehicle_class_limits`.
+    # Free text qualifying `limit`: "50 PL>12t", "70 chaussee mouillee".
     limit_spec: str | None = pa.Field(nullable=True)
     sens: int | None = pa.Field(nullable=True)
 
     class Config(pa.DataFrameModel.Config):
-        """Config for the schema."""
-
         strict = False  # Allow extra columns in raw data
         coerce = True  # Allow type coercion during validation

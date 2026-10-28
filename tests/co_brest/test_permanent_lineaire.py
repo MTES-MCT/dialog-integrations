@@ -16,24 +16,20 @@ from integrations.co_brest.permanent_lineaire.schema import Schema
 
 @pytest.fixture
 def raw_data():
-    """Load test data from permanent_lineaire.csv."""
     return pl.read_csv("tests/co_brest/permanent_lineaire.csv")
 
 
 @pytest.fixture
 def integration():
-    """Create Brest integration instance."""
     return Integration.from_organization("co_brest")
 
 
 @pytest.fixture
 def data_source(integration):
-    """Create Brest permanent_lineaire data source instance."""
     return DataSourceIntegration(integration.organization_settings, integration.client)
 
 
 def test_validate_raw_data(data_source, raw_data):
-    """Test that validation succeeds and produces expected columns."""
     validated = data_source.validate_raw_data(raw_data)
 
     expected_columns = set(Schema.to_schema().columns.keys())
@@ -42,7 +38,7 @@ def test_validate_raw_data(data_source, raw_data):
 
 
 def test_preprocess_casts_booleans(data_source, raw_data):
-    """Test that preprocessing casts VELO and CYCLO to boolean and filters empty NOARR."""
+    """Also drops rows with an empty NOARR."""
     schema_columns = list(Schema.to_schema().columns.keys())
     df = raw_data.select(schema_columns)
 
@@ -55,7 +51,6 @@ def test_preprocess_casts_booleans(data_source, raw_data):
 
 
 def test_cast_boolean_column_oui_to_true(data_source):
-    """Test that 'OUI' is cast to True."""
     df = pl.DataFrame({"test_col": ["OUI", "oui", "Oui"], "NOARR": ["A", "B", "C"]})
 
     result = df.with_columns(data_source.cast_boolean_column("test_col"))
@@ -65,7 +60,6 @@ def test_cast_boolean_column_oui_to_true(data_source):
 
 
 def test_cast_boolean_column_non_to_false(data_source):
-    """Test that 'NON' is cast to False."""
     df = pl.DataFrame({"test_col": ["NON", "non", "Non"], "NOARR": ["A", "B", "C"]})
 
     result = df.with_columns(data_source.cast_boolean_column("test_col"))
@@ -75,7 +69,6 @@ def test_cast_boolean_column_non_to_false(data_source):
 
 
 def test_cast_boolean_column_null_to_false(data_source):
-    """Test that null values are filled with False."""
     df = pl.DataFrame({"test_col": ["OUI", None, "NON"], "NOARR": ["A", "B", "C"]})
 
     result = df.with_columns(data_source.cast_boolean_column("test_col"))
@@ -85,7 +78,6 @@ def test_cast_boolean_column_null_to_false(data_source):
 
 
 def test_compute_period_fields():
-    """Test that compute_period_fields creates all required fields."""
 
     df = pl.DataFrame(
         {
@@ -100,7 +92,7 @@ def test_compute_period_fields():
 
     assert "period_start_date" in result.columns
     assert "period_end_date" in result.columns
-    # start_time / end_time are derived in payloads.build_period, not carried by the pivot.
+    # start_time / end_time are derived in payloads.build_period, not carried by the rows.
     assert "period_start_time" not in result.columns
     assert "period_end_time" not in result.columns
     assert "period_recurrence_type" in result.columns
@@ -117,7 +109,6 @@ def test_compute_period_fields():
 
 
 def test_compute_period_fields_filters_null_dt_mat():
-    """Test that rows with null DT_MAT are filtered out."""
     from datetime import datetime
 
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
@@ -141,7 +132,6 @@ def test_compute_period_fields_filters_null_dt_mat():
 
 
 def test_compute_location_fields():
-    """Test that compute_location_fields creates all required fields."""
     from api.dia_log_client.models import RoadTypeEnum
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
         compute_location_fields,
@@ -152,7 +142,7 @@ def test_compute_location_fields():
             "LIBCO": ["Commune A", "Commune B"],
             "LIBRU": ["Rue 1", "Rue 2"],
             "geometry": [
-                "POINT (150000 6850000)",  # Valid EPSG:2154 (Lambert 93) coordinates for Brest area
+                "POINT (150000 6850000)",  # Lambert 93, Brest area
                 "LINESTRING (150000 6850000, 150100 6850100)",
             ],
         }
@@ -178,7 +168,6 @@ def test_compute_location_fields():
 
 
 def test_compute_location_fields_filters_null_geometry():
-    """Test that rows with null geometry are filtered out."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
         compute_location_fields,
     )
@@ -188,7 +177,7 @@ def test_compute_location_fields_filters_null_geometry():
             "LIBCO": ["Commune A", "Commune B", "Commune C"],
             "LIBRU": ["Rue 1", "Rue 2", "Rue 3"],
             "geometry": [
-                "POINT (150000 6850000)",  # Valid EPSG:2154 coordinates
+                "POINT (150000 6850000)",  # Lambert 93
                 None,
                 "LINESTRING (150000 6850000, 150100 6850100)",
             ],
@@ -202,7 +191,7 @@ def test_compute_location_fields_filters_null_geometry():
 
 
 def test_compute_regulation_fields(data_source):
-    """Test that compute_regulation_fields creates all required fields and groups by NOARR."""
+    """One regulation per NOARR, titled from its first row."""
     df = pl.DataFrame(
         {
             "NOARR": ["REG001", "REG001", "REG002"],
@@ -223,15 +212,13 @@ def test_compute_regulation_fields(data_source):
 
     assert result["regulation_identifier"].to_list() == ["REG001-0", "REG001-0", "REG002-0"]
     assert result["regulation_title"][0] == "Limitation Vitesse – Rue A"
-    assert result["regulation_title"][1] == "Limitation Vitesse – Rue A"  # Same as first row
+    assert result["regulation_title"][1] == "Limitation Vitesse – Rue A"
     assert result["regulation_title"][2] == "Stationnement interdit – Rue C"
     assert result["regulation_other_category_text"][0] == "Circulation"
     assert result["regulation_document_url"][0] is None
 
 
 def test_compute_regulation_fields_with_url(data_source):
-    """Test that compute_regulation_fields includes URL
-    in regulation_document_url when available."""
     df = pl.DataFrame(
         {
             "NOARR": ["REG001", "REG001", "REG002"],
@@ -255,7 +242,6 @@ def test_compute_regulation_fields_with_url(data_source):
 
 
 def test_compute_measure_fields():
-    """Test that compute_measure_fields computes both measure_type_ and measure_max_speed."""
     from api.dia_log_client.models import MeasureTypeEnum
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
         compute_measure_fields,
@@ -283,7 +269,6 @@ def test_compute_measure_fields():
 
 
 def test_compute_measure_fields_filters_invalid_descriptif():
-    """Test that compute_measure_fields filters out rows with invalid DESCRIPTIF."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
         compute_measure_fields,
     )
@@ -303,7 +288,7 @@ def test_compute_measure_fields_filters_invalid_descriptif():
 
 
 def test_discard_misleading_rows():
-    """Test that discard_misleading_rows drops what DiaLog would publish wrong, and only that."""
+    """Drops what DiaLog would publish wrong, and only that."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
         discard_misleading_rows,
     )
@@ -368,7 +353,7 @@ def test_discard_misleading_rows():
 
 
 def test_read_free_text():
-    """Test that the free text is read in full, or reported as not read."""
+    """The free text is read in full, or reported as not read."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
         read_free_text,
     )
@@ -398,7 +383,7 @@ def test_read_free_text():
 
 
 def test_compute_vehicle_fields_restricts_to_the_threshold():
-    """Test that a gauge limit targets the vehicles over it, never every vehicle (R-33)."""
+    """A gauge limit targets the vehicles over it, never every vehicle (R-33)."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
         compute_vehicle_fields,
     )
@@ -438,8 +423,7 @@ def test_compute_vehicle_fields_restricts_to_the_threshold():
 
 
 def test_compute_vehicle_fields_reads_local_access():
-    """Test that "sauf desserte locale" becomes the desserteLocale exemption, next to the
-    exemptions the row already had, from its type or its CYCLO and VELO flags."""
+    """ "sauf desserte locale" adds desserteLocale to the exemptions the row already had."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
         compute_vehicle_fields,
     )
@@ -475,7 +459,6 @@ def test_compute_vehicle_fields_reads_local_access():
 
 
 def test_compute_measure_fields_filters_invalid_speed():
-    """Test that compute_measure_fields filters out SPEEDLIMITATION with invalid VITEMAX."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
         compute_measure_fields,
     )

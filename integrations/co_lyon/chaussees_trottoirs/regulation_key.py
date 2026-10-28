@@ -1,76 +1,46 @@
-"""Reading an order number out of the Métropole de Lyon free-text field.
-
-`precisionreglementation` is typed by hand by the 58 municipalities of the metropolitan
-area, so every spelling of "order number" coexists in it:
+"""Reading an order number out of `precisionreglementation`, hand-typed by 58 municipalities.
 
     ZCA : 2022 - Arrêté N°2024RP44520 du 29/09/2022
-    Arrêté n°2024CIR177610A1 du 10/10/24
     Arrêté N°UC 22-272 du 12/05/22
-    Arrêté n°VN-2021-AP-001 le 19/10/21
     Proposition zone apaisable = Zone 30 - Arrêté n°2021-055 le 02/06/21
 
-This is a level-3 identifier in the sense of R-20: the number is real, but it is
-recovered by parsing free text. If a clerk reformats their entry, the rule produces a
-different identifier and the pipeline creates a duplicate. The rule below absorbs the
-eight spellings observed on 2026-08-12; it will not absorb the ninth.
+A level-3 identifier (R-20): a clerk who reformats an entry creates a duplicate. The
+pattern absorbs the eight spellings observed on 2026-08-12, not a ninth.
 """
 
 import re
 from collections.abc import Iterable
 
-# « Arrêté N° », « Arrêté n », « Arrêté » — then the number, non-greedy, up to the first
-# closing delimiter. The number itself may contain a space ("UC 22-272") and a slash
-# ("08/2023").
 ORDER_NUMBER_PATTERN = re.compile(
-    # "Arrêté", and the spellings actually present: "Arrété" (é in first position,
-    # 2 rows) and "Arrêtéé" (doubled é, 2 rows).
+    # Also "Arrété" (2 rows) and "Arrêtéé" (2 rows).
     r"arr[eéê]t[eéê]{1,2}"
     # One word in between: "Arrêté permanent N° : AR-12/12/2025-17".
     r"(?:\s+permanent)?"
     # "N°", "n", "N° :", or nothing at all. Repeated: "Arrêté n°n°08/2023" exists.
     r"(?:\s*[Nn]\s*[°ºo]?)*"
     r"\s*:?\s*"
+    # Non-greedy; may hold a space ("UC 22-272") and a glued slash ("08/2023").
     r"([A-Za-z0-9][A-Za-z0-9\-/_\.\s]*?)"
-    # End of the number: a linking word, a punctuation mark, or the end of the string.
-    #
-    # A slash only closes it when **preceded by a space** ("N°A_2022_0839 / Proposition");
-    # glued to the digits it belongs to the number ("n°08/2023"). And only when no other
-    # order follows it: "N°2024RP44520 / Lim hauteur - Arrêté N°2022RP40610" ties the
-    # second number to the height limit those rows carry, so the slash must not close the
-    # first one and hand the row to the generic calmed-traffic order.
-    #
-    # A dash closes it only when what follows opens a new regulatory layer — "ZCA", "ZTL"
-    # or a vintage year. Segments stack several orders in one field, separated by a full
-    # stop, a dash or a line break, and the producer writes them **newest first** (counts
-    # and the 21 exceptions: `ai/docs/vers-l-equipe.md`, « Arrêtés cités mais jamais
-    # publiés »). So the first citation is the order in force, and the dash has to close
-    # the number for the first one to win. Qualified, because a number can hold a dash of
-    # its own:
-    # "Arrêté n°VOI-2023 - 120" (6 rows) and "Arrêté n°PV 2023 - 478" (3 rows) are single
-    # numbers, and a bare dash would truncate them into a different regulation.
-    #
-    # A colon is **not** a closing delimiter: only "Arrêté 607-2023 : circulation
-    # interdite…" (3 rows) would need it, and a colon is what separates "ZCA" from its
-    # vintage everywhere else.
+    # A spaced slash closes the number unless another order follows: in "N°2024RP44520 /
+    # Lim hauteur - Arrêté N°2022RP40610" the second order carries the height limit.
+    # Not a colon: only 3 rows would need it, and it separates "ZCA" from its vintage.
     r"(?=\s+(?:du|le|en|à)\s|\s+/(?!.*arr[eéê]t[eéê])"
+    # Orders stack newest first, so a dash closes the one in force, but only before "ZCA",
+    # "ZTL" or a year: "VOI-2023 - 120" (6 rows) and "PV 2023 - 478" (3) are one number.
     r"|\s+-\s(?=(?:ZCA|ZTL)\b|\d{4}\b)|[\r\n]|\.\s|\.$|,|$)",
     re.IGNORECASE,
 )
 
-# The annotation that marks a *project* rather than an order in force. 6 057 segments
-# carry it, and 5 985 of them are still limited to 50 km/h: reading the order number it
-# cites as a justification would publish 682 km of 30 km/h zones that do not exist.
-# "apaisable" is there to absorb the typo "Prpoposition zone apaisable" (1 row): the
-# word never appears outside a proposal.
+# Marks a project, not an order in force: 5 985 of its 6 057 segments are still at 50 km/h,
+# and reading its order number would publish 682 km of 30 km/h zones that do not exist.
+# "apaisab" catches the typo "Prpoposition" (1 row).
 PROJECT_PATTERN = re.compile(r"propos|apaisab", re.IGNORECASE)
 
 
 def order_number(text: str | None) -> str | None:
     """Order number read from the free-text field, or None.
 
-    Internal whitespace is collapsed and a trailing full stop dropped, so that one order
-    always yields one identifier. Case is preserved: source numbers are case-sensitive
-    (`2023P0051-LP`).
+    Case is kept: source numbers are case-sensitive (`2023P0051-LP`).
     """
     if not text:
         return None
@@ -83,12 +53,10 @@ def order_number(text: str | None) -> str | None:
 
 
 def order_key(number: str | None) -> str | None:
-    """Grouping key for an order number, blind to spelling variants.
+    """Grouping key blind to spelling variants: `2021 355RGC` and `2021_355RGC` are one act.
 
-    The same order is typed `2021 355RGC` or `2021_355RGC`, `2021-23` or `2021.23`.
-    Without this normalisation one act yields two DiaLog regulations, hence a duplicate.
-    Measured on the calmed-traffic zones: 558 raw numbers collapse to 555 keys, and the
-    three merges were checked one by one — same municipality, same date, same act.
+    On the calmed-traffic zones, 558 raw numbers collapse to 555 keys; the three merges
+    were checked one by one (same municipality, same date, same act).
     """
     if not number:
         return None
@@ -103,19 +71,11 @@ def is_project(text: str | None) -> bool:
 def foreign_order_keys(identifiers: Iterable[str], own_prefix: str) -> frozenset[str]:
     """Order keys already published in the organisation by a channel other than ours.
 
-    « Lyon (métropole) » holds ~800 regulations pushed by a channel absent from this
-    repository (P-04), whose identifiers are `{MUNICIPALITY}_{order number}`:
-    `LYON_2022RP40610`, `VAULX_EN_VELIN_22P010`, `SAINT-PRIEST_A_2022_0838`. Publishing
-    `MGL-CT-2022RP40610` next to `LYON_2022RP40610` would put one act twice in DiaLog,
-    with two contents, under two names — 19 such numbers on the 2026-09-22 draw.
-
-    The municipality prefix follows no convention (52 spellings), so the number is not
-    read at a fixed position: every suffix cut at an underscore is a candidate —
-    `A_2022_0838`, `2022_0838`, `0838` — plus the whole identifier for the few typed
-    without a prefix (`2023-ZFE-006`). Each candidate is normalised like our own keys.
-    Cutting at underscores only, rather than matching a trailing substring, is what
-    keeps `2019` from colliding with `TASSIN_2019_145`: the false positives found on
-    2026-08-12 (`2019`, `2021`, `7575`) do not appear.
+    That channel's ~800 identifiers read `{MUNICIPALITY}_{number}` (`LYON_2022RP40610`);
+    publishing `MGL-CT-2022RP40610` too would put one act twice in DiaLog (19 numbers on
+    2026-09-22). The prefix follows no convention (52 spellings), so every suffix cut at
+    an underscore is a candidate; cutting at underscores rather than matching a trailing
+    substring keeps `2019` from matching `TASSIN_2019_145`.
     """
     keys: set[str] = set()
     for identifier in identifiers:

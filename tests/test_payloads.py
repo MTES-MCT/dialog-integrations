@@ -1,4 +1,4 @@
-"""From pivot rows to API DTOs: the period, with or without daily time slots; the location
+"""From canonical rows to API DTOs: the period, with or without daily time slots; the location
 and the vehicles as the API reads them; the way rows fold into measures and regulations."""
 
 import polars as pl
@@ -40,7 +40,7 @@ def test_a_source_that_never_produced_the_column_is_unaffected():
 
 
 def test_time_slots_become_api_objects():
-    """The API expects SaveTimeSlotDTO objects, not the plain mappings the pivot holds."""
+    """The API expects SaveTimeSlotDTO objects, not the plain mappings the canonical rows hold."""
     dto = period(
         period_time_slots=[
             {"start_time": "2026-08-25T08:00:00+02:00", "end_time": "2026-08-25T17:30:00+02:00"},

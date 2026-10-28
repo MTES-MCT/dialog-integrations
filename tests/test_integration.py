@@ -107,7 +107,7 @@ def _snapshot(tmp_path) -> dict:
 
 
 def test_an_update_goes_through_put_and_never_delete_then_post(monkeypatch, tmp_path):
-    # DELETE then POST loses the regulation when the POST fails (D-06).
+    # DELETE then POST loses the regulation when the POST fails.
     store = SnapshotStore("co_test", "fake", base_dir=tmp_path)
     store.save(
         {f"{PREFIX}a": compute_regulation_digest(build_regulation(f"{PREFIX}a", max_speed=50))}
@@ -521,7 +521,7 @@ from tests.sync.test_dating import _read, _read_measure  # noqa: E402
 
 
 def _undated_rows(identifiers) -> pl.DataFrame:
-    """Permanent rows the source could not date, in the pivot's column names."""
+    """Permanent rows the source could not date, in the canonical model's column names."""
     return measure_rows(identifiers).with_columns(
         pl.lit(None, dtype=pl.String).alias("period_start_date"),
         pl.lit(None, dtype=pl.String).alias("period_end_date"),

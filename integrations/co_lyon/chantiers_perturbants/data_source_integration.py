@@ -1,34 +1,9 @@
-"""Métropole de Lyon — chantiers perturbants.
+"""Métropole de Lyon — chantiers perturbants: the disruption, not the administrative act.
 
-The layer publishes the **disruption**, not the administrative act: a work site with
-its footprint, its dates and the kind of hindrance it creates. It is a snapshot of
-what is going on right now — a site that ends simply disappears from the layer.
-
-Measured over three draws (12/08, 17/08 and 02/09/2026, 995 rows in total), that
-lifecycle is well behaved:
-
-- every single row carries both a start and an end date — no exception;
-- of 182 sites that vanished over 21 days, **182 had an end date already in the
-  past**. The producer never withdraws a site before its declared end, so a
-  regulation published here expires on its own, on the right day;
-- only 2 of 194 common identifiers were extended over 16 days.
-
-Known gaps, all measured and all deliberate:
-
-- `url_document` and `document_joint` exist and are empty on every row: no link to
-  the act, so nothing is sent in `regulation_document_url`;
-- `validite` is "A vérifier" on 100 % of rows and `avancement` is "Chantier en cours"
-  on 100 % of them, including sites that start in the future — neither can be used
-  to filter;
-- `Circulation réduite` (a narrowed carriageway) has no equivalent among DiaLog's
-  five measure types and is dropped under R-32 bis, as is `Circulation sens unique`
-  under R-32 for want of a direction column;
-- `descripchantierinternet` is free text that nuances the restriction — hours, "sauf
-  riverains", but also a direction, a weekend reopening, 15-minute closures. Only the
-  first two can be expressed, so a row is published only when its description is read
-  in full (R-78, `description.py`).
-
-Volumes dropped per motive are logged at each run.
+The layer is a snapshot: a site that ends disappears from it. Over three draws (12/08,
+17/08 and 02/09/2026, 995 rows), every row had both dates and all 182 vanished sites
+were past their end date, so a regulation published here expires on its own, on the
+right day. `validite` and `avancement` hold one value on 100 % of rows: neither filters.
 """
 
 import datetime
@@ -54,10 +29,8 @@ from .schema import LyonChantiersPerturbantsRawDataSchema
 
 WFS_LAYER = "pvo_patrimoine_voirie.pvochantierperturbant"
 
-# `typeperturbation` is the only column that says what is actually regulated. The
-# vocabulary is closed and stable: the same nine values across all three draws, no
-# arrival and no departure. Values absent from this table are counted and dropped,
-# never guessed.
+# Closed vocabulary, the same nine values over three draws; any other value is counted and
+# dropped, never guessed.
 MEASURE_TYPE_BY_PERTURBATION = {
     "Circulation interdite": MeasureTypeEnum.NOENTRY.value,
     "Circulation interdite de jour": MeasureTypeEnum.NOENTRY.value,
@@ -65,9 +38,8 @@ MEASURE_TYPE_BY_PERTURBATION = {
     "Circulation alternée": MeasureTypeEnum.ALTERNATEROAD.value,
     "Circulation alternée de jour": MeasureTypeEnum.ALTERNATEROAD.value,
     "Circulation alternée de nuit": MeasureTypeEnum.ALTERNATEROAD.value,
-    # "Circulation réduite*" is a narrowed carriageway: no DiaLog type covers it
-    # (R-32 bis). "Circulation sens unique" would need a direction the layer does
-    # not carry (R-32). Both are dropped and counted.
+    # Dropped: "Circulation réduite*" has no DiaLog type (R-32 bis), "Circulation sens
+    # unique" needs a direction the layer lacks (R-32).
 }
 
 # Above this, a "temporary" restriction stops looking temporary. It is reported, not
@@ -109,12 +81,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Map `typeperturbation` to a DiaLog measure type.
-
-    Produces `measure_type_` and `measure_max_speed` (always null: the layer carries
-    no speed). Drops every row whose perturbation has no DiaLog equivalent, counted
-    by value.
-    """
+    """Map `typeperturbation` to a DiaLog measure type, dropping and counting the rest."""
     df = df.with_columns(
         pl.col("typeperturbation")
         .replace_strict(MEASURE_TYPE_BY_PERTURBATION, default=None, return_dtype=pl.Utf8)
@@ -140,29 +107,10 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Read the description in full, or drop the row (R-78).
 
-    The description is the only place where the producer nuances the restriction, and
-    DiaLog can express two of those nuances: daily hours and a resident exemption. A
-    row is kept only when nothing else is written there — the rest (a direction, a
-    weekend reopening, 15-minute closures…) would otherwise be published as a stronger
-    restriction than stated. Three checks, each counted:
-
-    1. the type says "de jour" / "de nuit" but no hours can be read: the restriction
-       is *known* to be partial, publishing it around the clock overstates it;
-    2. a clock reading is left out of a pair (`de 7h à 17h, réouverture à 18h`): the
-       hours were not read in full;
-    3. once hours and `sauf riverains` are removed, more than a few connector
-       characters remain: the description says something we cannot express.
-
-    Hours read in full are published as read, whatever the type says: "de jour" / "de
-    nuit" only tells that hours exist, the description tells which. Until 2026-10-10 a
-    night type had to cross midnight, which dropped `de nuit` + `De 1h30 à 4h30`
-    (decision of Thibaut: a clear reading is enough, no theoretical night window).
-
-    A type without "de jour" / "de nuit" and no description stays around the clock,
-    which is the legitimate default. If such a description states hours anyway, they
-    are used: publishing 24/7 a restriction the source describes as `7h-17h` would be
-    just as wrong. The hours are assumed to be those of the restriction, not of the
-    crew's presence (a work site does not open and close in an instant).
+    Hours read in full are published whatever the type says: "de jour" / "de nuit" only
+    tells that hours exist, and a night slot need not cross midnight (decided 2026-10-10).
+    Hours on a type without either are used too, as 24/7 would be just as wrong. They are
+    taken as the restriction's hours, not the crew's.
     """
     clock_slots = pl.Struct({"start": pl.Utf8, "end": pl.Utf8})
     reading = pl.Struct(
@@ -184,8 +132,7 @@ def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
     df = df.with_columns(
         pl.col("descripchantierinternet")
         .cast(pl.Utf8)
-        # An empty description is not a missing answer: it means "no hours stated".
-        # Skipping nulls would leave the columns null, and null is not a length of zero.
+        # A null description means "no hours stated", not an unknown: read it as empty.
         .map_elements(read, return_dtype=reading, skip_nulls=False)
         .alias("_reading")
     ).unnest("_reading")
@@ -227,12 +174,10 @@ def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Temporary period, from `debutchantier` to `finchantier`, plus its daily slots.
+    """Temporary period from `debutchantier` to `finchantier`, with its daily slots.
 
-    Drops rows without both dates, rows ending before they start (R-38), and rows
-    already over (R-40). Long durations are **reported, not dropped**: whether a
-    multi-year "temporary" restriction is a data defect or a real one is a case-by-case
-    call, and silently discarding it hides the question.
+    Long durations are reported, not dropped: whether a multi-year "temporary" restriction
+    is a defect or real is a case-by-case call (R-38, R-40 for the dropped rows).
     """
     missing = pl.col("debutchantier").is_null() | pl.col("finchantier").is_null()
     n_missing = df.select(missing.sum()).item()
@@ -246,11 +191,8 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
         logger.warning(f"Dropping {n_inverted} rows ending before they start")
     df = df.filter(~inverted)
 
-    # The producer withdraws a work site from the layer on its end date, so this catches
-    # nothing on an ordinary day: it is the guard against a stale row being *created* as
-    # a restriction already over (R-40). Kept local to this source on purpose — the
-    # other sources have their own withdrawal habits, and a shared rule would only add
-    # noise to their logs. A site ending today is still in force until midnight.
+    # The producer withdraws a site on its end date, so this only guards against creating a
+    # stale row (R-40). Local on purpose: other sources withdraw on their own habits.
     expired = pl.col("finchantier") < today_in_paris()
     n_expired = df.select(expired.sum()).item()
     if n_expired:
@@ -289,10 +231,8 @@ def today_in_paris() -> datetime.date:
 def warn_long_durations(df: pl.DataFrame) -> None:
     """Report the work sites that last longer than a restriction plausibly can.
 
-    A multi-year "temporary" restriction is the defect that degraded DiaLog's feed
-    quality in the past, so it must never pass unnoticed — but the layer also carries
-    genuine multi-year sites, and end dates falling on 31 December that look like a
-    default rather than a decision. Both leave through this warning.
+    Multi-year "temporary" restrictions have degraded DiaLog's feed before, but the layer
+    also has genuine ones, and 31 December end dates that look like a default.
     """
     duration = (pl.col("finchantier") - pl.col("debutchantier")).dt.total_days()
     long_running = df.filter(duration > LONG_DURATION_WARNING_DAYS).sort(
@@ -315,17 +255,10 @@ def warn_long_durations(df: pl.DataFrame) -> None:
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """The work site's footprint, published as a DiaLog `zone`.
+    """The work site's footprint, published as a DiaLog `zone`, one per Polygon part.
 
-    The layer gives a MultiPolygon footprint, not the road centreline. Since the
-    `zone` road type (API, September 2026), DiaLog does the conversion itself: it
-    computes the street segments covered by the polygon and uses them as the effective
-    geometry, so what reaches the satnavs is road segments, as everywhere else. A zone
-    covering no street is refused by the API (HTTP 400): that row then fails alone,
-    since every site is its own regulation.
-
-    `zone` takes a single GeoJSON Polygon. Every footprint drawn so far has exactly one
-    part; a multi-part footprint becomes one zone per part, all on the same measure.
+    DiaLog turns it into the street segments it covers. A zone covering no street is
+    refused (HTTP 400) and fails alone, each site being its own regulation.
     """
     n_missing = df.select(pl.col("geometry").is_null().sum()).item()
     if n_missing:
@@ -360,10 +293,9 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def polygons_of(geometry: str | None) -> list[str] | None:
-    """Split a GeoJSON geometry into the Polygons a `zone` accepts, serialized.
+    """Split a GeoJSON geometry into the serialized Polygons a `zone` accepts.
 
-    A Polygon is returned as is; a MultiPolygon becomes one Polygon per part. Any
-    other geometry type is not a footprint and yields nothing, so the row is dropped.
+    Any other geometry type is not a footprint and yields nothing, so the row is dropped.
     """
     if geometry is None:
         return None
@@ -380,16 +312,11 @@ def polygons_of(geometry: str | None) -> list[str] | None:
 
 
 def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """One work site = one regulation, carrying one measure.
+    """One work site = one regulation `MGL-CHP-{gid}`, carrying one measure.
 
-    **Identifier rule:** `MGL-CHP-{gid}`, where `gid` is the layer's own key, unique
-    on every draw and stable over the control window (0 reattribution on 301 common
-    identifiers). The commune is deliberately *not* part of the identifier: a site
-    whose commune is corrected afterwards would otherwise become a second regulation
-    (measured case, file 202607828, Francheville → Tassin la Demi Lune).
-
-    The `MGL-` prefix keeps this source in its own namespace, away from the
-    `LYON_…` identifiers the organization already receives from another channel.
+    `gid` held over the control window (0 reattribution on 301 common identifiers). The
+    commune is left out: a corrected commune would make a second regulation (file
+    202607828, Francheville → Tassin la Demi Lune).
     """
     # The producer's free text keeps trailing spaces (« Travaux de branchement  »).
     title = pl.col("nomchantier").cast(pl.Utf8).str.strip_chars().fill_null("Chantier")
@@ -423,9 +350,7 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """No vehicle column in the layer: the restriction applies to everyone (R-34) —
-    except residents when the description says `Sauf riverains` (R-36, `localResident`).
-    """
+    """Every vehicle (R-34), except residents when the description says so (R-36)."""
     exempts_residents = (
         pl.col("descripchantierinternet")
         .cast(pl.Utf8)

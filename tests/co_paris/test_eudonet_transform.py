@@ -332,7 +332,7 @@ def test_the_catalog_table_is_complete():
 
 
 def test_an_unknown_measure_label_is_dropped_with_a_warning(captured_logs):
-    """Paris can enrich the catalog: a new value is never guessed (Q-05), nor stops the run."""
+    """Paris can enrich the catalog: a new value is never guessed, nor stops the run."""
     unknown = make_row(m_file_id=11, m_type="interdiction de klaxonner", l_file_id=None)
     known = make_row()
 
@@ -654,11 +654,8 @@ def test_hazardous_materials_have_their_own_type():
 
 
 def test_a_length_in_metres_is_not_turned_into_a_dimension():
-    """The label never says which dimension, and no measure of the dump precises it (R-35).
-
-    Checked on the 26 325 measures of the 2026-09-08 dump: not one carries a
-    `longueur` / `hauteur` / `largeur` value beside "aux véhicules de plus de N mètres".
-    """
+    """The label never says which dimension, and none of the 26 325 measures of 2026-09-08
+    carries a length, height or width beside it (R-35)."""
     row = make_row(
         m_type="limitation dimensionnelle",
         m_params=[
@@ -689,7 +686,7 @@ def test_a_category_without_an_equivalent_becomes_other_plus_its_label():
 
 @pytest.mark.parametrize("label", ["cycles", "aux véhicules de plus de 12 T"])
 def test_a_restriction_outside_the_closed_list_drops_its_measure(label, captured_logs):
-    """Cycles are never restricted (R-34); a new value waits for a human (Q-58)."""
+    """Cycles are never restricted (R-34); a new value waits for a human."""
     row = make_row(m_type="limitation catégorielle", m_params=[["véhicule concerné (1)", label]])
     assert pipeline(row).height == 0
     assert any("outside the closed list" in line and label in line for line in captured_logs)
@@ -904,7 +901,7 @@ def test_a_temporary_regulation_longer_than_a_year_is_kept_but_counted(captured_
     assert any("last more than a year" in line for line in captured_logs)
 
 
-def test_every_produced_column_survives_the_pivot(clean):
+def test_every_produced_column_survives_the_canonical_selection(clean):
     contract = set(RegulationMeasure.__annotations__)
     produced = {
         column
@@ -914,7 +911,7 @@ def test_every_produced_column_survives_the_pivot(clean):
     assert produced <= contract, sorted(produced - contract)
 
 
-def test_the_pivot_keys_this_step_owns_are_all_produced(clean):
+def test_the_canonical_keys_this_step_owns_are_all_produced(clean):
     expected = {
         "regulation_identifier",
         "regulation_title",

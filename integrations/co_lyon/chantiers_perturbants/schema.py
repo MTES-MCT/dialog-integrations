@@ -1,8 +1,6 @@
-"""Schema for the Métropole de Lyon "chantiers perturbants" WFS layer.
+"""Schema for the Métropole de Lyon "chantiers perturbants" WFS layer, used columns only.
 
-Only the columns we actually use are declared. Anything else is dropped before
-validation, and a column that disappears upstream fails the whole integration —
-which is the point: a silent schema change must not become silent data loss.
+A column that disappears upstream fails the whole integration rather than losing data.
 """
 
 from datetime import date
@@ -25,5 +23,5 @@ class LyonChantiersPerturbantsRawDataSchema(pa.DataFrameModel):
     geometry: str | None = pa.Field(nullable=True)
 
     class Config(pa.DataFrameModel.Config):
-        strict = False  # Allow extra columns
-        coerce = True  # Allow type coercion during validation
+        strict = False
+        coerce = True

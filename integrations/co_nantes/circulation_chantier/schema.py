@@ -1,5 +1,3 @@
-"""Schema for Nantes Circulation Chantier."""
-
 import pandera.polars as pa
 
 

@@ -1,11 +1,8 @@
-"""Day-over-day check of what the organization holds in DiaLog against what we produce.
+"""Day-over-day totals: what the organization holds in DiaLog against what we produce.
 
-The report counts what the pipeline produces. When identifiers are not stable, DiaLog
-fills up with the old ones and nothing in a single run shows it (co_nantes on the
-staging, 2026-09-29: 3 907 regulations for 793 produced).
-
-It also keeps each source's count: an empty or truncated export would otherwise read as
-the whole corpus leaving the source, and below the caps it would all be closed or deleted.
+Unstable identifiers fill DiaLog with old ones unseen in a single run (co_nantes on the
+staging, 2026-09-29: 3 907 regulations for 793 produced). Each source's count is kept too:
+an empty export would read as the whole corpus leaving the source.
 """
 
 from __future__ import annotations
@@ -29,7 +26,6 @@ VOLUME_DROP_SHARE = 0.7
 class Totals:
     dialog_in_prefix: int
     produced: int
-    # Empty in files written before 2026-10.
     sources: dict[str, int] = field(default_factory=dict)
 
 

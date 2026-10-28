@@ -13,11 +13,9 @@ CATEGORY_LABELS = {
 
 
 def dataset_label(source: BaseDataSourceIntegration, clean_data: pl.DataFrame) -> str:
-    """How the Tchap report names the dataset: "permanent" or "temporaire".
+    """ "permanent" or "temporaire" from the regulations produced, else the source's name.
 
-    Read from the regulations the source produced. A source may set `report_label`
-    instead, to be reported apart from the others of its kind. When the data says
-    nothing (no rows, or both kinds), the source keeps its own name.
+    A source sets `report_label` to be reported apart from the others of its kind.
     """
     label = getattr(source, "report_label", None)
     if isinstance(label, str) and label:

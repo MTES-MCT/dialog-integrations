@@ -124,8 +124,7 @@ def test_a_corrupted_snapshot_reads_as_missing(tmp_path):
     with gzip.open(store.path, "wt", encoding="utf-8") as handle:
         handle.write("{not json")
 
-    # Guessing its content could cost a mass rewrite; a missing snapshot only costs
-    # a day of updates.
+    # Guessing its content could cost a mass rewrite.
     assert store.load() is None
 
 
@@ -137,8 +136,8 @@ def test_the_state_directory_can_be_moved_with_an_environment_variable(monkeypat
 
 
 def test_a_snapshot_of_another_version_is_treated_as_missing(tmp_path):
-    # Version 1 digested the run day as the start of an undated permanent period; its
-    # digests would flag every such regulation. One day without updates instead.
+    # Version 1 digested undated permanent periods with the run day: every such regulation
+    # would look changed.
     store = SnapshotStore("co_test", "fake", base_dir=tmp_path)
     store.save({"A-1": compute_regulation_digest(build_regulation("A-1"))})
     with gzip.open(store.path, "rt", encoding="utf-8") as handle:

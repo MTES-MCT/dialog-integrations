@@ -57,7 +57,7 @@ def build_regulation(
 
 
 def measure_rows(identifiers, max_speed: int = 30) -> pl.DataFrame:
-    """One clean row per identifier, in the pivot's column names."""
+    """One clean row per identifier, in the canonical model's column names."""
     return pl.DataFrame(
         [
             {

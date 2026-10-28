@@ -14,9 +14,8 @@ PAUSED = "paused"
 VOLUME = "volume"
 
 
-# The pipeline does not redo the API's checks, so a few refusals are expected every
-# night (2026-09-24: 2 at Brest, 2 in Sarthe, 1 at Rennes). Flagged beyond the larger
-# of these; chosen on 2026-09-29.
+# A few refusals are expected every night (2026-09-24: 2 at Brest, 2 in Sarthe, 1 at
+# Rennes): flagged beyond the larger of floor and share, chosen on 2026-09-29.
 REJECTION_ALERT_FLOOR = 10
 
 
@@ -34,8 +33,7 @@ class IntegrationOutcome:
     deleted: int = 0
     # None for organizations that do not close what left their source.
     closed: int | None = None
-    # Outages do not fail the run (D-05): the CI marks a run failed only when the
-    # command itself exits non-zero.
+    # Outages do not fail the run: only a non-zero exit of the command does.
     error_causes: dict[str, int] = field(default_factory=dict)
     rejections: int = 0
     # Regulations the pipeline itself left out (a zone over parallel roads, a failed check,
@@ -44,13 +42,10 @@ class IntegrationOutcome:
     planned: dict[str, int] = field(default_factory=dict)
     held: dict[str, int] = field(default_factory=dict)
     source: dict[str, int] = field(default_factory=dict)
-    # The corpus, for the Tchap message: rows read from the sources, and the
-    # regulations and measures that are in DiaLog after the run — what was produced,
-    # minus what could not be created (held, refused, or failed).
+    # Rows read from the sources; `regulations` and `measures` are those in DiaLog after
+    # the run: produced, minus held, refused or failed creations.
     raw_rows: int | None = None
-    # One entry per dataset ("permanent", "temporaire"): the regulations and measures
-    # in DiaLog after the run, and the restrictions the dataset states versus those the
-    # pipeline retained, whose ratio is the share of the dataset retained.
+    # One entry per dataset ("permanent", "temporaire"), with its share retained.
     datasets: list[dict] = field(default_factory=list)
     regulations: int = 0
     measures: int = 0

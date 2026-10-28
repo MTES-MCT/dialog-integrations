@@ -4,7 +4,7 @@ import json
 
 import polars as pl
 
-from canonical.regulation_measure import unknown_pivot_columns
+from canonical.regulation_measure import unknown_canonical_columns
 from checks import rows as checks
 from tests.sync_fixtures import measure_rows
 
@@ -64,7 +64,7 @@ def test_coordinates_out_of_bounds_or_in_latitude_longitude_order_fail():
     }
 
 
-def test_a_column_named_like_the_pivot_but_missing_from_it_is_reported():
-    assert unknown_pivot_columns(
+def test_a_column_named_like_the_canonical_model_but_missing_from_it_is_reported():
+    assert unknown_canonical_columns(
         ["regulation_identifier", "vehicle_critair_types", "locaton_label", "location_lable"]
     ) == ["location_lable", "vehicle_critair_types"]

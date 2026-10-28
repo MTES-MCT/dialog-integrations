@@ -4,11 +4,7 @@ import pandera.polars as pa
 
 
 class AveyronPrescriptionsRoutieresRawDataSchema(pa.DataFrameModel):
-    """Schema for the raw Aveyron restriction gabarits data.
-
-    The producer ships every numeric column as a string. Declaring the target types here
-    makes `coerce` do the conversion once, and fail loudly if a value is not convertible.
-    """
+    """The producer ships numbers as strings: `coerce` converts them, or fails loudly."""
 
     geo_point_2d: bytes | None = pa.Field(nullable=True)
     geo_shape: bytes | None = pa.Field(nullable=True)
@@ -24,7 +20,5 @@ class AveyronPrescriptionsRoutieresRawDataSchema(pa.DataFrameModel):
     observatio: str | None = pa.Field(nullable=True)
 
     class Config(pa.DataFrameModel.Config):
-        """Config for the schema."""
-
         strict = False  # Allow extra columns in raw data
         coerce = True  # Allow type coercion during validation

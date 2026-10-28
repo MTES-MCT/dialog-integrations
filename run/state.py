@@ -40,9 +40,8 @@ def save_snapshots(
     snapshot_by_source: dict[str, dict[str, Digest]],
     written: Written,
 ) -> None:
-    # Closed today, missing from the source and still in DiaLog, or not built
-    # today: these stay in the snapshot so tomorrow knows they have ended (or
-    # retries a closure that failed or was held, or an update the build missed).
+    # Closed, missing but still in DiaLog, or not built today: they stay in the snapshot
+    # so tomorrow knows they ended, or retries what failed.
     carried: dict[str, Digest] = dict(written.closed_digests)
     previous = snapshot or {}
     remaining = {i for i in previous if is_part_of(i, production.unbuilt)}
@@ -80,9 +79,7 @@ def write_snapshots(
 ) -> None:
     """Record what is now in DiaLog, one snapshot per data source.
 
-    `carried` holds regulations absent from today's production that must stay in
-    the snapshot (closed, or already ended): each goes back to the source snapshot
-    that held it, or to the first source when no snapshot remembers it.
+    A `carried` regulation goes back to the snapshot that held it, or to the first source.
     """
     previous = snapshot or {}
     carried = carried or {}

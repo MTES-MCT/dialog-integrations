@@ -1,9 +1,7 @@
 """Read-only client for the Eudonet REST API used by the City of Paris.
 
-Eudonet exposes one generic endpoint per table (`POST /Search/{table}`) with a page size
-capped at 50 rows. Everything else — the criteria tree, the catalog values, the parent
-links — is expressed with numeric field identifiers (`descId`), which the API lists
-itself (`GET /MetaInfos/ListTabs/`, `POST /MetaInfos/`, Swagger under `/eudoapidoc/`).
+One endpoint per table (`POST /Search/{table}`), 50 rows per page; fields are numeric
+`descId`s, listed by the API itself (`POST /MetaInfos/`, Swagger under `/eudoapidoc/`).
 """
 
 import time
@@ -31,17 +29,15 @@ QUOTA_PAUSE_SECONDS = 20
 EMPTY_BATCH_PAUSE_SECONDS = 5
 # `IN_LIST` accepted 300 values in one criterion on 2026-09-08.
 IN_LIST_MAX_VALUES = 300
-# From this size, a batch that stays empty after a second read is a lost answer, not data:
-# 2.2 % of the in-scope measures had no location on the 2026-09-08 dump, so twenty empty
-# together do not happen. Believed, it would amputate their regulations at the next update.
+# A batch this large that stays empty is a lost answer: 2.2 % of the measures had no location
+# on 2026-09-08, and believing it would amputate their regulations at the next update.
 EMPTY_BATCH_DISBELIEVED_FROM = 20
 DEFAULT_ATTEMPTS = 6
 DEFAULT_TIMEOUT = (10, 120)
 TOKEN_MARGIN = timedelta(minutes=5)
 FALLBACK_TOKEN_LIFETIME = timedelta(minutes=20)
 
-# `ExpirationDate` has been seen as ISO 8601; the other two are the formats the rest of the
-# API uses for dates, kept as a safety net.
+# `ExpirationDate` comes as ISO 8601; these are the API's other date formats, as a fallback.
 EXPIRATION_DATE_FORMATS = ("%d/%m/%Y %H:%M:%S", "%Y/%m/%d %H:%M:%S")
 
 Criterion = dict[str, Any]
@@ -87,11 +83,10 @@ def any_of(*criteria: Criterion) -> Criterion:
 
 
 def flatten_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Turn one API row into a flat dict.
+    """`{"FileId", "<descId>": Value, "<descId>_db": DbValue, "<descId>_fid": parent FileId}`.
 
-    `{"FileId": 1, "<descId>": Value, "<descId>_db": DbValue, "<descId>_fid": parent FileId}`
-    The `_fid` key only appears on link fields; that is how a measure points at its
-    regulation (`1101_fid`) and a location at its measure (`1202_fid`).
+    `_fid` only exists on link fields: a measure's regulation (`1101_fid`), a location's
+    measure (`1202_fid`).
     """
     flat: dict[str, Any] = {"FileId": row["FileId"]}
     for field in row.get("Fields") or []:
@@ -199,11 +194,10 @@ class EudonetClient:
         chunk: int = IN_LIST_MAX_VALUES,
         label: str = "",
     ) -> list[dict[str, Any]]:
-        """Rows whose `id_field` is one of `ids`, queried in chunks (operator `IN_LIST`).
+        """Rows whose `id_field` is one of `ids`, queried in `IN_LIST` chunks.
 
-        Used to pull the locations of a known set of measures, `id_field` being the parent
-        table's number: a location cannot be filtered on its regulation, two levels up
-        (error 204).
+        A location cannot be filtered on its regulation, two levels up (error 204), hence
+        reading it by its measures.
         """
         name = label or f"table {table}"
         identifiers = list(ids)
@@ -214,9 +208,8 @@ class EudonetClient:
             where = criterion(id_field, IN_LIST, ";".join(str(value) for value in batch))
             batch_rows = self.search_all(table, columns, where, label=f"{name} batch {index}")
             if not batch_rows:
-                # Seen live on 2026-09-08: a batch of 50 measures answered `TotalRows = 0`
-                # once, then 64 rows on every replay. An empty batch is plausible but rare,
-                # so it is read a second time before being believed.
+                # On 2026-09-08 a batch of 50 measures answered 0 rows once, then 64 on every
+                # replay: an empty batch is read twice before being believed.
                 logger.warning(
                     f"Eudonet {name} batch {index}: empty answer for {len(batch)} "
                     f"identifiers, reading it again in {EMPTY_BATCH_PAUSE_SECONDS} s"

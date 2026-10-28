@@ -1,9 +1,5 @@
-"""Tests for the Nantes work-site layer: the identifier must survive a reload.
-
-The producer reloads the layer every working day and renumbers `gid` and `objectid`.
-The regulation is keyed on `numero_chantier`, and its rows are sorted, so that a reload
-changes neither the identifiers nor the order of the measures.
-"""
+"""The Nantes identifiers and measure order must survive the daily reload, which renumbers
+`gid` and `objectid`."""
 
 import polars as pl
 

@@ -12,7 +12,7 @@ import polars as pl
 import pytest
 
 import registry
-from canonical.regulation_measure import unknown_pivot_columns
+from canonical.regulation_measure import unknown_canonical_columns
 from checks import rows as checks
 from run.organization import BaseIntegration
 from settings import Organization
@@ -84,8 +84,8 @@ WITH_FIXTURE = [
 
 @pytest.fixture(autouse=True)
 def _no_reference_downloads(monkeypatch):
-    """Reference data a source downloads besides its own (a territory's outline) is
-    replaced by a stand-in that keeps everything: the fixture is the subject here."""
+    """A territory's outline is replaced by one that keeps everything: the fixture is the
+    subject here."""
     from shapely.geometry import box
 
     from toolkit.transforms.perimeter import Perimeter
@@ -102,18 +102,18 @@ def _clean_data(organization, source_class) -> pl.DataFrame:
 
 
 @pytest.mark.parametrize("organization, source", WITH_FIXTURE, ids=_id)
-def test_a_source_names_no_column_the_pivot_lacks(organization, source):
+def test_a_source_names_no_column_the_canonical_model_lacks(organization, source):
     clean = _clean_data(organization, source)
 
-    assert unknown_pivot_columns(clean.columns) == []
+    assert unknown_canonical_columns(clean.columns) == []
 
 
 @pytest.mark.parametrize("organization, source", WITH_FIXTURE, ids=_id)
 def test_a_source_passes_the_common_checks(organization, source):
     instance = source(SimpleNamespace(organization=organization), client=None)
-    pivot = instance.select_regulation_measure_fields(_clean_data(organization, source))
+    canonical_rows = instance.select_regulation_measure_fields(_clean_data(organization, source))
 
-    failing = checks.failing_rows(pivot)
+    failing = checks.failing_rows(canonical_rows)
 
     assert failing.is_empty(), failing.group_by("reason").len().to_dicts()
 
@@ -125,9 +125,11 @@ def test_a_source_builds_the_same_regulations_twice_inside_its_prefix(organizati
     instance = source(SimpleNamespace(organization=organization), client=None)
 
     def build():
-        pivot = instance.select_regulation_measure_fields(_clean_data(organization, source))
+        canonical_rows = instance.select_regulation_measure_fields(
+            _clean_data(organization, source)
+        )
         unbuilt: set[str] = set()
-        regulations = integration.create_regulations(pivot, source, unbuilt)
+        regulations = integration.create_regulations(canonical_rows, source, unbuilt)
         return {str(r.identifier): compute_regulation_digest(r) for r in regulations}, unbuilt
 
     first, unbuilt = build()

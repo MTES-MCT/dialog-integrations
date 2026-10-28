@@ -40,18 +40,14 @@ class C(NamedTuple):
 
 
 DESCRIPTION_CONFIG = {
-    # Limitations de vitesse
     "Limitation Vitesse": C(MTE.SPEEDLIMITATION),
-    # Stationnement
     "Stationnement interdit": C(MTE.PARKINGPROHIBITED),
     "Arrêt interdit": C(MTE.PARKINGPROHIBITED),
     "Stationnement gênant": C(MTE.PARKINGPROHIBITED),
     "Stationnement interdit aux poids-lourds": C(MTE.PARKINGPROHIBITED, threshold_column="POIDS"),
-    # noEntry – limitations dimensionnelles (poids / hauteur)
     "Limitation Poids": C(MTE.NOENTRY, threshold_column="POIDS"),
     "Limitation Hauteur": C(MTE.NOENTRY, threshold_column="HAUTEUR"),
     "Interdit aux transports de marchandises": C(MTE.NOENTRY, threshold_column="POIDS"),
-    # noEntry – catégories particulières
     "Interdit dans les 2 sens": C(MTE.NOENTRY),
     "Interdit à  tous véhicules à moteur": C(MTE.NOENTRY, ["bicycle", "pedestrians"]),
     "Interdit aux véhicules à moteur sauf cyclos": C(
@@ -61,11 +57,9 @@ DESCRIPTION_CONFIG = {
     "Sens interdit / Sens unique": C(MTE.NOENTRY),
 }
 
-# CONDITION and DESCR nuance the restriction in free text. They are read in full or the
-# row is dropped (R-78): three wordings are understood, and once they are removed only
-# punctuation may remain. No grace in characters: on the 2026-09-24 feed the shortest
-# leftovers are "30" and "sauf", and both mean something.
-# "Desserte riveraine" is the producer's other word for it (Thibaut, 2026-09-25).
+# CONDITION and DESCR are read in full or the row is dropped (R-78): once the wordings below
+# are removed, only punctuation may remain. Even "30" or "sauf" means something (2026-09-24).
+# "Riveraine" is the producer's other word for it (confirmed 2026-09-25).
 LOCAL_ACCESS = re.compile(
     r"(?:sauf|excepté)\s+(?:la\s+)?desserte\s+(?:locale|riveraine)", re.IGNORECASE
 )
@@ -73,8 +67,7 @@ TIME_SLOT = re.compile(
     r"(?:interdit\s+)?(?:de|entre)\s+(\d{1,2})\s*h(\d{2})?\s*(?:à|et)\s+(\d{1,2})\s*h(\d{2})?",
     re.IGNORECASE,
 )
-# Notes that add nothing to what is published: parking "on the carriageway" is what a
-# road location already says, and a greenway is what a ban on motor vehicles makes.
+# Already said by a road location ("on the carriageway") or by a ban on motor vehicles.
 NEUTRAL_NOTE = re.compile(r"interdit\s+sur\s+chaussée|voie\s+verte", re.IGNORECASE)
 
 TEXT_READING = pl.Struct(
@@ -116,8 +109,6 @@ def text_reading(field: str) -> pl.Expr:
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
-    """Data source for Brest permanent lineaire shapefile data."""
-
     name = "permanent_lineaire"
     raw_data_schema = Schema
 
@@ -259,11 +250,8 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Measure type from DESCRIPTIF (DESCRIPTION_CONFIG), speed from VITEMAX.
-
-    Drops: DESCRIPTIF outside DESCRIPTION_CONFIG; speed limitations without a positive
-    VITEMAX.
-    """
+    """Measure type from DESCRIPTIF, speed from VITEMAX; unknown types and speed
+    limitations without a positive VITEMAX are dropped."""
     type_mapping = {
         descriptif: config.measure_type.value for descriptif, config in DESCRIPTION_CONFIG.items()
     }
@@ -291,18 +279,10 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 def discard_misleading_rows(df: pl.DataFrame) -> pl.DataFrame:
     """Drop the rows DiaLog would publish wrong; each motive is counted on the whole input
-    (R-79), a row can fall under several.
+    (R-79), so a row can count under several.
 
-    - "Sens interdit / Sens unique" is a one-way street whatever SENS says (orders
-      07700 and 07710, audit of 2026-09-23): as a rawGeoJSON location it would be
-      published as a street closed both ways. One-way data is frozen until DiaLog
-      carries the direction (R-32).
-    - SENS=1 is a restriction in one direction only: published in both (R-32). Only 0
-      means both ways; any other value is dropped with it.
-    - Free text in CONDITION or DESCR that says more than `read_free_text` understands:
-      a direction, another exemption, days of the week… (R-78).
-    - A weight, height or width restriction without its own threshold would apply to
-      every vehicle, or to the wrong ones (R-35).
+    A rawGeoJSON location carries no direction: "Sens interdit / Sens unique" is one-way
+    whatever SENS says (audit of 2026-09-23) and would come out closed both ways (R-32).
     """
     lacks_threshold = pl.any_horizontal(
         (pl.col("DESCRIPTIF") == descriptif) & ~(pl.col(config.threshold_column).fill_null(0) > 0)
@@ -328,11 +308,7 @@ def discard_misleading_rows(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Dimensions from POIDS / HAUTEUR / LARGEUR (0 means none); exemptions from
-    DESCRIPTION_CONFIG, else from the CYCLO (-> other) and VELO (-> bicycle) flags, plus
-    desserteLocale when CONDITION or DESCR says "sauf desserte locale" (or "riveraine");
-    heavyGoodsVehicle for a weight limit, dimensions for a height or width limit (R-33),
-    all vehicles otherwise."""
+    """Dimensions (0 means none), exemptions and restricted types (R-33)."""
     exempted_types_mapping = {
         descriptif: config.exempted_types for descriptif, config in DESCRIPTION_CONFIG.items()
     }

@@ -130,13 +130,9 @@ def update_all(
 ) -> tuple[list[str], list[str]]:
     """Replace every regulation; return (updated, deleted without their new version).
 
-    `PUT /api/regulations` replaces the regulation as a whole; DELETE-then-POST
-    would lose it when the POST fails (D-06).
-    A regulation with an undated period is read back first, so that the date DiaLog
-    holds survives the replacement (`sync/dating.py`).
-    A regulation carrying zones cannot go through PUT — the API answers 500 on it
-    (S-14), and the zone must be converted to sections again anyway — so it is
-    deleted and recreated through the zone flow.
+    PUT, not DELETE then POST, which would lose the regulation when the POST fails. A
+    zone regulation is the exception: the API answers 500 to its PUT, so it is deleted
+    and recreated through the zone flow.
     """
     updated: list[str] = []
     lost: list[str] = []
@@ -146,10 +142,8 @@ def update_all(
         logger.info(f"Updating regulation {index + 1}/{len(regulations)}: {identifier}")
         logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
 
-        # An undated permanent period keeps the date DiaLog already holds: a PUT
-        # replaces the regulation whole, so the date has to be read back first.
-        # Without that read the update would restart the regulation today — it is
-        # left for tomorrow instead.
+        # A PUT replaces the whole regulation: an undated period must keep the date DiaLog
+        # holds, or it restarts today. Unreadable, it waits for tomorrow.
         if has_undated_period(regulation):
             read = integration.api.get(identifier)
             if read is None:
@@ -179,11 +173,8 @@ def close_all(
 ) -> dict[str, Digest]:
     """Bring the end date of every identifier back to `closed_at`, keeping it in DiaLog.
 
-    The source no longer has the row, so each regulation is read back from DiaLog,
-    rebuilt as a write payload and sent through `PUT` with its periods clamped
-    (`sync/closure.py`). One that already ended on its own needs no write. Returns,
-    for every regulation now known to be closed, the digest of what DiaLog holds —
-    it goes into the snapshot so tomorrow skips it without a call.
+    The source no longer has it, so it is read back from DiaLog and rebuilt. Returns the
+    digest of every regulation now closed, for the snapshot: tomorrow skips it unread.
     """
     closed: dict[str, Digest] = {}
     for index, identifier in enumerate(identifiers):
@@ -220,11 +211,9 @@ def close_all(
 
 
 def delete_all(integration: BaseIntegration, identifiers: Sequence[str]) -> list[str]:
-    """DELETE every identifier; return those that are gone from DiaLog.
+    """DELETE every identifier, already checked against the prefix; return those gone.
 
-    Callers must have checked the prefix first: this method deletes what it is
-    given. An identifier already absent (404) counts as gone: the goal state is
-    reached and it leaves the snapshot.
+    An identifier already absent (404) counts as gone: it leaves the snapshot.
     """
     deleted: list[str] = []
     for index, identifier in enumerate(identifiers):

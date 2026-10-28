@@ -84,7 +84,7 @@ def test_an_export_of_another_shape_is_read_as_unreadable(monkeypatch):
     assert "2024T11570" in _eudonet_source().fetch_numbers_published_elsewhere()
 
 
-def test_the_pipeline_runs_from_the_fixture_to_the_pivot(integration):
+def test_the_pipeline_runs_from_the_fixture_to_the_canonical_model(integration):
     for data_source in integration.data_sources:
         source = data_source(integration.organization_settings, integration.client)
 

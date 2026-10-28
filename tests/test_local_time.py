@@ -1,8 +1,7 @@
 """Period bounds must leave as French local time, with the offset of the day.
 
-Regression guard for the encoding bug measured on staging: `%Y-%m-%dT00:00:00Z`
-published every regulation two hours late in summer, one in winter, and ended it
-as the last day began.
+A `Z` suffix published every regulation two hours late in summer, one in winter, and
+ended it as the last day began (measured on the staging).
 """
 
 from datetime import date, datetime
@@ -71,18 +70,14 @@ def test_the_two_transition_days_change_offset_mid_day(day, expected_start, expe
 
 
 def test_an_aware_column_keeps_its_own_calendar_day():
-    """Casting an aware column straight to Datetime rebases it on UTC.
-
-    14:30 CEST would become a naive 12:30, which is harmless here — but 00:30 CEST
-    would become 22:30 the day before, moving the regulation to the wrong day.
-    """
+    """Cast straight to Datetime, an aware 00:30 CEST would become 22:30 the day before."""
     assert start(aware_frame(datetime(2026, 9, 1, 14, 30))) == "2026-09-01T00:00:00+02:00"
     assert start(aware_frame(datetime(2026, 9, 1, 0, 30))) == "2026-09-01T00:00:00+02:00"
     assert end(aware_frame(datetime(2026, 9, 1, 0, 30))) == "2026-09-01T23:59:59+02:00"
 
 
 def test_nothing_leaves_labelled_as_utc():
-    """The old encoding appended `Z`, which DiaLog reads as a genuine UTC instant."""
+    """DiaLog reads a `Z` suffix as a genuine UTC instant."""
     for value in (start(naive_frame(date(2026, 7, 1))), end(naive_frame(date(2026, 7, 1)))):
         assert not value.endswith("Z")
         assert value.endswith("+02:00")

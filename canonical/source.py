@@ -5,7 +5,7 @@ import polars as pl
 from loguru import logger
 
 from api.dia_log_client import Client
-from canonical.regulation_measure import RegulationMeasure, unknown_pivot_columns
+from canonical.regulation_measure import RegulationMeasure, unknown_canonical_columns
 from settings import OrganizationSettings
 
 
@@ -22,12 +22,11 @@ class BaseDataSourceIntegration:
 
     # Opt-in: collapse the rows sharing a `measure_group_key` into a single measure
     # carrying every one of their locations (R-28). Off by default: the sources already
-    # in production emit one measure per row (D-18).
+    # in production emit one measure per row.
     group_locations_by_measure: bool = False
 
-    # Opt-in: hard ceiling on the number of locations a single POST may carry. Above it
-    # the regulation is cut into `IDENTIFIER-01`, `IDENTIFIER-02`… slices, ordered by
-    # `regulation_split_order`. `None` means no ceiling.
+    # Most locations a single POST may carry: above it the regulation is cut into
+    # `IDENTIFIER-01`, `IDENTIFIER-02`… slices, ordered by `regulation_split_order`.
     max_locations_per_regulation: int | None = None
     organization_settings: OrganizationSettings
     client: Client
@@ -40,12 +39,8 @@ class BaseDataSourceIntegration:
     def organization(self) -> str:
         return self.organization_settings.organization
 
-    # What the dataset states and what the pipeline keeps, in the source's own unit: a
-    # row, a segment, or one restriction of a segment that carries several. Their ratio
-    # is the share of the dataset retained, shown in the Tchap report. Defaults: the
-    # rows fetched, and the rows `compute_clean_data` returns. A source overrides them
-    # when a row is not one restriction: it splits rows into restrictions, or merges
-    # rows into measures.
+    # In the source's own unit (row, segment or restriction); their ratio, the share of the
+    # dataset retained, is shown in the Tchap report. Default: rows fetched, rows returned.
     dataset_restrictions: int | None = None
     retained_restrictions: int | None = None
 
@@ -110,11 +105,12 @@ class BaseDataSourceIntegration:
         raise NotImplementedError("Subclasses must implement compute_clean_data method")
 
     def select_regulation_measure_fields(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Keep the pivot columns; an unknown one with a pivot prefix is logged (D-08)."""
-        unknown = unknown_pivot_columns(df.columns)
+        """Keep the canonical columns; an unknown one with a canonical prefix is logged."""
+        unknown = unknown_canonical_columns(df.columns)
         if unknown:
             logger.error(
-                f"{self.name}: columns named like the pivot but not in it, dropped: {unknown}"
+                f"{self.name}: columns named like the canonical model but not in it, "
+                f"dropped: {unknown}"
             )
         required_fields = list(get_type_hints(RegulationMeasure).keys())
         available_fields = [field for field in required_fields if field in df.columns]

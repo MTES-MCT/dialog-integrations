@@ -18,24 +18,20 @@ from integrations.dp_sarthe.restrictions_gabarits.schema import (
 
 @pytest.fixture
 def raw_data():
-    """Load test data from restrictions_gabarits.csv."""
     return pl.read_csv("tests/dp_sarthe/restrictions_gabarits.csv", separator=",")
 
 
 @pytest.fixture
 def integration():
-    """Create Sarthe integration instance."""
     return Integration.from_organization("dp_sarthe")
 
 
 @pytest.fixture
 def data_source(integration):
-    """Create Sarthe restrictions_gabarits data source instance."""
     return DataSourceIntegration(integration.organization_settings, integration.client)
 
 
 def test_validate_raw_data(data_source, raw_data):
-    """Test that validation succeeds and produces expected columns."""
     validated = data_source.validate_raw_data(raw_data)
 
     expected_columns = set(SartheRestrictionGabaritsRawDataSchema.to_schema().columns.keys())
@@ -44,7 +40,6 @@ def test_validate_raw_data(data_source, raw_data):
 
 
 def test_preprocess_is_identity(data_source, raw_data):
-    """Test that Sarthe has no preprocessing (identity function)."""
     schema_columns = list(SartheRestrictionGabaritsRawDataSchema.to_schema().columns.keys())
     df = raw_data.select(schema_columns)
 
@@ -55,8 +50,6 @@ def test_preprocess_is_identity(data_source, raw_data):
 
 
 def test_compute_measure_fields():
-    """Test that compute_measure_fields sets measure_type to NOENTRY
-    and measure_max_speed to null."""
     from api.dia_log_client.models import MeasureTypeEnum
 
     df = pl.DataFrame(
@@ -78,7 +71,6 @@ def test_compute_measure_fields():
 
 
 def test_compute_period_fields():
-    """Test that compute_period_fields creates all required fields from date_creation."""
     df = pl.DataFrame(
         {
             "date_creation": [
@@ -93,7 +85,7 @@ def test_compute_period_fields():
 
     assert "period_start_date" in result.columns
     assert "period_end_date" in result.columns
-    # start_time / end_time are derived in payloads.build_period, not carried by the pivot.
+    # start_time / end_time are derived in payloads.build_period, not carried by the rows.
     assert "period_start_time" not in result.columns
     assert "period_end_time" not in result.columns
     assert "period_recurrence_type" in result.columns
@@ -107,7 +99,6 @@ def test_compute_period_fields():
 
 
 def test_compute_period_fields_filters_null_date_creation():
-    """Test that rows with null date_creation are filtered out."""
     df = pl.DataFrame(
         {
             "date_creation": ["2024-07-11T19:27:30+01:00", None, "2025-01-23T10:51:06+00:00"],
@@ -124,7 +115,6 @@ def test_compute_period_fields_filters_null_date_creation():
 
 
 def test_compute_location_fields():
-    """Test that compute_location_fields creates all required fields."""
     from api.dia_log_client.models import RoadTypeEnum
 
     df = pl.DataFrame(
@@ -159,7 +149,6 @@ def test_compute_location_fields():
 
 
 def test_compute_location_fields_filters_null_geometry():
-    """Test that rows with null geometry are filtered out."""
     df = pl.DataFrame(
         {
             "localisation_curviligne": ["Route 1", "Route 2", "Route 3"],
@@ -174,7 +163,7 @@ def test_compute_location_fields_filters_null_geometry():
 
 
 def test_compute_vehicle_fields_with_tonnage():
-    """Test that compute_vehicle_fields handles tonnage correctly (keeps in ton)."""
+    """Tonnage stays in tonnes."""
     df = pl.DataFrame(
         {
             "tonnage": [7.5, 3.5, 10.0],
@@ -190,15 +179,14 @@ def test_compute_vehicle_fields_with_tonnage():
     assert "vehicle_max_height" in result.columns
     assert "vehicle_max_width" in result.columns
 
-    assert result["vehicle_heavyweight_max_weight"][0] == 7.5  # 7.5 tons
-    assert result["vehicle_heavyweight_max_weight"][1] == 3.5  # 3.5 tons
-    assert result["vehicle_heavyweight_max_weight"][2] == 10.0  # 10.0 tons
+    assert result["vehicle_heavyweight_max_weight"][0] == 7.5
+    assert result["vehicle_heavyweight_max_weight"][1] == 3.5
+    assert result["vehicle_heavyweight_max_weight"][2] == 10.0
 
     assert all(not v for v in result["vehicle_all_vehicles"].to_list())
 
 
 def test_compute_vehicle_fields_with_height():
-    """Test that compute_vehicle_fields handles hauteur correctly."""
     df = pl.DataFrame(
         {
             "tonnage": [5.0, 3.5],
@@ -219,7 +207,6 @@ def test_compute_vehicle_fields_with_height():
 
 
 def test_compute_vehicle_fields_with_width():
-    """Test that compute_vehicle_fields handles largeur correctly."""
     df = pl.DataFrame(
         {
             "tonnage": [5.0, 3.5],
@@ -240,7 +227,6 @@ def test_compute_vehicle_fields_with_width():
 
 
 def test_compute_vehicle_fields_with_restricted_types():
-    """Test that vehicle_restricted_types is set based on restriction type."""
     df = pl.DataFrame(
         {
             "tonnage": [7.5, 0.0, 3.5, 0.0],
@@ -271,7 +257,6 @@ def test_compute_vehicle_fields_with_restricted_types():
 
 
 def test_compute_regulation_fields(data_source):
-    """Test that compute_regulation_fields creates all required fields."""
     df = pl.DataFrame(
         {
             "objectid": [1, 280, 8],
@@ -297,10 +282,9 @@ def test_compute_regulation_fields(data_source):
 
 
 def test_compute_regulation_fields_drops_duplicates(data_source):
-    """Test that compute_regulation_fields drops duplicate objectids."""
     df = pl.DataFrame(
         {
-            "objectid": [1, 1, 2],  # First objectid is duplicated
+            "objectid": [1, 1, 2],
             "nature": ["Nature A", "Nature A duplicate", "Nature B"],
             "site": ["Site A", "Site A duplicate", "Site B"],
         }

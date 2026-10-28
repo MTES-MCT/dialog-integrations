@@ -126,9 +126,8 @@ def test_speed_is_never_invented():
         ("entre 6h et 17h", [("06:00", "17:00")]),
         ("de 09:00 à 16:30", [("09:00", "16:30")]),
         ("De 7h à 17h, sens Sud/Nord", [("07:00", "17:00")]),
-        # Night work: the end precedes the start, which is how it is expressed.
+        # Night work: the end precedes the start.
         ("De 20h à 5h le lendemain", [("20:00", "05:00")]),
-        # Several windows in one description, `/` separating them.
         (
             "11h-15h / 19h-00h / 00h-1h",
             [("11:00", "15:00"), ("19:00", "00:00"), ("00:00", "01:00")],
@@ -220,7 +219,7 @@ def test_drops_partial_day_restrictions_without_hours(warnings):
 @pytest.mark.parametrize(
     "perturbation,description,expected",
     [
-        # D-27: a night closure that does not cross midnight is still a night closure.
+        # A night closure need not cross midnight.
         ("Circulation interdite de nuit", "De 1h30 à 4h30", [("01:30", "04:30")]),
         ("Circulation alternée de nuit", "De 21h à 5h", [("21:00", "05:00")]),
         # The type only says hours exist; hours read in full are published as read.
@@ -380,8 +379,7 @@ def test_location_drops_footprints_that_are_not_polygons():
 
 
 def test_identifier_is_the_gid_and_carries_no_commune():
-    """A commune corrected afterwards must not create a second regulation. The `MGL-CHP-`
-    prefix keeps these apart from the Lyon regulations of the other channel (`LYON_…`)."""
+    """A commune corrected afterwards must not create a second regulation."""
     lyon = compute_regulation_fields(frame(row(gid=415731, commune1="Francheville")))
     moved = compute_regulation_fields(frame(row(gid=415731, commune1="Tassin la Demi Lune")))
     assert lyon.get_column("regulation_identifier")[0] == "MGL-CHP-415731"

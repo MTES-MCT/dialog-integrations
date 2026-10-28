@@ -12,13 +12,11 @@ TABLE_REGULATIONS = 1100
 TABLE_MEASURES = 1200
 TABLE_LOCATIONS = 2700
 
-# Link fields: `1101` carries the regulation of a measure, `1202` the measure of a location.
-# These are the columns *returned* (their `_fid` is the parent FileId).
+# Link columns as *returned*: their `_fid` is the parent FileId.
 FIELD_REGULATION_LINK = 1101
 FIELD_MEASURE_LINK = 1202
-# To *filter* a child table on its parent, the criterion field is the parent table number
-# itself (`1200` for the measure of a location): a criterion on `1202` matches nothing
-# (verified live on 2026-09-16, `TotalRows = 0` on every batch).
+# To *filter* on the parent, the criterion field is the parent table number: a criterion on
+# `1202` matched nothing on every batch (2026-09-16).
 FILTER_MEASURE_OF_LOCATION = TABLE_MEASURES
 
 DB_DATE_FORMATS = ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d")
@@ -117,21 +115,17 @@ RAW_COLUMNS: dict[str, Any] = {
 
 
 def needs_locations(measure: dict[str, Any]) -> bool:
-    """True only for a measure whose label the closed table maps to a DiaLog type.
-
-    An unknown label and one marked out of the model are both dropped by
-    `compute_measure_fields`: their locations are not fetched.
-    """
+    """True for a measure whose label maps to a DiaLog type; the others are dropped later,
+    so their locations are not fetched."""
     label = displayed_value(measure, MEASURE_NAME.descid)
     return label is not None and MEASURE_TYPE_BY_LABEL.get(label) is not None
 
 
 def count_unreadable_measures(tables: dict[str, list[dict[str, Any]]]) -> int:
-    """Measures whose regulation `Search/1100` never returns.
+    """Measures whose in-scope regulation the API account has no right to read.
 
-    Both share the perimeter query: the regulation is in scope, but the API account has no
-    right on it (per-record rights). 13 % of the in-scope measures on the 2026-09-08 dump,
-    23 % of the active temporary ones.
+    Rights are per record: 13 % of the in-scope measures on 2026-09-08, 23 % of the active
+    temporary ones.
     """
     known = {row["FileId"] for row in tables.get(str(TABLE_REGULATIONS), [])}
     return sum(
@@ -188,11 +182,9 @@ def _group_by_parent(
 def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame:
     """One row per location, carrying its measure and its regulation.
 
-    Childless parents are kept with null children so that the funnel counts them:
-    a regulation with no measure, a measure with no location. A measure out of the model
-    gets a single row without location, whether or not its locations were read: the
-    online extraction does not fetch them (`needs_locations`), and a frozen dump must give
-    the same rows.
+    Childless parents are kept with null children so that the funnel counts them. A measure
+    out of the model gets one row without location even if a frozen dump has its locations,
+    so the dump and the online extraction give the same rows.
     """
     regulations = tables.get(str(TABLE_REGULATIONS), [])
     measures = tables.get(str(TABLE_MEASURES), [])

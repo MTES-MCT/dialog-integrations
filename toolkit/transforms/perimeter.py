@@ -1,38 +1,14 @@
 """The organisation's perimeter as DiaLog sees it, and the filter that applies it upstream.
 
-DiaLog refuses an emprise when its geometry does not intersect the geometry of the
-organisation posting it (« L'organisation ne semble pas avoir les compétences pour
-intervenir sur ce linéaire de route »), and the refusal takes the whole regulation down
-(R-77). The check is reproducible, because the back end builds the organisation's
-geometry from public data and a fixed recipe (`OrganizationAdministrativeBoundariesGeometry`,
-`OrganizationRepository` in the DiaLog repository):
+DiaLog refuses an emprise that does not intersect the organisation's geometry, and the
+refusal takes the whole regulation down (R-77). That geometry is reproducible: the
+geo.api.gouv.fr contours of the organisation's communes, unioned, simplified with a
+tolerance per code type, then a plain `ST_Intersects` with the geometry as sent. The recipe
+is DiaLog's (`OrganizationAdministrativeBoundariesGeometry`): if it changes, follow it.
 
-1. the communes' contours come from `https://geo.api.gouv.fr/communes?...&fields=contour`,
-   selected by the organisation's administrative code — one commune (INSEE), a
-   département, a région, or an EPCI such as a métropole;
-2. they are unioned (`ST_Union`) and simplified (`ST_SimplifyPreserveTopology`) with a
-   tolerance that depends on the code type, in degrees: 0 for a commune, 0.002 for an
-   EPCI, 0.001 for a département, 0.003 for a région;
-3. the test is a plain `ST_Intersects` in EPSG:4326 between the geometry **as sent** and
-   that stored geometry — no buffer, no length fraction, one test per emprise.
-
-Rebuilding the same geometry here and dropping what does not intersect it removes those
-refusals before they cost a POST, without a hand-maintained blocklist. The simplification
-matters: at 0.002° (~160-220 m) the stored contour cuts corners, so a segment can be a few
-hundred metres outside the real boundary and still be accepted, or a few metres inside
-and refused. The recipe is DiaLog's, not ours: if the back end changes its tolerance or
-its source, this file must follow.
-
-The rebuild is not exact: Douglas-Peucker on a closed ring depends on the ring's start
-vertex, which the union engine decides — PostGIS there, GEOS here. Only the geometry
-DiaLog stores would match exactly. Hence the second test: an emprise must also touch the
-**exact** union of the contours, before simplification. Where the two simplifications
-disagree, the emprise lies in the slack the simplification adds along the boundary,
-outside the communes themselves — a road on the neighbour's territory. This drops a few
-emprises the API would have accepted, and needs no blocklist.
-
-Measurements (Lyon, residual segments, cost of the exact-contour test): R-77 in
-`ai/docs/regles-metier.md`, and `ai/docs/vers-l-equipe.md`.
+The rebuild is not exact (Douglas-Peucker depends on the ring's start vertex, which PostGIS
+and GEOS choose differently), so an emprise must also touch the exact union of the
+contours: what only the simplification's slack accepts lies on the neighbour's territory.
 """
 
 from __future__ import annotations
@@ -76,7 +52,7 @@ class Perimeter:
     code: str
     # The geometry DiaLog stores, rebuilt: unioned then simplified.
     geometry: BaseGeometry
-    # The union before simplification. An emprise must touch both (see the module doc).
+    # The union before simplification: an emprise must touch both.
     exact: BaseGeometry | None = None
 
     @classmethod
@@ -107,11 +83,8 @@ class Perimeter:
         return cls(code_type=code_type, code=code, geometry=geometry, exact=exact)
 
     def intersects(self, geojson: str | None) -> bool | None:
-        """DiaLog's test for one emprise: `ST_Intersects(sent geometry, organisation geometry)`.
-
-        None when the geometry is missing or unreadable — the caller decides what to do
-        with it; the API would refuse it for a different reason.
-        """
+        """DiaLog's test for one emprise, plus the exact contour; None when the geometry is
+        missing or unreadable, which the API would refuse for another reason."""
         if geojson is None:
             return None
         try:
@@ -129,9 +102,7 @@ def discard_outside_perimeter(
     """Drop the rows whose geometry DiaLog would refuse for this organisation.
 
     Rows without a readable geometry are kept: this filter only reproduces the competence
-    check, and the source's own geometry rules deal with the rest. A row must touch the
-    simplified geometry DiaLog stores and the exact union of the contours: see the module
-    doc for why both.
+    check.
     """
     prepared = prep(perimeter.geometry)
     exact = prep(perimeter.exact) if perimeter.exact is not None else None

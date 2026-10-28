@@ -30,10 +30,7 @@ IS_TEMPORARY = pl.col("a_type") == TYPE_TEMPORARY_LABEL
 
 
 def filter_police_prefecture(df: pl.DataFrame, publish: bool) -> pl.DataFrame:
-    """Keep or drop the acts of the police prefecture (R-73, Q-36).
-
-    Counted either way, so the report always carries the share of the prefecture.
-    """
+    """Keep or drop the acts of the police prefecture (R-73), counted either way."""
     is_prefecture = (pl.col("a_service") == SERVICE_POLICE_PREFECTURE).fill_null(False)
     prefecture = df.filter(is_prefecture)
     if not prefecture.height:
@@ -53,16 +50,11 @@ def filter_police_prefecture(df: pl.DataFrame, publish: bool) -> pl.DataFrame:
 
 
 def compute_regulation_fields(df: pl.DataFrame, today: date) -> pl.DataFrame:
-    """The regulation half of the pivot, and the perimeter filter that goes with it.
+    """The regulation half of the canonical model, and the perimeter filter again, for a
+    frozen extract replayed after some acts ended.
 
-    The perimeter is filtered again here: the Eudonet query already did it on the day of
-    the extraction, but a frozen extract replayed on a later day has to lose the acts that
-    ended since.
-
-    `1101` « N° d'arrêté » is Eudonet's own business key (R-23): unique across the base and
-    stable across the life of the act, in both its shapes (`2021T113851` since 2017,
-    `1996-10345` before). It is used as is, with no normalisation that could make two
-    distinct acts collide.
+    `1101` « N° d'arrêté » is unique and stable for the life of the act (R-23), in both its
+    shapes (`2021T113851`, `1996-10345`): used as is, so two acts can never collide.
     """
     return (
         df.pipe(_discard_unnumbered)

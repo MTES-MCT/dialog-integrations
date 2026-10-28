@@ -1,4 +1,4 @@
-"""Data source integration for Sarthe restriction gabarits CSV data."""
+"""Sarthe: restrictions_gabarits."""
 
 import io
 
@@ -23,8 +23,6 @@ URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_restri
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
-    """Data source for Sarthe restriction gabarits CSV data."""
-
     raw_data_schema = SartheRestrictionGabaritsRawDataSchema
     name = "restrictions_gabarits"
 
@@ -150,7 +148,6 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
             .otherwise(None)
             .alias("vehicle_max_width"),
             pl.lit([]).cast(pl.List(pl.Utf8)).alias("vehicle_exempted_types"),
-            # heavyGoodsVehicle for a weight limit, dimensions for height / width only.
             pl.when((pl.col("tonnage").is_not_null()) & (pl.col("tonnage") > 0))
             .then(pl.lit(["heavyGoodsVehicle"]).cast(pl.List(pl.Utf8)))
             .otherwise(pl.lit(["dimensions"]).cast(pl.List(pl.Utf8)))

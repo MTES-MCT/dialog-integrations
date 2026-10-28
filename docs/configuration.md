@@ -22,6 +22,18 @@ Ordre de priorité en dev, du plus faible au plus fort :
 2. `.env.{organization}.dev` ;
 3. variables d'environnement du processus.
 
+## Tchap
+
+`dialog notify` poste le rapport de la nuit avec un compte de service, qui doit avoir rejoint le salon (non chiffré). Trois variables, en secrets de la CI :
+
+```text
+TCHAP_HOMESERVER_URL="https://matrix.agent.dinum.tchap.gouv.fr"
+TCHAP_ROOM_ID="!xxxx:agent.dinum.tchap.gouv.fr"
+TCHAP_ACCESS_TOKEN="syt_..."
+```
+
+Sans elles, le message est ignoré en local et l'envoi échoue en CI.
+
 ## Ce qui tourne chaque nuit : `integrations.toml`
 
 Le registre liste les organisations du workflow `integrate`, leur cible (`prod` ou `staging`) et leurs sources en pause. Le workflow en génère sa matrice (`python3 registry.py matrix`) : ajouter, promouvoir ou mettre en pause une organisation ne touche plus le YAML. L'environnement GitHub et ses secrets restent à créer à la main (`{org}` pour la prod, `{org}-staging` sinon). La politique de synchronisation, elle, reste dans `integration.py`, à côté du code qui fabrique les identifiants.

@@ -1,29 +1,14 @@
-"""Paris / Eudonet: from a structured location description to a DiaLog named street.
+"""From an Eudonet location to a DiaLog named street (`roadType = lane`), which DiaLog geocodes.
 
-Eudonet carries no geometry. A location is a road name (`2710`), an arrondissement (`2708`)
-and, depending on `2705` "Porte sur", either a house number, two bounds, or nothing. That
-is exactly DiaLog's `namedStreet` (`roadType = lane`): DiaLog geocodes it itself.
+Every `location_*` column goes verbatim to `SaveNamedStreetDTO`: nothing else may leave this
+module under that prefix.
 
-Every `location_*` column produced here is passed verbatim to `SaveNamedStreetDTO`, so
-nothing else may leave this module under that prefix (no label, no geometry).
-
-Crossing-road labels from the 2017 data migration are upper case with no accent nor
-apostrophe ("RUE D AUTEUIL"). DiaLog's geocoder does not recognise them; the official name
-does (probed on 2026-09-16, 6 cases out of 6). `street_names.json` is the list of official
-names (`l_longmin`) of the Paris open data street referential "Dénominations des emprises
-des voies actuelles" (ODbL), taken on 2026-09-08. The migration is frozen since 2017, so a
-frozen list covers it; only a street renamed since would be missed, and it is then sent
-as is. Rebuilt as the sorted set of `l_longmin` of that referential.
-
-The arrondissement (`2708`) is sometimes missing, or lists several ("6ème ; 15ème") for a
-street that crosses a boundary. `street_districts.json` says where each official street
-lies, from the same street referential joined to the "Adresses" one (`c_ar`), both taken on
-2026-09-08: one INSEE code for a street within one arrondissement, otherwise the runs of
-consecutive house numbers of one parity that fall in each. A missing arrondissement is a
-gap, not an error, and the referential fills it without ambiguity (a translation, R-06).
-What the table cannot settle stays dropped when the source cites no arrondissement, and
-goes to the first one cited when it cites several. Rebuilt as, for each `l_longmin`, the `c_ar`
-of its addresses (`n_sq_vo`), as runs of `n_voie` by parity when there are several.
+`street_names.json`: the official names (`l_longmin`) of the Paris referential "Dénominations
+des emprises des voies actuelles" (ODbL, 2026-09-08). DiaLog does not geocode the upper-case
+labels of the 2017 migration ("RUE D AUTEUIL"), but does the official name (6 of 6, 2026-09-16).
+`street_districts.json`: per `l_longmin`, the `c_ar` of its addresses in the "Adresses"
+referential (same date), as runs of `n_voie` by parity when several. It fills a missing
+arrondissement (R-06); what it cannot settle is dropped, or goes to the first one cited.
 """
 
 import json
@@ -59,18 +44,15 @@ CITY_CODE_BY_DISTRICT = {
     **{f"{n}ème arrondissement": f"751{n:02d}" for n in range(2, 21)},
 }
 
-# `2711` "Sens": any value but "both ways", the "circulation générale" ones included, drops
-# the location rather than widen it to both directions (R-32 freeze; Q-60, 2026-10-26).
+# `2711` "Sens": any value but both ways drops the location rather than widen it (R-32 freeze,
+# 2026-10-26).
 BOTH_DIRECTIONS_LABEL = "dans les deux sens"
 # `2712` "côté" values that limit a location to one side of the street, which the DiaLog
 # write API cannot carry (2026-10-23): dropped rather than widened to both sides.
 ONE_SIDE_LABELS = ("côté pair", "côté impair")
 
-# A numbered label naming another street than the location's ("28 Place Saint-Ferdinand" on
-# rue Brunel) is the corner building on the crossing street: where along that street the
-# measure starts cannot be told, so the location is dropped. On the 2026-09-08 extraction,
-# spellings of the same street score 0.95 or more ("VILLA PATRICE BOUDARD" / "Boudart"),
-# other streets 0.79 or less: 11 locations dropped, whatever the threshold in between.
+# A number on another street is a corner building, which does not tell where the measure
+# starts. 2026-09-08: same street ≥ 0.95, other streets ≤ 0.79 (11 locations dropped).
 SAME_STREET_MIN_RATIO = 0.9
 
 STREET_NAMES_FILE = Path(__file__).with_name("street_names.json")
@@ -133,9 +115,7 @@ class Bound:
 def parse_house_number(text: str | None) -> str | None:
     """ "12", "12 bis", "n°39" → "12", "12", "39": the first number, without its suffix.
 
-    Probed on the staging on 2026-09-08: DiaLog geocodes neither "12 bis", nor "12B", nor
-    "12bis" (400 "La géolocalisation de la voie entre ces points a échoué"). The bare
-    number is the closest address it knows; the suffix is dropped and counted.
+    DiaLog geocodes no suffixed number (400 on "12 bis", "12B", "12bis", 2026-09-08).
     """
     if not text:
         return None
@@ -160,19 +140,14 @@ def parse_bound(
 ) -> Bound | None:
     """A section bound from its three possible carriers, most explicit first.
 
-    Recent entries fill `N° adresse` (house number on the road) or `Libellé voie`
-    (crossing road). The 2017 data migration filled only `Libellé adresse`, which is either
-    "117 QUAI DE LA GARE" (a house number on the road itself: 1 484 of 1 502 numbered
-    labels name the road of the location) or "RUE DANTE" (a crossing road).
+    The 2017 migration filled only `Libellé adresse`: "117 QUAI DE LA GARE" is a number on the
+    road itself (1 484 of 1 502 numbered labels), "RUE DANTE" a crossing road.
     """
     number = parse_house_number(house_number)
     if number:
         return Bound(POINT_TYPE_HOUSE_NUMBER, house_number=number)
-    # The 2017 migration also copied the *end* address label into `Libellé voie` (1 174
-    # rows start with a number, e.g. "22 RUE DES REGLISES"; the start field never does).
-    # Sent as a crossing road, DiaLog answers 400 and the whole regulation is refused
-    # (staging run of 2026-09-16, 175 of the 506 refused regulations). Read it like the
-    # address label: a leading number is a house number on the road itself.
+    # The 2017 migration also copied end address labels into `Libellé voie`: sent as crossing
+    # roads, they got 175 of 506 regulations refused (2026-09-16).
     label = road_name or address_label
     if not label:
         return None

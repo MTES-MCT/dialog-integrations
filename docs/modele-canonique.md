@@ -23,7 +23,7 @@ supprimée, mais signalée en erreur dans le journal : une faute de frappe, ou u
 le modèle ne porte pas encore. Une colonne de travail d'une source commence par `_`
 (`_measure_kind`) : elle n'est jamais confondue avec le modèle.
 
-Dans le code, le modèle s'appelle encore souvent le « pivot » : c'est le même objet.
+L'équipe l'appelle aussi le « pivot » : c'est le même objet.
 
 ## Les contrôles communs
 

@@ -36,7 +36,7 @@ VEHICLE_COLUMNS: dict[str, Any] = {
     "vehicle_restricted_types": pl.List(pl.Utf8),
     "vehicle_exempted_types": pl.List(pl.Utf8),
     "vehicle_heavyweight_max_weight": pl.Float64,
-    # No catalog value carries a length, height or width (Q-52): always empty.
+    # No catalog value carries a length, height or width: always empty.
     "vehicle_max_length": pl.Float64,
     "vehicle_max_height": pl.Float64,
     "vehicle_max_width": pl.Float64,
@@ -137,12 +137,9 @@ def read_vehicle_set(
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     """`vehicleSet`, read from the named parameters of the measure.
 
-    Drops, and counts, three kinds of measures:
-    - restricting a vehicle value outside the closed list (R-34, Q-58): cycles are never
-      restricted, a new value waits for a human;
-    - a `limitation dimensionnelle` or `limitation catégorielle` with no readable vehicle
-      value: an empty vehicle set would close the road to everyone, and "other" with no
-      threshold tells a GPS nothing (R-35);
+    Drops a measure restricting a value outside the closed list (R-34), and a gauge or
+    category limit with no readable vehicle: an empty set would close the road to everyone
+    (R-35).
     """
     tally = VehicleTally()
     read = [

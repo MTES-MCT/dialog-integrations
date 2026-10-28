@@ -1,9 +1,5 @@
-"""The daily integration report, built from the result of every organization's run.
-
-Formatting only: `Notifier.format_message` returns the text and HTML bodies, and
-`notifications.tchap_bot.TchapBot` posts them. The results are the `--json` outputs of
-`dialog integrate`, one per organization, keyed `result_{org}`.
-"""
+"""The daily Tchap report, formatted from the `--json` result of every organization's run
+(keyed `result_{org}`); `report.tchap_bot` posts it."""
 
 import html
 import json
@@ -17,10 +13,7 @@ class Notifier:
     """Turn the integration results into the message the team reads in Tchap."""
 
     def format_message(self, results_data: dict) -> tuple[str, str]:
-        """Build the message: plain-text fallback first, then HTML.
-
-        Matrix requires `body` and treats `formatted_body` as the optional enrichment.
-        """
+        """The message as (plain text, HTML)."""
         now = datetime.now().strftime("%d/%m/%Y %H:%M")
         title = "Rapport d'intégration Open Data"
 
@@ -29,14 +22,12 @@ class Notifier:
 
         results = self._parse_results(results_data)
         if not results:
-            # An empty report means the integration job produced nothing.
-            # This is an anomaly, and it should be reported.
+            # The integration job produced nothing: an anomaly to report.
             anomaly = "Aucun résultat d'intégration reçu."
             text_lines += ["", f"⚠️ {anomaly}"]
             html_parts.append(f"<ul><li>⚠️ <strong>{anomaly}</strong></li></ul>")
 
-        # Production first, then every staging: the team reads what is live before what
-        # is under review. A result without a target predates the staging runs.
+        # Production first: the team reads what is live before what is under review.
         production = [(org, r) for org, r in results if self._target(r) in (None, PRODUCTION_HOST)]
         staging = [(org, r) for org, r in results if self._target(r) not in (None, PRODUCTION_HOST)]
         hosts = sorted({self._target(r) or "" for _, r in staging})
@@ -66,11 +57,8 @@ class Notifier:
 
     @staticmethod
     def _parse_results(results_data: dict) -> list[tuple[str, dict]]:
-        """The (organization, result) pairs, in a stable order.
-
-        Sorted: the output order of a GitHub matrix job is not guaranteed. Values are
-        JSON strings such as '{"success": true}'; anything unreadable counts as a failure.
-        """
+        """The (organization, result) pairs, sorted: a GitHub matrix does not guarantee its
+        output order. An unreadable result counts as a failure."""
         results = []
         for key, raw in sorted(results_data.items()):
             if not key.startswith("result_"):
@@ -112,8 +100,6 @@ class Notifier:
         )
         return text_lines, item
 
-    # Wording of the synchronization counters, as the team reads them in Tchap.
-    # `closed` only appears for organizations that close what left their source.
     COUNT_LABELS = (
         ("created", "créé"),
         ("updated", "mis à jour"),
@@ -130,11 +116,7 @@ class Notifier:
 
     @classmethod
     def _format_counts(cls, result: dict) -> str:
-        """Created / updated / deleted, when the run reported them.
-
-        Results from before synchronization existed only carry `success`; they must
-        keep rendering exactly as they did.
-        """
+        """Created / updated / deleted / closed, when the run reported them."""
         parts = []
         for key, label in cls.COUNT_LABELS:
             value = result.get(key)
@@ -218,9 +200,7 @@ class Notifier:
         """Held batches and source volumes, on their own lines."""
         details = cls.format_alerts(result)
 
-        # One line per dataset (permanent, temporaire), or the organization's total for
-        # results from before datasets were reported apart. Raw row counts mean
-        # something different in every organization, so they are left out.
+        # Raw row counts mean something different in every organization: left out.
         datasets = result.get("datasets")
         if isinstance(datasets, list) and datasets:
             details += [cls._format_dataset(d) for d in datasets if isinstance(d, dict)]

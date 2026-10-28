@@ -1,9 +1,4 @@
-"""Tests for Aveyron prescriptions routieres: grouping, identifiers and dating.
-
-The source publishes one row per (stretch, sign). R-28 says a row is not an arrete, so
-these tests pin the two ways rows become one: by the number the producer cites, and
-otherwise by the measure itself, departmentally.
-"""
+"""Tests for Aveyron prescriptions routieres: grouping, identifiers and dating."""
 
 from urllib.parse import quote
 
@@ -31,8 +26,7 @@ def signs(**overrides):
         pl.col("numero_dar").cast(pl.Utf8),
         pl.col("date_darre").cast(pl.Utf8),
         pl.col("panneau_value").cast(pl.Float64),
-        # As compute_measure_fields leaves it, so the key never drifts from the sign a
-        # test overrides.
+        # Derived, so the key never drifts from the sign a test overrides.
         measure_group_key().alias("measure_group_key"),
     )
 
@@ -160,10 +154,7 @@ def test_title_of_a_numbered_arrete_lists_every_prescription_of_the_group():
 
 
 def test_a_numbered_arrete_is_dated_from_the_earliest_day_its_rows_carry():
-    """A measure carries one period; the producer sometimes writes two dates for one act.
-
-    Measured case: `AV-GB-02-207`, whose two B12 rows are dated a day apart.
-    """
+    """Measured case: `AV-GB-02-207`, whose two B12 rows are dated a day apart."""
     df = compute_regulation_fields(
         signs(
             numero_dar=["02-207", "02-207"],
@@ -182,11 +173,7 @@ def test_a_numbered_arrete_is_dated_from_the_earliest_day_its_rows_carry():
 
 
 def test_a_grouped_fallback_is_dated_from_the_run_not_from_one_of_its_members():
-    """R-39: the group gathers stretches from different acts, so no member's date fits.
-
-    One real signature spans three dates from 2003 to 2019; picking one would assert a
-    commencement date for the other stretches that nothing supports.
-    """
+    """R-39: one real fallback mixes acts from 2003 to 2019, so no member's date fits."""
     df = compute_regulation_fields(
         signs(
             numero_dar=[None, None, None],
@@ -203,11 +190,7 @@ def test_a_grouped_fallback_is_dated_from_the_run_not_from_one_of_its_members():
 
 
 def test_an_undated_numbered_arrete_stays_undated():
-    """Signed, signposted and in force; only the day it was signed is missing.
-
-    Left null rather than dated the day of the run: `sync/dating.py`
-    dates it when DiaLog is written, so the comparison never sees a moving date.
-    """
+    """Left null, so the comparison never sees a moving date."""
     df = compute_regulation_fields(signs(date_darre=[None]))
 
     result = compute_period_fields(df)

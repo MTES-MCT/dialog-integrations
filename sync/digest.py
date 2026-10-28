@@ -9,16 +9,14 @@ from typing import Any
 
 from api.dia_log_client.models import PostApiRegulationsAddBody
 
-# Regulation fields whose change must trigger an update.
 DIGESTED_REGULATION_FIELDS = ("title", "category", "subject", "otherCategoryText")
 
 
-# Mirrors of startDate / endDate rebuilt at send time; keeping them would only add noise.
+# Mirrors of startDate / endDate rebuilt at send time.
 VOLATILE_PERIOD_FIELDS = ("startTime", "endTime")
 
 
-# A digest is a plain JSON structure, kept readable so a field-by-field diff can be
-# rendered from two snapshots without going back to the source.
+# Plain JSON, so a field-by-field diff can be rendered from two snapshots alone.
 Digest = dict[str, Any]
 
 
@@ -41,10 +39,8 @@ def compute_regulation_digest(regulation: PostApiRegulationsAddBody) -> Digest:
 def fingerprint(digest: Digest) -> str:
     """Stable hash of a digest: canonical JSON, sorted keys, empty lists dropped.
 
-    An empty list says the same thing as an absent key (`timeSlots: []` is "around the
-    clock"). Dropping them here, on the stored digest as well as on today's, keeps a
-    snapshot built before a key existed — or before it was left out — from reading as a
-    change of every regulation.
+    An empty list means the same as an absent key (`timeSlots: []`): dropping them keeps an
+    older snapshot without that key from reading as a change of every regulation.
     """
     canonical = json.dumps(
         _without_empty_lists(digest),
@@ -94,8 +90,7 @@ def _digest_location(location: Any) -> Digest:
         if isinstance(value, Mapping):
             digest[key] = dict(value)
 
-    # Both carry a label and a GeoJSON geometry; a zone is digested on the polygon we
-    # send, not on the sections DiaLog derives from it.
+    # A zone is digested on the polygon we send, not on the sections DiaLog derives.
     for key in ("rawGeoJSON", "zone"):
         drawn = location.get(key)
         if isinstance(drawn, Mapping):
@@ -107,11 +102,8 @@ def _digest_location(location: Any) -> Digest:
 
 
 def _digest_geometry(geometry: Any) -> Digest | None:
-    """Reduce a geometry to type, point count, bounding box and hash.
-
-    Storing full geometries would make the snapshot unreadable and huge; these four
-    values move as soon as the geometry does.
-    """
+    """Type, point count, bounding box and hash: they move as soon as the geometry does,
+    without filling the snapshot with full geometries."""
     if geometry is None:
         return None
 

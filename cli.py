@@ -14,9 +14,8 @@ from report.tchap_bot import TchapBot
 from run.organization import BaseIntegration
 from settings import Organization
 
-# By default loguru prints the value of every variable of a failing frame, and Typer the
-# locals of the command: a crash while authenticating at a source would put its
-# credentials in the CI log, which a public repository shows to anyone.
+# Neither loguru nor Typer may print a failing frame's variables: a source's credentials
+# would land in the CI log, public like the repository.
 logger.remove()
 logger.add(sys.stderr, diagnose=False)
 
@@ -73,13 +72,10 @@ def integrate(
     if entry and entry.paused:
         dialog_integration.paused_sources = frozenset(entry.paused)
     logger.info(f"Integrating measures for organization: {organization.name} (env: {env})")
-    # The host actually written to, so the Tchap report can file the run under its
-    # target. Scheme and trailing slash are dropped; a URL without scheme is kept as is.
+    # The host written to, so the Tchap report files the run under its target.
     base_url = dialog_integration.organization_settings.base_url or ""
     target = urlparse(base_url).hostname or base_url.strip("/")
 
-    # The summary keeps every alert and error the run logs, without reading any log
-    # file: a sink collects them while the run lasts.
     records: list = []
     sink = logger.add(lambda m: records.append(m.record), level="WARNING") if summary else None
     try:

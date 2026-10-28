@@ -83,9 +83,8 @@ def test_build_unions_the_communes_and_simplifies_with_dialog_s_tolerance():
 
 
 def test_an_emprise_in_the_simplification_s_slack_is_dropped():
-    # DiaLog's simplified geometry covers the notch, the exact contour does not: the
-    # emprise lies on the neighbour's territory, and the API refused two such segments
-    # on 2026-09-18 (Craponne). Both geometries must be touched.
+    # Only DiaLog's simplified geometry covers the notch: the emprise lies on the
+    # neighbour's territory (the API refused two such segments at Craponne, 2026-09-18).
     west = box(4.0, 45.0, 4.5, 46.0)
     east = box(4.5, 45.0, 5.0, 46.0)
     notch = box(4.999, 45.4, 5.0, 45.6)

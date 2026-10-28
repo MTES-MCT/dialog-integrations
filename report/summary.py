@@ -1,10 +1,6 @@
 """The run summary of one organization, in markdown, for the GitHub run page.
 
-Each job of the matrix writes its own to a file it uploads as an artifact; the notify
-job gathers them, in matrix order, into one document shown on its own summary and kept
-as a dated artifact. Nothing is parsed from a log file: the counters come from the
-run's outcome, and the alerts from a loguru sink `cli.py` keeps open for the duration
-of the run.
+Counters come from the run's outcome and alerts from a loguru sink, never from parsing a log.
 """
 
 from collections.abc import Iterable, Mapping

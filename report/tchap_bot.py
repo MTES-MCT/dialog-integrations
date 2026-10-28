@@ -1,16 +1,6 @@
-"""Post a message to a Tchap (Matrix) room.
+"""Post a message to a Tchap (Matrix) room as a service account.
 
-Authenticates with a service account token. The account must have joined the room, and
-the room must be unencrypted. Configuration comes from three environment variables, or
-from the constructor:
-
-    TCHAP_HOMESERVER_URL="https://matrix.agent.dinum.tchap.gouv.fr"
-    TCHAP_ROOM_ID="!xxxx:agent.dinum.tchap.gouv.fr"
-    TCHAP_ACCESS_TOKEN="syt_..."
-
-Usage:
-
-    TchapBot().send("Bonjour", "<p>Bonjour</p>")
+The account must have joined the room, and the room must be unencrypted.
 """
 
 import os
@@ -47,10 +37,8 @@ class TchapBot:
     def send(self, body: str, formatted_body: str | None = None) -> str | None:
         """Post one message; return the event id the server assigned, or None when unsent.
 
-        `body` is the plain text every client can show; `formatted_body`, when given, is
-        the HTML enrichment (`org.matrix.custom.html`). Without a complete configuration
-        the message is skipped locally, and the call fails in CI: a silent notification
-        there hides a broken pipeline.
+        Without a complete configuration the message is skipped locally but the call fails
+        in CI: a silent notification there hides a broken pipeline.
         """
         missing = self.missing_configuration()
         if missing:
@@ -96,7 +84,6 @@ class TchapBot:
             logger.error(f"Failed to send Tchap message: {e}")
             raise
 
-        # The event_id proves the server accepted the message, and locates it in Tchap.
         try:
             event_id = str(response.json().get("event_id", "?"))
         except ValueError:

@@ -1,14 +1,8 @@
 """Minimal WFS 2.0 reader, for the sources a producer serves through a GeoServer.
 
-Many open data catalogues (the Grand Lyon one among them) expose every layer through a
-single OGC endpoint, so one reader covers all of a producer's data sources. Features
-come back as GeoJSON and are flattened into one Polars row per feature: the feature
-properties, plus a `geometry` column holding the GeoJSON geometry serialized as a
-string, so the frame stays a plain table that Pandera can validate.
-
-Coordinates are requested in EPSG:4326. GeoServer honours `SRSNAME` and answers in
-longitude/latitude order, which is what DiaLog expects (R-52) — `assert_lon_lat_bbox`
-makes that assumption fail loudly instead of silently shipping swapped coordinates.
+One Polars row per feature: its properties, plus `geometry` as a GeoJSON string so the
+frame stays a plain table Pandera can validate. GeoServer answers `SRSNAME=EPSG:4326` in
+lon/lat order (R-52); `assert_lon_lat_bbox` fails loudly when it does not.
 """
 
 import json
@@ -23,11 +17,7 @@ BBox = tuple[float, float, float, float]  # min_lon, min_lat, max_lon, max_lat
 
 
 def fetch_wfs_features(url: str, layer: str, *, srs: str = "EPSG:4326") -> pl.DataFrame:
-    """Download one WFS layer as GeoJSON and return it as a Polars DataFrame.
-
-    `layer` is the qualified type name, `namespace:layer` as the GetCapabilities lists
-    it. The `geometry` column holds each feature's GeoJSON geometry as a string.
-    """
+    """Download one WFS layer; `layer` is `namespace:layer` as GetCapabilities lists it."""
     params = {
         "SERVICE": "WFS",
         "VERSION": "2.0.0",
@@ -60,10 +50,8 @@ def features_to_dataframe(features: list[dict]) -> pl.DataFrame:
 def assert_lon_lat_bbox(df: pl.DataFrame, bbox: BBox) -> None:
     """Fail loudly if the geometries do not sit inside the expected lon/lat box.
 
-    Swapped axes are the single most common geographic defect, and they produce data
-    that passes every other check. The box should be generous — it is a sanity check
-    on the axis order, not a geographic filter — and sampling a few geometries is
-    enough to catch a swap.
+    Swapped axes pass every other check. Keep the box generous: it checks the axis order,
+    it is not a geographic filter.
     """
     min_lon, min_lat, max_lon, max_lat = bbox
     sample = df.filter(pl.col("geometry").is_not_null()).head(50)

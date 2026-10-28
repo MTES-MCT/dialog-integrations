@@ -22,11 +22,8 @@ from .vocabulary import (
 
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """`measure_type_` and `measure_max_speed`, from the closed table of catalog `1202`.
-
-    Produces `measure_group_key` too: the Eudonet measure, so that its locations collapse
-    into one DiaLog measure (R-76).
-    """
+    """`measure_type_`, `measure_max_speed`, and `measure_group_key`: the Eudonet measure, so
+    its locations collapse into one DiaLog measure (R-76)."""
     return (
         df.pipe(map_measure_types)
         .pipe(compute_max_speed)
@@ -37,12 +34,8 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def map_measure_types(df: pl.DataFrame) -> pl.DataFrame:
-    """`measure_type_`, after three drops, each counted: no measure at all, a label absent
-    from `MEASURE_TYPE_BY_LABEL`, a label the table marks as out of the model.
-
-    Paris can extend catalog `1202` at any time: a new value is dropped with a warning until
-    a human qualifies it, rather than stop the whole run or be guessed.
-    """
+    """`measure_type_`; a label new to catalog `1202` is dropped with a warning until a human
+    qualifies it, never guessed and never stopping the run."""
     no_measure = df.filter(pl.col("m_type").is_null())
     if no_measure.height:
         logger.warning(
@@ -129,9 +122,8 @@ def discard_narrowed_measures(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def discard_unknown_parameters(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop a measure carrying a filled parameter of an unknown name: it may narrow the
-    measure the way a time slot or a lane does, and would be published wider than the act
-    (R-81)."""
+    """Drop a measure with a filled parameter of an unknown name: it may narrow the measure
+    like a time slot or a lane does (R-81)."""
     names = [
         [
             pair[0].strip()
@@ -178,9 +170,8 @@ def has_filled_parameter(df: pl.DataFrame, names: frozenset[str]) -> pl.Series:
 def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:
     """Give every published pedestrian area its walking-pace limit, in the same regulation.
 
-    R-71 (Code de la route R. 110-2): only the vehicles serving the area may enter, and at
-    walking pace. The limit applies to every vehicle, with no exemption: the ones let in
-    still drive at walking pace.
+    R-71 (Code de la route R. 110-2): no exemption on the limit, as the vehicles let in still
+    drive at walking pace.
     """
     bans = df.filter(pl.col("m_type") == LABEL_PEDESTRIAN_AREA)
     if not bans.height:
