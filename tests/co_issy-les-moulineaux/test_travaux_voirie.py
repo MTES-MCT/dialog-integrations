@@ -13,6 +13,7 @@ import pytest
 
 from api.dia_log_client.models import MeasureTypeEnum, PostApiRegulationsAddBodyStatus
 from run.organization import BaseIntegration
+from toolkit.transforms.titles import ELLIPSIS, TITLE_MAX_LENGTH
 
 MODULE = "integrations.co_issy-les-moulineaux.travaux_voirie.data_source_integration"
 
@@ -174,10 +175,10 @@ def test_titre_tronque_a_la_limite_de_l_api(longueur, doit_etre_tronquee):
         )
     )["regulation_title"][0]
 
-    assert len(titre) <= module.TITLE_MAX_LENGTH
+    assert len(titre) <= TITLE_MAX_LENGTH
     if doit_etre_tronquee:
-        assert len(titre) == module.TITLE_MAX_LENGTH
-        assert titre.endswith(module.TITLE_ELLIPSIS)
+        assert len(titre) == TITLE_MAX_LENGTH
+        assert titre.endswith(ELLIPSIS)
     else:
         assert titre == description
 

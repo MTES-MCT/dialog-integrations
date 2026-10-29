@@ -13,6 +13,7 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
+from toolkit.transforms.titles import truncate
 
 from .schema import IssylesMoulineauxTravauxRawDataSchema
 
@@ -26,9 +27,6 @@ MEASURE_TYPE_BY_LABEL = {
     "Stationnement gênant": MeasureTypeEnum.PARKINGPROHIBITED.value,
     "Limitation vitesse": MeasureTypeEnum.SPEEDLIMITATION.value,
 }
-
-TITLE_MAX_LENGTH = 255
-TITLE_ELLIPSIS = "..."
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
@@ -170,13 +168,7 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
             pl.lit(PostApiRegulationsAddBodySubject.ROADMAINTENANCE.value).alias(
                 "regulation_subject"
             ),
-            pl.when(pl.col("description").str.len_chars() > TITLE_MAX_LENGTH)
-            .then(
-                pl.col("description").str.slice(0, TITLE_MAX_LENGTH - len(TITLE_ELLIPSIS))
-                + pl.lit(TITLE_ELLIPSIS)
-            )
-            .otherwise(pl.col("description"))
-            .alias("regulation_title"),
+            truncate(pl.col("description")).alias("regulation_title"),
             pl.col("type_travaux").alias("regulation_other_category_text"),
             pl.col("url").alias("regulation_document_url"),
         ]

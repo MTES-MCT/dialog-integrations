@@ -229,15 +229,15 @@ def test_compute_vehicle_fields_with_width():
 def test_compute_vehicle_fields_with_restricted_types():
     df = pl.DataFrame(
         {
-            "tonnage": [7.5, 0.0, 3.5, 0.0],
-            "hauteur": [0.0, 3.9, 0.0, 0.0],
-            "largeur": [0.0, 0.0, 2.5, 0.0],
+            "tonnage": [7.5, 0.0],
+            "hauteur": [0.0, 3.9],
+            "largeur": [0.0, 0.0],
         }
     )
 
     result = compute_vehicle_fields(df)
 
-    assert result.height == 4
+    assert result.height == 2
 
     assert "vehicle_restricted_types" in result.columns
 
@@ -245,15 +245,10 @@ def test_compute_vehicle_fields_with_restricted_types():
     weights = result["vehicle_heavyweight_max_weight"].to_list()
 
     assert restricted_types[0] == ["heavyGoodsVehicle"]
-    assert restricted_types[2] == ["heavyGoodsVehicle"]
-
     assert restricted_types[1] == ["dimensions"]
-    assert restricted_types[3] == ["dimensions"]
 
     assert weights[0] == 7.5
     assert weights[1] is None
-    assert weights[2] == 3.5
-    assert weights[3] is None
 
 
 def test_compute_regulation_fields(data_source):

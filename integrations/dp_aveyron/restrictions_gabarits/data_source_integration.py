@@ -19,6 +19,8 @@ from integrations.dp_aveyron.restrictions_gabarits.schema import (
 )
 from toolkit.connectors import opendatasoft
 from toolkit.transforms.local_time import start_of_local_day
+from toolkit.transforms.periods import permanent_period
+from toolkit.transforms.titles import truncate
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/prescriptions-routieres-du-departement-aveyron/exports/parquet"
 LOCAL_FILE = "explorations/dp_aveyron/data/prescriptions-routieres-du-departement-aveyron.parquet"
@@ -171,14 +173,7 @@ def compute_period_fields(df: pl.DataFrame):
         )
 
     df = df.with_columns(signed.alias("_start_date"))
-    return df.with_columns(
-        [
-            start_of_local_day(df, "_start_date").alias("period_start_date"),
-            pl.lit(None).alias("period_end_date"),
-            pl.lit("everyDay").alias("period_recurrence_type"),
-            pl.lit(True).alias("period_is_permanent"),
-        ]
-    )
+    return df.with_columns(permanent_period(start_of_local_day(df, "_start_date")))
 
 
 def compute_location_fields(df: pl.DataFrame):
@@ -209,8 +204,6 @@ IDENTIFIER_PREFIX = "AV-GB"
 # What the producer writes when there is no arrete to refer to. Treated as an absence,
 # otherwise every one of them lands in a single catch-all regulation.
 PLACEHOLDER_REFERENCES = ["0arrete", "arlot"]
-TITLE_MAX_LENGTH = 255
-TITLE_ELLIPSIS = "..."
 OTHER_CATEGORY_TEXT = "Restriction de gabarit"
 
 
@@ -277,12 +270,7 @@ def compute_regulation_fields(df: pl.DataFrame):
                 "regulation_category"
             ),
             pl.lit(PostApiRegulationsAddBodySubject.OTHER.value).alias("regulation_subject"),
-            pl.when(title.str.len_chars() > TITLE_MAX_LENGTH)
-            .then(
-                title.str.slice(0, TITLE_MAX_LENGTH - len(TITLE_ELLIPSIS)) + pl.lit(TITLE_ELLIPSIS)
-            )
-            .otherwise(title)
-            .alias("regulation_title"),
+            truncate(title).alias("regulation_title"),
             pl.lit(OTHER_CATEGORY_TEXT).alias("regulation_other_category_text"),
         ]
     )

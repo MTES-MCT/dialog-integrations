@@ -15,6 +15,7 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.transforms.periods import permanent_period
 
 from .schema import RennesCirculationInterditeRawDataSchema
 
@@ -83,14 +84,7 @@ def compute_measure_fields(df: pl.DataFrame):
 def compute_period_fields(df: pl.DataFrame):
     """Permanent period starting on 2022-01-13, the creation date of the file."""
 
-    return df.with_columns(
-        [
-            pl.lit("2022-01-13T00:00:00+01:00").alias("period_start_date"),
-            pl.lit(None).alias("period_end_date"),
-            pl.lit("everyDay").alias("period_recurrence_type"),
-            pl.lit(True).alias("period_is_permanent"),
-        ]
-    )
+    return df.with_columns(permanent_period(pl.lit("2022-01-13T00:00:00+01:00")))
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:

@@ -37,13 +37,9 @@ from integrations.co_paris.eudonet.raw_rows import (
 )
 from integrations.co_paris.eudonet.regulations import (
     IDENTIFIER_PREFIX,
-    TITLE_MAX_LENGTH,
     compute_period_fields,
     compute_regulation_fields,
     filter_police_prefecture,
-)
-from integrations.co_paris.eudonet.text import (
-    ELLIPSIS as TITLE_ELLIPSIS,
 )
 from integrations.co_paris.eudonet.vehicles import (
     compute_vehicle_fields,
@@ -55,6 +51,8 @@ from integrations.co_paris.eudonet.vocabulary import (
 )
 from run.organization import BaseIntegration
 from tests.co_paris.eudonet_fixture import load_fixture
+from toolkit.transforms.titles import ELLIPSIS as TITLE_ELLIPSIS
+from toolkit.transforms.titles import TITLE_MAX_LENGTH
 
 FIXTURE_EXTRACTED_ON = date(2026, 9, 8)
 

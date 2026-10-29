@@ -22,6 +22,7 @@ from integrations.co_lyon.grand_lyon import fetch_layer
 from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
 from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 from toolkit.transforms.time_slots import to_iso_slots
+from toolkit.transforms.titles import truncate
 
 from .description import RESIDUAL_MAX_CHARS, read_description
 from .schema import LyonChantiersPerturbantsRawDataSchema
@@ -40,9 +41,6 @@ MEASURE_TYPE_BY_PERTURBATION = {
     # Dropped: "Circulation réduite*" has no DiaLog type, "Circulation sens
     # unique" needs a direction the layer lacks.
 }
-
-TITLE_MAX_LENGTH = 255
-TITLE_ELLIPSIS = "..."
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
@@ -286,12 +284,7 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
             pl.lit(PostApiRegulationsAddBodySubject.ROADMAINTENANCE.value).alias(
                 "regulation_subject"
             ),
-            pl.when(title.str.len_chars() > TITLE_MAX_LENGTH)
-            .then(
-                title.str.slice(0, TITLE_MAX_LENGTH - len(TITLE_ELLIPSIS)) + pl.lit(TITLE_ELLIPSIS)
-            )
-            .otherwise(title)
-            .alias("regulation_title"),
+            truncate(title).alias("regulation_title"),
             pl.lit("Chantier perturbant").alias("regulation_other_category_text"),
             # `url_document` is empty on every row today; kept so it flows through the
             # day the producer fills it in.

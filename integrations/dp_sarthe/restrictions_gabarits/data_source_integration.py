@@ -15,6 +15,8 @@ from integrations.dp_sarthe.restrictions_gabarits.schema import (
 )
 from toolkit.connectors import opendatasoft
 from toolkit.transforms.local_time import start_of_local_day
+from toolkit.transforms.periods import permanent_period
+from toolkit.transforms.vehicle_types import restricted_types_from_limits
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_restrictions_gabarits/exports/csv?lang=fr&timezone=Europe%2FLondon&use_labels=true&delimiter=%3B"
 
@@ -94,14 +96,7 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     df = df.filter(pl.col("date_creation").is_not_null())
 
-    return df.with_columns(
-        [
-            start_of_local_day(df, "date_creation").alias("period_start_date"),
-            pl.lit(None).alias("period_end_date"),
-            pl.lit("everyDay").alias("period_recurrence_type"),
-            pl.lit(True).alias("period_is_permanent"),
-        ]
-    )
+    return df.with_columns(permanent_period(start_of_local_day(df, "date_creation")))
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
@@ -141,10 +136,12 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
             .otherwise(None)
             .alias("vehicle_max_width"),
             pl.lit([]).cast(pl.List(pl.Utf8)).alias("vehicle_exempted_types"),
-            pl.when((pl.col("tonnage").is_not_null()) & (pl.col("tonnage") > 0))
-            .then(pl.lit(["heavyGoodsVehicle"]).cast(pl.List(pl.Utf8)))
-            .otherwise(pl.lit(["dimensions"]).cast(pl.List(pl.Utf8)))
-            .alias("vehicle_restricted_types"),
             pl.lit(None).cast(pl.Utf8).alias("vehicle_other_exempted_type_text"),
         ]
+    ).with_columns(
+        restricted_types_from_limits(
+            pl.col("vehicle_heavyweight_max_weight"),
+            pl.col("vehicle_max_height"),
+            pl.col("vehicle_max_width"),
+        ).alias("vehicle_restricted_types")
     )

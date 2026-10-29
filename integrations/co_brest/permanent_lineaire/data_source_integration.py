@@ -23,7 +23,9 @@ from api.dia_log_client.models import (
 from canonical.source import BaseDataSourceIntegration
 from toolkit.connectors.download import DOWNLOAD_TIMEOUT
 from toolkit.transforms.local_time import start_of_local_day
+from toolkit.transforms.periods import permanent_period
 from toolkit.transforms.time_slots import _clock, to_iso_slots
+from toolkit.transforms.vehicle_types import restricted_types_from_limits
 
 from .schema import Schema
 
@@ -212,16 +214,13 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
 
     return df.with_columns(
         [
-            start_of_local_day(df, "DT_MAT").alias("period_start_date"),
+            *permanent_period(start_of_local_day(df, "DT_MAT")),
             pl.struct(pl.col("DT_MAT"), text_reading("time_slots").alias("slots"))
             .map_elements(
                 lambda row: to_iso_slots(row["DT_MAT"].date(), row["slots"]) or None,
                 return_dtype=pl.List(pl.Struct({"start_time": pl.Utf8, "end_time": pl.Utf8})),
             )
             .alias("period_time_slots"),
-            pl.lit(None).alias("period_end_date"),
-            pl.lit("everyDay").alias("period_recurrence_type"),
-            pl.lit(True).alias("period_is_permanent"),
         ]
     )
 
@@ -373,19 +372,12 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
         .alias("vehicle_other_exempted_type_text")
     )
 
-    has_weight = pl.col("vehicle_heavyweight_max_weight").is_not_null()
-    has_size = (
-        pl.col("vehicle_max_height").is_not_null() | pl.col("vehicle_max_width").is_not_null()
-    )
     df = df.with_columns(
-        pl.when(has_weight & has_size)
-        .then(pl.lit(["heavyGoodsVehicle", "dimensions"]))
-        .when(has_weight)
-        .then(pl.lit(["heavyGoodsVehicle"]))
-        .when(has_size)
-        .then(pl.lit(["dimensions"]))
-        .otherwise(None)
-        .alias("vehicle_restricted_types")
+        restricted_types_from_limits(
+            pl.col("vehicle_heavyweight_max_weight"),
+            pl.col("vehicle_max_height"),
+            pl.col("vehicle_max_width"),
+        ).alias("vehicle_restricted_types")
     )
 
     df = df.with_columns(

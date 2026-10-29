@@ -119,7 +119,9 @@ report/             ce que lisent les humains
   notifier.py  summary.py  tchap_bot.py   message Tchap, résumé GitHub
 toolkit/            ce qu'une source peut appeler
   connectors/       lire une plateforme : Opendatasoft, ArcGIS, WFS, téléchargement
-  transforms/       heures locales, créneaux, périmètre de compétence
+  transforms/       heures locales, créneaux, périmètre de compétence, troncature des
+                    intitulés, période permanente, types de véhicules déduits des
+                    seuils, jumeau 5 km/h de l'aire piétonne
   rules/            les règles métier partagées, et leur application
 integrations/       un dossier par organisation DiaLog, rien d'autre
 api/                client de l'API DiaLog, généré (non versionné)

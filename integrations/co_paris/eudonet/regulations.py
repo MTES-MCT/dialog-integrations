@@ -5,9 +5,10 @@ from loguru import logger
 
 from api.dia_log_client.models import PeriodRecurrenceTypeEnum, PostApiRegulationsAddBodySubject
 from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
+from toolkit.transforms.titles import OTHER_CATEGORY_TEXT_MAX_LENGTH, truncate, truncate_text
 
 from .counts import count_by
-from .text import plain_text, truncate
+from .text import plain_text
 from .vocabulary import (
     ACCEPTED_STATES_BY_TYPE,
     PERMANENT_SUBJECT_TEXT,
@@ -21,8 +22,6 @@ from .vocabulary import (
 
 IDENTIFIER_PREFIX = "PARIS-EUDO-"
 
-TITLE_MAX_LENGTH = 255
-OTHER_CATEGORY_TEXT_MAX_LENGTH = 100
 SUBJECT_OTHER = PostApiRegulationsAddBodySubject.OTHER.value
 
 IS_PERMANENT = pl.col("a_type") == TYPE_PERMANENT_LABEL
@@ -131,9 +130,8 @@ def _regulation_columns(df: pl.DataFrame) -> pl.DataFrame:
     title = pl.Series(
         "regulation_title",
         [
-            truncate(
-                f"Arrêté n° {identifier} — {cleaned}" if cleaned else f"Arrêté n° {identifier}",
-                TITLE_MAX_LENGTH,
+            truncate_text(
+                f"Arrêté n° {identifier} — {cleaned}" if cleaned else f"Arrêté n° {identifier}"
             )
             for identifier, cleaned in zip(
                 df.get_column("a_identifier"),
@@ -161,7 +159,7 @@ def _regulation_columns(df: pl.DataFrame) -> pl.DataFrame:
             .then(pl.lit(PERMANENT_SUBJECT_TEXT))
             .when(reason == "")
             .then(pl.lit(UNKNOWN_REASON_TEXT))
-            .otherwise(reason.str.slice(0, OTHER_CATEGORY_TEXT_MAX_LENGTH))
+            .otherwise(truncate(reason, OTHER_CATEGORY_TEXT_MAX_LENGTH))
             .alias("regulation_other_category_text"),
             # No durable URL for the signed PDF: the Eudonet attachment link is a one-shot
             # token, and the BOVP has no per-act permalink we could rebuild.

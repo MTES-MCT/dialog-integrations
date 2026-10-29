@@ -4,7 +4,8 @@ from collections import Counter
 import polars as pl
 from loguru import logger
 
-from api.dia_log_client.models import MeasureTypeEnum
+from toolkit.transforms import pedestrian_area
+from toolkit.transforms.pedestrian_area import PEDESTRIAN_AREA_SPEED
 
 from .counts import count_by
 from .vocabulary import (
@@ -15,7 +16,6 @@ from .vocabulary import (
     LANE_PARAMETERS,
     MEASURE_TYPE_BY_LABEL,
     MULTI_VALUE_SEPARATOR,
-    PEDESTRIAN_AREA_SPEED,
     SPEED_PARAMETER,
     TIME_SLOT_PARAMETERS,
 )
@@ -168,27 +168,8 @@ def has_filled_parameter(df: pl.DataFrame, names: frozenset[str]) -> pl.Series:
 
 
 def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:
-    """Give every published pedestrian area its walking-pace limit, in the same regulation.
-
-    Code de la route R. 110-2: no exemption on the limit, as the vehicles let in still
-    drive at walking pace.
-    """
-    bans = df.filter(pl.col("m_type") == LABEL_PEDESTRIAN_AREA)
-    if not bans.height:
-        return df
-    speeds = bans.with_columns(
-        pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value).alias("measure_type_"),
-        pl.lit(PEDESTRIAN_AREA_SPEED, dtype=df.schema["measure_max_speed"]).alias(
-            "measure_max_speed"
-        ),
-        (pl.col("measure_group_key") + pl.lit(f"-V{PEDESTRIAN_AREA_SPEED}")).alias(
-            "measure_group_key"
-        ),
-        pl.lit(None, dtype=pl.List(pl.Utf8)).alias("vehicle_exempted_types"),
-        pl.lit(None, dtype=pl.Utf8).alias("vehicle_other_exempted_type_text"),
+    return pedestrian_area.add_pedestrian_area_speed(
+        df,
+        is_ban=pl.col("m_type") == LABEL_PEDESTRIAN_AREA,
+        twin_group_key=pl.col("measure_group_key") + pl.lit(f"-V{PEDESTRIAN_AREA_SPEED}"),
     )
-    logger.info(
-        f"{bans['m_file_id'].n_unique()} pedestrian-area bans get their "
-        f"{PEDESTRIAN_AREA_SPEED} km/h twin ({speeds.height} locations)"
-    )
-    return pl.concat([df, speeds], how="vertical")

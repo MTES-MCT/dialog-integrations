@@ -84,8 +84,6 @@ LABEL_CATEGORY_LIMIT = "limitation catégorielle"
 
 IMPLIED_MAX_SPEED_BY_LABEL: dict[str, int] = {LABEL_ZONE_30: 30}
 
-PEDESTRIAN_AREA_SPEED = 5
-
 SERVICE_POLICE_PREFECTURE = "Préfecture de Police"
 
 # `1114` Raison. Everything the catalog holds beyond these lands on `other` + free text;

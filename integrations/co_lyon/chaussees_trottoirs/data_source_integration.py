@@ -20,9 +20,6 @@ from api.dia_log_client.models import (
 from api.dia_log_client.models import (
     PostApiRegulationsAddBodyMeasuresItemVehicleSetType0ExemptedTypesType0Item as VehicleExemptedTypeEnum,  # noqa: E501
 )
-from api.dia_log_client.models import (
-    PostApiRegulationsAddBodyMeasuresItemVehicleSetType0RestrictedTypesType0Item as VehicleRestrictedTypeEnum,  # noqa: E501
-)
 from canonical.source import BaseDataSourceIntegration
 from dialog.calls import DialogApi
 from integrations.co_lyon.chaussees_trottoirs.regulation_key import (
@@ -33,7 +30,11 @@ from integrations.co_lyon.chaussees_trottoirs.regulation_key import (
 )
 from integrations.co_lyon.chaussees_trottoirs.schema import LyonChausseesTrottoirsRawDataSchema
 from integrations.co_lyon.grand_lyon import fetch_layer
+from toolkit.transforms.pedestrian_area import add_pedestrian_area_speed
 from toolkit.transforms.perimeter import Perimeter, discard_outside_perimeter
+from toolkit.transforms.periods import permanent_period
+from toolkit.transforms.titles import truncate
+from toolkit.transforms.vehicle_types import restricted_types_from_limits
 
 WFS_LAYER = "pvo_patrimoine_voirie.pvochausseetrottoir"
 
@@ -184,7 +185,11 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(self.count_retained_restrictions)
             # After the counters (not a restriction of its own) and the identifier (it
             # joins the regulation of its ban).
-            .pipe(add_pedestrian_area_speed)
+            .pipe(
+                add_pedestrian_area_speed,
+                is_ban=pl.col("measure_group_key") == pl.lit("AIRE_PIETONNE"),
+                twin_group_key=pl.lit(PEDESTRIAN_AREA_SPEED_KEY),
+            )
             # Groups by (regulation, measure, street), so after the identifier.
             .pipe(merge_contiguous_segments)
             .pipe(compute_geographic_split_order)
@@ -419,25 +424,11 @@ def dimension_signature() -> pl.Expr:
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Vehicle set of each measure: dimension limits are carried over, never invented."""
     is_dimension = pl.col("_measure_kind") == "dimensions"
-    has_tonnage = pl.col("limitationtonnage").is_not_null()
-    has_size = pl.any_horizontal(
-        pl.col(column).is_not_null()
-        for column in ("limitationhauteur", "limitationlargeur", "limitationlongueur")
-    )
-
-    restricted_types = (
-        pl.when(has_tonnage & has_size)
-        .then(
-            pl.lit(
-                [
-                    VehicleRestrictedTypeEnum.HEAVYGOODSVEHICLE.value,
-                    VehicleRestrictedTypeEnum.DIMENSIONS.value,
-                ]
-            )
-        )
-        .when(has_tonnage)
-        .then(pl.lit([VehicleRestrictedTypeEnum.HEAVYGOODSVEHICLE.value]))
-        .otherwise(pl.lit([VehicleRestrictedTypeEnum.DIMENSIONS.value]))
+    restricted_types = restricted_types_from_limits(
+        pl.col("limitationtonnage"),
+        pl.col("limitationhauteur"),
+        pl.col("limitationlargeur"),
+        pl.col("limitationlongueur"),
     )
 
     # One enters a ZTL or a pedestrian area to reach an address: without this exemption the
@@ -480,12 +471,7 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     date is never presumed. Not the run day either: the sync compares dates, so every
     order would look modified each morning. `sync/dating.py` fills it when writing.
     """
-    return df.with_columns(
-        pl.lit(None, dtype=pl.String).alias("period_start_date"),
-        pl.lit(None).alias("period_end_date"),
-        pl.lit("everyDay").alias("period_recurrence_type"),
-        pl.lit(True).alias("period_is_permanent"),
-    )
+    return df.with_columns(permanent_period())
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
@@ -497,12 +483,12 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     df = df.filter(pl.col("geometry").is_not_null())
     return df.with_columns(
         pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),
-        pl.concat_str(
-            [pl.col("nomvoie1").fill_null("Voie sans nom"), pl.col("commune1").fill_null("")],
-            separator=" – ",
-        )
-        .str.slice(0, 255)
-        .alias("location_label"),
+        truncate(
+            pl.concat_str(
+                [pl.col("nomvoie1").fill_null("Voie sans nom"), pl.col("commune1").fill_null("")],
+                separator=" – ",
+            )
+        ).alias("location_label"),
         pl.col("geometry").alias("location_geometry"),
     )
 
@@ -594,25 +580,6 @@ def compute_regulation_fields(
     ).with_columns(regulation_title())
 
 
-def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:
-    """Give every published pedestrian area its walking-pace limit, in the same regulation.
-
-    The Code de la route (R. 110-2) defines the area by both (team decision, 2026-09-14).
-    A twin of the ban, it inherits its filters; no exemption, as those let in still walk.
-    """
-    bans = df.filter(pl.col("measure_group_key") == pl.lit("AIRE_PIETONNE"))
-    if not bans.height:
-        return df
-    speeds = bans.with_columns(
-        pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value).alias("measure_type_"),
-        pl.lit(int(PEDESTRIAN_AREA_SPEED), dtype=pl.Int64).alias("measure_max_speed"),
-        pl.lit(PEDESTRIAN_AREA_SPEED_KEY).alias("measure_group_key"),
-        pl.lit(None, dtype=pl.List(pl.String)).alias("vehicle_exempted_types"),
-    )
-    logger.info(f"{speeds.height} pedestrian-area bans get their {PEDESTRIAN_AREA_SPEED} km/h twin")
-    return pl.concat([df, speeds], how="vertical")
-
-
 def regulation_title() -> pl.Expr:
     """Human-readable title, never blocking, always fabricated."""
     numbered = pl.format("Arrêté n°{} – Métropole de Lyon", pl.col("order_number"))
@@ -638,12 +605,8 @@ def regulation_title() -> pl.Expr:
         .otherwise(pl.format("Restriction de gabarit {} – Métropole de Lyon", dimension_label()))
     )
 
-    return (
-        pl.when(pl.col("_is_own_measure"))
-        .then(numbered)
-        .otherwise(fallback)
-        .str.slice(0, 255)
-        .alias("regulation_title")
+    return truncate(pl.when(pl.col("_is_own_measure")).then(numbered).otherwise(fallback)).alias(
+        "regulation_title"
     )
 
 

@@ -8,9 +8,9 @@ from loguru import logger
 from api.dia_log_client.models import (
     PostApiRegulationsAddBodyMeasuresItemVehicleSetType0ExemptedTypesType0Item as VehicleExemptedTypeEnum,  # noqa: E501
 )
+from toolkit.transforms.titles import truncate_text
 
 from .counts import count_by
-from .text import truncate
 from .vocabulary import (
     ALL_VEHICLES_LABELS,
     EXEMPTED_OTHER,
@@ -180,7 +180,7 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def _free_text(texts: list[str]) -> str:
-    return truncate(FREE_TEXT_SEPARATOR.join(texts), OTHER_TYPE_TEXT_MAX_LENGTH)
+    return truncate_text(FREE_TEXT_SEPARATOR.join(texts), OTHER_TYPE_TEXT_MAX_LENGTH)
 
 
 def _append_unique(values: list[str], value: str) -> None:

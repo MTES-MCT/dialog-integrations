@@ -13,6 +13,7 @@ from canonical.source import BaseDataSourceIntegration
 from integrations.dp_sarthe.limitations_vitesse.schema import SartheRawDataSchema
 from toolkit.connectors import opendatasoft
 from toolkit.transforms.local_time import start_of_local_day
+from toolkit.transforms.periods import permanent_period
 
 URL = (
     "https://data.sarthe.fr"
@@ -122,14 +123,9 @@ def compute_start_date(df: pl.DataFrame) -> pl.DataFrame:
         .alias("_raw_start_date")
     )
 
-    return df.with_columns(
-        [
-            start_of_local_day(df, "_raw_start_date").alias("period_start_date"),
-            pl.lit(None).alias("period_end_date"),
-            pl.lit("everyDay").alias("period_recurrence_type"),
-            pl.lit(True).alias("period_is_permanent"),
-        ]
-    ).drop("_raw_start_date")
+    return df.with_columns(permanent_period(start_of_local_day(df, "_raw_start_date"))).drop(
+        "_raw_start_date"
+    )
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:

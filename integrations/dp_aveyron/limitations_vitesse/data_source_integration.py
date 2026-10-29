@@ -15,6 +15,7 @@ from integrations.dp_aveyron.limitations_vitesse.schema import (
     AveyronLimitationsVitesseRawDataSchema,
 )
 from toolkit.connectors import opendatasoft
+from toolkit.transforms.periods import permanent_period
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/limitations-de-vitesse-du-departement-aveyron/exports/parquet"
 
@@ -221,19 +222,8 @@ def compute_measure_fields(df: pl.DataFrame):
 
 
 def compute_period_fields(df: pl.DataFrame):
-    """Permanent, every day, no end, and a null start date.
-
-    The source has no date, and the day of the run would make every limit look
-    modified each morning. `sync/dating.py` fills the null when DiaLog is written.
-    """
-    return df.with_columns(
-        [
-            pl.lit(None, dtype=pl.String).alias("period_start_date"),
-            pl.lit(None).alias("period_end_date"),
-            pl.lit("everyDay").alias("period_recurrence_type"),
-            pl.lit(True).alias("period_is_permanent"),
-        ]
-    )
+    """Permanent and undated: the source has no date."""
+    return df.with_columns(permanent_period())
 
 
 # `cote` is left out: it becomes `location_direction`, so a stretch limited alike both ways
