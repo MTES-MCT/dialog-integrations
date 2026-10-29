@@ -8,17 +8,16 @@ on its own is left to it.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
-from zoneinfo import ZoneInfo
 
 import polars as pl
+
+from canonical.regulation_measure import DEFECT_COLUMN
+from toolkit.transforms.local_time import parse_instant
 
 END_BEFORE_START = "fin avant début"
 SPEED_WITHOUT_VALUE = "limitation sans vitesse"
 MISSING_GEOMETRY = "géométrie manquante"
 BAD_COORDINATES = "coordonnées hors bornes ou inversées"
-
-PARIS = ZoneInfo("Europe/Paris")
 
 # Metropolitan France: a (lat, lon) pair sent in GeoJSON's (lon, lat) order lands in this
 # box, where no correctly ordered point of a territory DiaLog serves falls.
@@ -33,9 +32,10 @@ def failing_rows(df: pl.DataFrame) -> pl.DataFrame:
         return pl.DataFrame(schema={"regulation_identifier": pl.Utf8, "reason": pl.Utf8})
 
     if {"period_start_date", "period_end_date"} <= set(df.columns):
+        # An unreadable date is the API's to refuse, not this check's.
         ends_early = []
         for start, end in zip(df["period_start_date"].to_list(), df["period_end_date"].to_list()):
-            begins, ends = _parse(start), _parse(end)
+            begins, ends = parse_instant(start), parse_instant(end)
             ends_early.append(begins is not None and ends is not None and ends < begins)
         reasons.append(_flag(df, pl.Series(ends_early), END_BEFORE_START))
 
@@ -63,6 +63,14 @@ def failing_rows(df: pl.DataFrame) -> pl.DataFrame:
         bad = [_bad_coordinates(value) for value in df["location_geometry"].to_list()]
         reasons.append(_flag(df, pl.Series(bad), BAD_COORDINATES))
 
+    if DEFECT_COLUMN in df.columns:
+        reasons.append(
+            df.filter(pl.col(DEFECT_COLUMN).is_not_null()).select(
+                pl.col("regulation_identifier").cast(pl.Utf8),
+                reason=pl.col(DEFECT_COLUMN).cast(pl.Utf8),
+            )
+        )
+
     return pl.concat(reasons).unique(maintain_order=True)
 
 
@@ -72,23 +80,6 @@ def _flag(df: pl.DataFrame, mask: pl.Series, reason: str) -> pl.DataFrame:
         .select(pl.col("regulation_identifier").cast(pl.Utf8))
         .with_columns(reason=pl.lit(reason))
     )
-
-
-def _parse(value) -> datetime | None:
-    """A period bound as the canonical model carries it: ISO text, a date or a datetime."""
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        parsed = value
-    elif isinstance(value, date):
-        parsed = datetime(value.year, value.month, value.day)
-    else:
-        try:
-            parsed = datetime.fromisoformat(str(value))
-        except ValueError:
-            # Unreadable dates are the API's to refuse, not this check's.
-            return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=PARIS)
 
 
 def _bad_coordinates(geometry) -> bool:

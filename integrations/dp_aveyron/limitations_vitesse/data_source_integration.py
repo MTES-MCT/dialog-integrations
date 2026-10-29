@@ -67,6 +67,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(discard_directional_stretches)
             # After the locations: the blocklist names stretches by their milestones.
             .pipe(discard_refused_segments)
+            # Before the rows are grouped into regulations.
+            .pipe(self.apply_rules)
             # Before duplicates are merged: the rows fetched count them too.
             .pipe(self.count_retained_restrictions)
             .pipe(compute_regulation_fields)

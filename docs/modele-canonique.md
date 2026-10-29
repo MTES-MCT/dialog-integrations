@@ -34,6 +34,7 @@ ligne passe les contrôles de `checks/rows.py` :
 * limitation de vitesse sans vitesse ;
 * emprise `rawGeoJSON` sans géométrie ;
 * coordonnées hors bornes ou en ordre (latitude, longitude).
+* une ligne marquée d'un défaut par une règle métier (`row_defect`, ci-dessous).
 
 Un arrêté dont une ligne échoue est laissé de côté **en entier**, et laissé tel que DiaLog
 le détient : ni créé, ni mis à jour, ni clos. Il compte parmi les « écartés par la
@@ -41,3 +42,28 @@ pipeline » de Tchap ; le motif est dans le journal de l'exécution.
 
 Un arrêté dont une mesure n'a pas pu être construite suit le même chemin, toutes ses
 tranches (`-01`, `-02`…) comprises.
+
+## Les règles métier
+
+Une règle (`toolkit/rules/rule.py`) a un code, un libellé, souvent un numéro de règle, et
+une **nature** :
+
+* **écarté** : la ligne est retirée ;
+* **défaut** : la ligne est marquée (`row_defect`), et son arrêté laissé tel que DiaLog le
+  détient, comme pour un contrôle commun qui échoue : une ligne cassée ne doit pas clore
+  ce qui était juste ;
+* **signalé** : journalisé, rien n'est retiré.
+
+Elle s'écrit une fois, en expression Polars sur les noms canoniques. Une source déclare
+dans `rules` les règles de `toolkit/rules/` qu'elle applique, chacune à la place de son
+propre code : ajouter une règle à la banque ne change aucune autre source.
+
+Une source qui ne regroupe pas n'a rien d'autre à écrire : la classe de base applique ses
+règles à ses lignes canoniques. Une source qui regroupe par numéro d'arrêté les applique
+avant, par `self.apply_rules(df)`, puisque retirer une ligne après fausserait la règle des
+100 % ; elle déclare comment ses propres colonnes se lisent en noms canoniques
+(`rule_inputs`). Chaque règle s'applique à tout le jeu, et une ligne qui relève de deux
+règles compte pour les deux.
+
+Le rapport de synchronisation donne, par source, le nombre de lignes de chaque règle ; le
+journal, quelques identifiants.

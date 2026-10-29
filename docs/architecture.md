@@ -53,7 +53,7 @@ flowchart LR
     subgraph H["Ici"]
         direction LR
         h1["source"] --> h2["traitements propres<br/>à la source"] --> h3["canonique"] --> h4["contrôles"] --> h5["envoi"]
-        r["banque de règles métier<br/>toolkit/rules/ (à venir)"] -.->|"appelée par"| h2
+        r["banque de règles métier<br/>toolkit/rules/"] -.->|"appelée par"| h2
     end
 
     subgraph U["Habituellement"]
@@ -71,8 +71,10 @@ produire, quelle que soit la façon dont elle y arrive.
 Conséquence pour qui lit le code : une règle métier se cherche aujourd'hui dans la source
 qui l'applique (`integrations/{org}/{source}/data_source_integration.py`), pas dans un
 module commun. Seuls les contrôles de `checks/rows.py` valent pour toutes les sources.
-Les règles qu'appliquent plusieurs sources iront dans `toolkit/rules/` : une banque de
-méthodes qu'une source appelle pendant sa transformation, une méthode par règle.
+Les règles qu'appliquent plusieurs sources vont dans `toolkit/rules/`, au fil de la
+migration des sources : une règle s'écrit une fois sur les noms canoniques, et une source
+l'applique à l'étape de sa transformation qu'elle choisit (voir
+[Le modèle canonique et les contrôles](modele-canonique.md#les-règles-métier)).
 
 ## Où vit chaque étape
 
@@ -118,7 +120,7 @@ report/             ce que lisent les humains
 toolkit/            ce qu'une source peut appeler
   connectors/       lire une plateforme : Opendatasoft, ArcGIS, WFS, téléchargement
   transforms/       heures locales, créneaux, périmètre de compétence
-  rules/            à venir : une méthode par règle métier partagée entre sources
+  rules/            les règles métier partagées, et leur application
 integrations/       un dossier par organisation DiaLog, rien d'autre
 api/                client de l'API DiaLog, généré (non versionné)
 tests/

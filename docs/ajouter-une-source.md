@@ -25,6 +25,9 @@ integrations/co_maville
     nombre de lignes annoncé par le portail.
   * ArcGIS : `arcgis.read_layer(URL)` lit toutes les pages d'une couche FeatureServer en
     EPSG:4326 ; une couche plus courte qu'annoncé fait échouer la source, qui est gelée.
+  * Écarter ou marquer des lignes : par une règle métier, commune ou propre à la source,
+    appliquée par `self.apply_rules(df)`, qui la compte au rapport (voir
+    [les règles métier](modele-canonique.md#les-règles-métier)).
 
 Du code partagé par les sources d'une même organisation reste dans son dossier (exemple :
 `integrations/co_lyon/grand_lyon.py`). Pour qu'une organisation tourne chaque nuit,

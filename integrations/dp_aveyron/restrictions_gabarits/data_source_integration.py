@@ -43,6 +43,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(filter_unrelevant)
             .pipe(compute_measure_fields)
             .pipe(compute_location_fields)
+            # Before the rows are grouped into regulations.
+            .pipe(self.apply_rules)
             # After the regulation: a measure carries one period over its group of rows (R-28).
             .pipe(compute_regulation_fields)
             .pipe(compute_period_fields)
