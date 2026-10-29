@@ -169,3 +169,11 @@ def test_each_update_is_detailed_field_by_field():
 
     assert "Différences détectées" in report
     assert "measures[0].maxSpeed : 50 → 30" in report
+
+
+def test_the_report_counts_the_rows_each_rule_applied_to():
+    produced = {f"{PREFIX}a": digest(f"{PREFIX}a")}
+    plan = reconcile(produced, [], {}, identifier_prefix=PREFIX, delete_missing=True)
+    funnel = SourceFunnel(name="eudonet", rules={"arrêté terminé (écarté)": 12})
+
+    assert "règles — arrêté terminé (écarté) : 12" in report_for(plan, produced, funnels=[funnel])

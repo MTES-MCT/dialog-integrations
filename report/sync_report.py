@@ -47,6 +47,8 @@ class SourceFunnel:
     # organization sharing a label are reported together.
     label: str = ""
     metrics: dict[str, int] = field(default_factory=dict)
+    # Rows each business rule applied to, by "label (nature)".
+    rules: dict[str, int] = field(default_factory=dict)
 
 
 def diff_digests(old: Any, new: Any, path: str = "") -> list[tuple[str, Any, Any]]:
@@ -141,6 +143,9 @@ def render_report(
         if funnel.metrics:
             measured = ", ".join(f"{name} : {value}" for name, value in funnel.metrics.items())
             lines.append(f"    volumétries source — {measured}")
+        if funnel.rules:
+            applied = ", ".join(f"{name} : {count}" for name, count in funnel.rules.items())
+            lines.append(f"    règles — {applied}")
     if not funnels:
         lines.append("  (aucune source n'a produit de données)")
     for name, why in (frozen_sources or {}).items():

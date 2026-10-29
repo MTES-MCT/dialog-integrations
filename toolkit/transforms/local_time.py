@@ -8,6 +8,9 @@ Anything else is read as UTC and shifts the regulation by one or two hours : a `
 suffix, a fixed offset, or no offset at all.
 """
 
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
 import polars as pl
 
 PARIS = "Europe/Paris"
@@ -74,3 +77,19 @@ def from_epoch_ms(column: str) -> pl.Expr:
         .dt.convert_time_zone(PARIS)
         .dt.strftime(ISO_WITH_OFFSET)
     )
+
+
+def parse_instant(value) -> datetime | None:
+    """ISO text, a date or a datetime as an aware instant; a naive one is read in Paris."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, date):
+        parsed = datetime(value.year, value.month, value.day)
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except ValueError:
+            return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=ZoneInfo(PARIS))

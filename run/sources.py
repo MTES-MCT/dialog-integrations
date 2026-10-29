@@ -111,6 +111,7 @@ def run_all(integration: BaseIntegration, outcome: IntegrationOutcome, limit_to)
                 regulations=len(source_regulations),
                 measures=num_measures,
                 metrics=metrics,
+                rules=dict(source.rule_counts),
             )
         )
 

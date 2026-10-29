@@ -178,6 +178,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_vehicle_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
+            # Before R-28 judges the orders, like the discards above.
+            .pipe(self.apply_rules)
             .pipe(compute_regulation_fields, self.foreign_order_keys)
             .pipe(self.count_retained_restrictions)
             # After the counters (not a restriction of its own) and the identifier (it

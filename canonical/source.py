@@ -7,6 +7,8 @@ from loguru import logger
 from api.dia_log_client import Client
 from canonical.regulation_measure import RegulationMeasure, unknown_canonical_columns
 from settings import OrganizationSettings
+from toolkit.rules.apply import RulesResult, apply_rules
+from toolkit.rules.rule import Nature, Rule
 
 
 class BaseDataSourceIntegration:
@@ -28,12 +30,22 @@ class BaseDataSourceIntegration:
     # Most locations a single POST may carry: above it the regulation is cut into
     # `IDENTIFIER-01`, `IDENTIFIER-02`… slices, ordered by `regulation_split_order`.
     max_locations_per_regulation: int | None = None
+
+    # The source's columns read as canonical ones, for `apply_rules` before its canonical
+    # frame exists (a source that groups by order number applies them before grouping).
+    rule_inputs: dict[str, pl.Expr] = {}
+    # The rules of `toolkit/rules/` this source applies, each in place of its own code.
+    rules: tuple[Rule, ...] = ()
+
     organization_settings: OrganizationSettings
     client: Client
 
     def __init__(self, organization_settings: OrganizationSettings, client: Client):
         self.organization_settings = organization_settings
         self.client = client
+        # By "label (nature)": rows each rule applied to, for the report.
+        self.rule_counts: dict[str, int] = {}
+        self._applied_codes: set[str] = set()
 
     @property
     def organization(self) -> str:
@@ -65,9 +77,39 @@ class BaseDataSourceIntegration:
         validated_data = self.validate_raw_data(raw_data)
         clean_data = validated_data.pipe(self.compute_clean_data)
         logger.info(f"After cleaning, got {clean_data.shape[0]} records")
+        clean_data = self._apply_rules_to_canonical(clean_data)
 
         clean_data = self.select_regulation_measure_fields(clean_data)
         return clean_data
+
+    def apply_rules(self, df: pl.DataFrame, *own_rules: Rule) -> pl.DataFrame:
+        """Apply the source's `rules` and any rule of its own, counting each."""
+        rules = [*self.rules, *own_rules]
+        if not rules:
+            return df
+        result = apply_rules(df, rules, self.rule_inputs, source=self.name or "")
+        self._count(result, rules)
+        self._applied_codes |= {r.code for r in rules if r.code not in result.unevaluated}
+        return result.frame
+
+    def _apply_rules_to_canonical(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Apply the rules to the canonical rows; a decision already applied must find nothing."""
+        rules = [
+            rule
+            for rule in self.rules
+            if rule.code not in self._applied_codes or rule.nature is Nature.DECISION
+        ]
+        result = apply_rules(df, rules, source=self.name or "")
+        if again := {c: n for c, n in result.applied.items() if c in self._applied_codes}:
+            logger.error(f"{self.name}: rules already applied still apply to rows: {again}")
+        self._count(result, rules)
+        return result.frame
+
+    def _count(self, result: RulesResult, rules: list[Rule]) -> None:
+        for rule in rules:
+            if applied := result.applied.get(rule.code):
+                key = f"{rule.label} ({rule.nature.value})"
+                self.rule_counts[key] = self.rule_counts.get(key, 0) + applied
 
     def fetch_raw_data(self) -> pl.DataFrame:
         raise NotImplementedError("Subclasses must implement fetch_raw_data method")

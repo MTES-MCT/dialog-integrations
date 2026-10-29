@@ -17,6 +17,7 @@ from checks import rows as checks
 from run.organization import BaseIntegration
 from settings import Organization
 from sync.digest import compute_regulation_digest
+from toolkit.rules.apply import apply_rules
 
 ORGANIZATIONS = [o.name for o in Organization]  # type: ignore[attr-defined]
 
@@ -141,3 +142,11 @@ def test_a_source_builds_the_same_regulations_twice_inside_its_prefix(organizati
     prefix = source.identifier_prefix or integration_class.identifier_prefix
     if prefix:
         assert all(identifier.startswith(prefix) for identifier in first)
+
+
+@pytest.mark.parametrize("organization, source", WITH_FIXTURE, ids=_id)
+def test_a_source_can_evaluate_every_rule_it_declares(organization, source):
+    instance = source(SimpleNamespace(organization=organization), client=None)
+    canonical_rows = instance.select_regulation_measure_fields(_clean_data(organization, source))
+
+    assert apply_rules(canonical_rows, list(instance.rules)).unevaluated == []

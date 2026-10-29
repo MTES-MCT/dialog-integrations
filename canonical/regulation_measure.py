@@ -56,7 +56,11 @@ class RegulationMeasure(TypedDict):
     vehicle_restricted_types: list[str] | None
     vehicle_other_exempted_type_text: str | None
     vehicle_other_restricted_type_text: str | None
+    # Set on a row a defect rule applies to: its regulation is left as DiaLog has it.
+    row_defect: str | None
 
+
+DEFECT_COLUMN = "row_defect"
 
 CANONICAL_FAMILIES = ("period_", "location_", "regulation_", "measure_", "vehicle_")
 
