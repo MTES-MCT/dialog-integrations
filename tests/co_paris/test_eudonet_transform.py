@@ -51,7 +51,7 @@ from integrations.co_paris.eudonet.vocabulary import (
     PERMANENT_SUBJECT_TEXT,
     UNKNOWN_REASON_TEXT,
 )
-from run.organization import BaseIntegration
+from payloads.measures import build_vehicle_set
 from tests.co_paris.eudonet_fixture import load_fixture
 from toolkit.rules.apply import apply_rules
 from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
@@ -622,9 +622,8 @@ def test_two_tonnages_on_one_measure_keep_the_stricter(second):
 
 def test_all_vehicles_alone_produces_only_that_field():
     source = DataSourceIntegration(None, None)  # type: ignore[arg-type]
-    integration = BaseIntegration.__new__(BaseIntegration)
     measure = pipeline(make_row()).pipe(source.select_regulation_measure_fields).row(0, named=True)
-    dto = integration.create_save_vehicle_dto(measure)  # type: ignore[arg-type]
+    dto = build_vehicle_set(measure)  # type: ignore[arg-type]
     assert dto.to_dict() == {"allVehicles": True}
 
 

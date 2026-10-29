@@ -13,7 +13,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from sync.snapshot import organization_dirs, readable
+from sync.snapshot import organization_dir
 
 # No floor: chosen on 2026-09-29.
 SHIFT_SHARE = 0.05
@@ -33,15 +33,12 @@ class TotalsStore:
     def __init__(
         self, organization: str, base_dir: Path | str | None = None, target: str | None = None
     ):
-        directory, legacy = organization_dirs(organization, target, base_dir)
-        self.path = directory / "totals.json"
-        self.legacy_path = legacy / "totals.json" if legacy else None
+        self.path = organization_dir(organization, target, base_dir) / "totals.json"
 
     def load(self) -> Totals | None:
         """The previous run's totals, or None when there is no usable file."""
-        path = readable(self.path, self.legacy_path)
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
             sources = payload.get("sources") or {}
             return Totals(
                 dialog_in_prefix=int(payload["dialog_in_prefix"]),
@@ -51,7 +48,7 @@ class TotalsStore:
         except FileNotFoundError:
             return None
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
-            logger.warning(f"Unreadable totals {path} ({e}), treated as missing")
+            logger.warning(f"Unreadable totals {self.path} ({e}), treated as missing")
             return None
 
     def save(self, totals: Totals) -> None:

@@ -213,7 +213,8 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     num_null_titles = df.select(pl.col("regulation_title").is_null().sum()).item()
-    logger.warning(f"Dropping {num_null_titles} rows with null regulation_title")
+    if num_null_titles:
+        logger.warning(f"Dropping {num_null_titles} rows with null regulation_title")
     df = df.filter(pl.col("regulation_title").is_not_null())
 
     return df
@@ -271,7 +272,12 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
         descriptif: config.measure_type.value for descriptif, config in DESCRIPTION_CONFIG.items()
     }
 
-    df = df.filter(pl.col("DESCRIPTIF").is_in(DESCRIPTION_CONFIG.keys())).with_columns(
+    known = pl.col("DESCRIPTIF").is_in(DESCRIPTION_CONFIG.keys())
+    unknown = df.filter(~known)
+    if unknown.height:
+        counts = dict(unknown["DESCRIPTIF"].value_counts(sort=True).iter_rows())
+        logger.warning(f"Dropping {unknown.height} rows without a DiaLog measure type: {counts}")
+    df = df.filter(known).with_columns(
         pl.col("DESCRIPTIF").replace(type_mapping).alias("measure_type_")
     )
 
@@ -308,10 +314,10 @@ def discard_misleading_rows(df: pl.DataFrame) -> pl.DataFrame:
         0, named=True
     )
     discarded = pl.any_horizontal(motives.values())
-    logger.warning(
-        f"Discarding {df.select(discarded.sum()).item()}/{df.height} rows DiaLog would "
-        f"publish wrong: {counts}"
-    )
+    if n_discarded := df.select(discarded.sum()).item():
+        logger.warning(
+            f"Discarding {n_discarded}/{df.height} rows DiaLog would publish wrong: {counts}"
+        )
     return df.filter(~discarded)
 
 

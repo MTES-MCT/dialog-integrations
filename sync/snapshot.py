@@ -34,25 +34,12 @@ def state_dir(base_dir: Path | str | None = None) -> Path:
     return Path(os.getenv(STATE_DIR_ENV) or DEFAULT_STATE_DIR)
 
 
-def organization_dirs(
+def organization_dir(
     organization: str, target: str | None, base_dir: Path | str | None = None
-) -> tuple[Path, Path | None]:
-    """Where an organization's state is written, and the older path still read.
-
-    Without a target (tests, tools), the older layout is the only one.
-    """
+) -> Path:
+    """Where an organization's state is kept: per target, flat without one (tests, tools)."""
     root = state_dir(base_dir)
-    if not target:
-        return root / organization, None
-    return root / target / organization, root / organization
-
-
-def readable(path: Path, legacy: Path | None) -> Path:
-    """`path` when it exists, else the older `legacy` path when that one does."""
-    if path.exists() or legacy is None or not legacy.exists():
-        return path
-    logger.info(f"Reading {legacy} written before the target was part of the path")
-    return legacy
+    return root / target / organization if target else root / organization
 
 
 class SnapshotStore:
@@ -67,23 +54,20 @@ class SnapshotStore:
     ):
         self.organization = organization
         self.source = source
-        directory, legacy = organization_dirs(organization, target, base_dir)
-        self.path = directory / f"{source}.json.gz"
-        self.legacy_path = legacy / f"{source}.json.gz" if legacy else None
+        self.path = organization_dir(organization, target, base_dir) / f"{source}.json.gz"
 
     def exists(self) -> bool:
-        return readable(self.path, self.legacy_path).exists()
+        return self.path.exists()
 
     def load(self) -> dict[str, Digest] | None:
         """The stored digests, or None when there is no usable snapshot: guessing an
         unreadable one could cost a mass rewrite."""
-        path = readable(self.path, self.legacy_path)
-        if not path.exists():
-            logger.info(f"No snapshot at {path}: no update will be detected this run")
+        if not self.path.exists():
+            logger.info(f"No snapshot at {self.path}: no update will be detected this run")
             return None
 
         try:
-            with gzip.open(path, "rt", encoding="utf-8") as handle:
+            with gzip.open(self.path, "rt", encoding="utf-8") as handle:
                 payload = json.load(handle)
         except (OSError, ValueError) as e:
             logger.warning(f"Unreadable snapshot {self.path} ({e}), treated as missing")

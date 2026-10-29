@@ -450,6 +450,9 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     `rawGeoJSON` carries no direction: harmless for a speed limit, blocking the day a
     one-way ban has to be expressed.
     """
+    n_null_geometry = df.select(pl.col("geometry").is_null().sum()).item()
+    if n_null_geometry:
+        logger.warning(f"Dropping {n_null_geometry}/{df.height} measures without geometry")
     df = df.filter(pl.col("geometry").is_not_null())
     return df.with_columns(
         pl.lit(RoadTypeEnum.RAWGEOJSON.value).alias("location_road_type"),

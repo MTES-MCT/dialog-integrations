@@ -62,10 +62,9 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
         if dup_ids.height > 0:
             logger.warning(
-                "Found %d duplicated fallback ids, dropping ALL corresponding rows",
-                dup_ids.height,
+                f"Found {dup_ids.height} duplicated fallback ids, dropping ALL corresponding rows"
             )
-            logger.debug("Duplicated ids: %s", dup_ids["id"].to_list())
+            logger.debug(f"Duplicated ids: {dup_ids['id'].to_list()}")
 
         df = df.join(dup_ids, on="id", how="anti")
 

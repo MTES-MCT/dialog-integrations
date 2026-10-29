@@ -24,7 +24,6 @@ from toolkit.transforms.periods import permanent_period
 from toolkit.transforms.titles import truncate
 
 URL = "https://opendata.aveyron.fr/api/explore/v2.1/catalog/datasets/prescriptions-routieres-du-departement-aveyron/exports/parquet"
-LOCAL_FILE = "explorations/dp_aveyron/data/prescriptions-routieres-du-departement-aveyron.parquet"
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
@@ -94,7 +93,12 @@ PANNEAUX = {
 
 def filter_unrelevant(df: pl.DataFrame):
     """Keep the signs listed in PANNEAUX."""
-    return df.filter(pl.col("panneau_type").is_in(PANNEAUX.keys()))
+    listed = pl.col("panneau_type").is_in(PANNEAUX.keys())
+    unlisted = df.filter(~listed)
+    if unlisted.height:
+        counts = dict(unlisted["panneau_type"].value_counts(sort=True).iter_rows())
+        logger.warning(f"Dropping {unlisted.height} signs outside PANNEAUX: {counts}")
+    return df.filter(listed)
 
 
 # The unit each sign states its value in. `B9i` (caravans) and `B18c` (hazardous goods)

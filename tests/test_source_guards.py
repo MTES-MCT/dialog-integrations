@@ -225,23 +225,17 @@ def test_a_source_writing_outside_its_own_prefix_is_refused(monkeypatch, tmp_pat
         integration.integrate_regulations()
 
 
-def test_state_is_kept_per_target_and_the_older_path_is_still_read(tmp_path):
-    old = SnapshotStore("co_test", "a", base_dir=tmp_path)
-    old.save({"X": {"title": "t"}})
-
+def test_state_is_kept_per_target(tmp_path):
     store = SnapshotStore("co_test", "a", base_dir=tmp_path, target="dialog.beta.gouv.fr")
     assert store.path == tmp_path / "dialog.beta.gouv.fr" / "co_test" / "a.json.gz"
-    assert store.load() == {"X": {"title": "t"}}
 
     store.save({"Y": {"title": "u"}})
     assert store.load() == {"Y": {"title": "u"}}
-    assert SnapshotStore("co_test", "a", base_dir=tmp_path, target="other.host").load() == {
-        "X": {"title": "t"}
-    }
+    assert SnapshotStore("co_test", "a", base_dir=tmp_path, target="other.host").load() is None
 
 
 def test_totals_written_before_sources_were_counted_still_load(tmp_path):
-    path = tmp_path / "co_test" / "totals.json"
+    path = tmp_path / "h" / "co_test" / "totals.json"
     path.parent.mkdir(parents=True)
     path.write_text('{"dialog_in_prefix": 3, "produced": 2}')
 

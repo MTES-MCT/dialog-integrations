@@ -511,7 +511,7 @@ def test_the_ztl_publishes_its_speed_beside_the_ban(clean_data):
 
 
 def test_a_ztl_measure_reaches_the_api_with_its_exemption(regulations):
-    """`desserteLocale` must survive `create_save_vehicle_dto`, not be simplified away."""
+    """`desserteLocale` must survive `build_vehicle_set`, not be simplified away."""
     ztl = next(r for r in regulations if r.identifier == "MGL-CT-2025ZTL001")
     measure = measures_of(ztl)[0]
 

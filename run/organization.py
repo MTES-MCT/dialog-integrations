@@ -14,17 +14,14 @@ from api.dia_log_client import Client
 from api.dia_log_client.models import (
     PostApiRegulationsAddBody,
     PostApiRegulationsAddBodyStatus,
-    SaveLocationDTO,
     SaveMeasureDTO,
-    SavePeriodDTO,
-    SaveVehicleSetDTO,
 )
 from canonical.regulation_measure import RegulationMeasure
 from canonical.source import BaseDataSourceIntegration
 from dialog.calls import DialogApi
 from dialog.client import build_client
 from dialog.zone_sections import MAX_SECTIONS_PER_LENGTH, MIN_SECTION_LENGTH_M
-from payloads.measures import build_location, build_measure, build_period, build_vehicle_set
+from payloads.measures import build_measure
 from payloads.regulations import build_regulations
 from run import integrate, writes
 from settings import OrganizationSettings
@@ -161,7 +158,6 @@ class BaseIntegration:
         return writes.create_one(self, regulation)
 
     # --- payloads -------------------------------------------------------------------
-    # The `create_save_*_dto` are called by nobody: overriding them has no effect.
 
     def create_regulations(
         self,
@@ -186,12 +182,3 @@ class BaseIntegration:
         self, measure: RegulationMeasure, locations: list[RegulationMeasure] | None = None
     ) -> SaveMeasureDTO:
         return build_measure(measure, locations)
-
-    def create_save_period_dto(self, measure: RegulationMeasure) -> SavePeriodDTO:
-        return build_period(measure)
-
-    def create_save_location_dto(self, measure: RegulationMeasure) -> SaveLocationDTO:
-        return build_location(measure)
-
-    def create_save_vehicle_dto(self, measure: RegulationMeasure) -> SaveVehicleSetDTO:
-        return build_vehicle_set(measure)

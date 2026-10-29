@@ -20,7 +20,7 @@ from integrations.co_paris.eudonet.locations import (
     parse_house_number,
     parse_house_number_range,
 )
-from run.organization import BaseIntegration
+from payloads.measures import build_location
 from toolkit.rules.apply import apply_rules
 
 INPUT_COLUMNS = {
@@ -430,9 +430,7 @@ def test_the_row_builds_a_named_street_dto():
         {key: value for key, value in row.items() if key.startswith("location_")},
     )
 
-    dto = BaseIntegration.create_save_location_dto(
-        BaseIntegration.__new__(BaseIntegration), measure
-    )
+    dto = build_location(measure)
 
     assert isinstance(dto, SaveLocationDTO)
     assert dto.road_type == RoadTypeEnum.LANE

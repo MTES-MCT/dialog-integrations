@@ -65,7 +65,8 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     null_measure_type = df.select(pl.col("measure_type_").is_null().sum()).item()
-    logger.warning(f"Dropping {null_measure_type} rows due to unable to infer restriction type")
+    if null_measure_type:
+        logger.warning(f"Dropping {null_measure_type} rows without a DiaLog measure type")
     df = df.filter(pl.col("measure_type_").is_not_null())
 
     return df

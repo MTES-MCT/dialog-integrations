@@ -14,7 +14,6 @@ from toolkit.connectors import opendatasoft
 from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 
 URL = "https://data.sarthe.fr/api/explore/v2.1/catalog/datasets/227200029_chantiers_routiers/exports/parquet"
-LOCAL_FILE = "explorations/dp_sarthe/data/227200029_chantiers_routiers.parquet"
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
@@ -82,6 +81,12 @@ def compute_period_fields(df: pl.DataFrame):
 def compute_location_fields(df: pl.DataFrame):
     """Departmental-road location parsed from `loc_txt`, e.g. "RD 0074 : Du 3+150 au 4+0" -> D74."""
     pattern = r"(RD) (\d+) : Du (\d+)\+(\d+) au (\d+)\+(\d+)"
+    unread = df.filter(~pl.col("loc_txt").str.contains(pattern).fill_null(False))
+    if unread.height:
+        # Kept, as before: the location goes out without a road number.
+        logger.warning(
+            f"{unread.height} rows whose loc_txt is not read: {unread['loc_txt'].to_list()[:10]}"
+        )
 
     return df.with_columns(
         [

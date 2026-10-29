@@ -25,31 +25,18 @@ URL = (
     "travaux_1_jour/exports/parquet?lang=fr&timezone=Europe%2FBerlin"
 )
 
-LOCAL_FILE = "explorations/co_rennes/data/travaux_1_jour.parquet"
-
-MODE = "remote"
-
 
 class DataSourceIntegration(BaseDataSourceIntegration):
     raw_data_schema = RennesTravauxVoirieRawDataSchema
     name = "travaux_voirie"
 
     def fetch_raw_data(self):
-        if MODE == "remote":
-            logger.info(f"Downloading data from {URL}")
+        logger.info(f"Downloading data from {URL}")
 
-            r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
-            r.raise_for_status()
+        r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
+        r.raise_for_status()
 
-            df = pl.read_parquet(io.BytesIO(r.content))
-        elif MODE == "local":
-            logger.info(f"Opening local data from {LOCAL_FILE}")
-            df = pl.read_parquet(LOCAL_FILE)
-        else:
-            logger.error("MODE should be local or remote")
-            raise
-
-        return df
+        return pl.read_parquet(io.BytesIO(r.content))
 
     def compute_clean_data(self, raw_data):
         return (
@@ -78,7 +65,8 @@ def compute_measure_fields(df: pl.DataFrame):
     )
 
     null_measure_type = df.select(pl.col("measure_type_").is_null().sum()).item()
-    logger.warning(f"Dropping {null_measure_type} rows due to unable to infer restriction type")
+    if null_measure_type:
+        logger.warning(f"Dropping {null_measure_type} rows without a DiaLog measure type")
     df = df.filter(pl.col("measure_type_").is_not_null())
 
     return df

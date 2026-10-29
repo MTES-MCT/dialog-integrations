@@ -50,10 +50,9 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
         if dup_ids.height > 0:
             logger.warning(
-                "Found %d duplicated objectids, dropping ALL corresponding rows",
-                dup_ids.height,
+                f"Found {dup_ids.height} duplicated objectids, dropping ALL corresponding rows"
             )
-            logger.debug("Duplicated objectids: %s", dup_ids["objectid"].to_list())
+            logger.debug(f"Duplicated objectids: {dup_ids['objectid'].to_list()}")
 
         df = df.join(dup_ids, on="objectid", how="anti")
 
