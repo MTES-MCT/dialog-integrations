@@ -55,6 +55,7 @@ from run.organization import BaseIntegration
 from tests.co_paris.eudonet_fixture import load_fixture
 from toolkit.rules.apply import apply_rules
 from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
+from toolkit.rules.vehicles import THRESHOLD_MISSING
 from toolkit.transforms.titles import ELLIPSIS as TITLE_ELLIPSIS
 from toolkit.transforms.titles import TITLE_MAX_LENGTH
 
@@ -708,11 +709,14 @@ def test_measures_aimed_at_pedestrians_or_cycles_are_left_out_by_label(label, le
 
 
 @pytest.mark.parametrize("label", ["limitation dimensionnelle", "limitation catégorielle"])
-def test_an_unreadable_gauge_is_dropped_and_counted(label, captured_logs):
-    """Neither a closure for everyone, nor "other" with no threshold."""
+def test_an_unreadable_gauge_reaches_the_rules_naming_no_vehicle(label):
+    """Neither a closure for everyone, nor "other" with no threshold: the common rule
+    leaves it out."""
     row = make_row(m_type=label, m_params=[["véhicule concerné (1)", "à tous les véhicules"]])
-    assert pipeline(row).height == 0
-    assert any("no readable vehicle value" in line for line in captured_logs)
+
+    result = apply_rules(pipeline(row), [THRESHOLD_MISSING], canonical=True)
+
+    assert result.frame.is_empty()
 
 
 @pytest.mark.parametrize(

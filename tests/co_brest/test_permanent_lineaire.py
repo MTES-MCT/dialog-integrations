@@ -14,6 +14,7 @@ from integrations.co_brest.permanent_lineaire.data_source_integration import (
 )
 from integrations.co_brest.permanent_lineaire.schema import Schema
 from toolkit.rules.apply import apply_rules
+from toolkit.rules.vehicles import THRESHOLD_MISSING
 
 
 @pytest.fixture
@@ -302,8 +303,6 @@ def test_discard_misleading_rows():
         ("one-direction", "Limitation Vitesse", 1, None, None, 0.0, 0.0),
         ("unknown-direction", "Interdit dans les 2 sens", 2, None, None, 0.0, 0.0),
         ("undirected", "Limitation Vitesse", None, None, None, 0.0, 0.0),
-        ("height-given-as-weight", "Limitation Hauteur", 0, None, None, 3.5, 0.0),
-        ("no-tonnage", "Interdit aux transports de marchandises", 0, None, None, None, None),
         ("unread-note", "Stationnement interdit", 0, None, "en épis", 0.0, 0.0),
         (
             "local-access-and-more",
@@ -352,6 +351,36 @@ def test_discard_misleading_rows():
         "time-slot",
         "neutral-note",
     ]
+
+
+def test_a_limit_without_its_own_threshold_reaches_the_rules_without_any():
+    """A height limit carrying only a weight, a goods ban without tonnage: no threshold, so
+    the common rule leaves them out rather than a ban on every vehicle."""
+    from integrations.co_brest.permanent_lineaire.data_source_integration import (
+        compute_vehicle_fields,
+    )
+
+    df = pl.DataFrame(
+        {
+            "NOARR": ["height-given-as-weight", "no-tonnage", "height"],
+            "DESCRIPTIF": [
+                "Limitation Hauteur",
+                "Interdit aux transports de marchandises",
+                "Limitation Hauteur",
+            ],
+            "POIDS": [3.5, None, 0.0],
+            "HAUTEUR": [0.0, None, 2.1],
+            "LARGEUR": [0.0, None, 0.0],
+            "CYCLO": [False, False, False],
+            "VELO": [False, False, False],
+            "CONDITION": ["", "", ""],
+            "DESCR": ["", "", ""],
+        }
+    )
+
+    result = apply_rules(compute_vehicle_fields(df), [THRESHOLD_MISSING], canonical=True)
+
+    assert result.frame["NOARR"].to_list() == ["height"]
 
 
 def test_read_free_text():

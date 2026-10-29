@@ -3,6 +3,7 @@
 import polars as pl
 
 from toolkit.rules.rule import Nature, Outcome, Rule
+from toolkit.transforms.vehicle_types import DIMENSIONS, HEAVY_GOODS_VEHICLE
 
 # Word-bounded: "aire piétonne", which is published, and "cyclomoteurs" or "cyclos", which
 # are motor vehicles, do not match.
@@ -35,3 +36,49 @@ def _pedestrians_or_cycles(targeted: pl.Expr) -> Rule:
         outcome=Outcome.DROP,
         valid=~targeted,
     )
+
+
+# 44 t is the legal maximum of a road vehicle: above it, the weight is a structure's load
+# capacity (Lyon, 50 to 230 t), and exceptional transport goes through permits of its own.
+HEAVYWEIGHT_ABOVE_LIMIT = Rule(
+    code="HEAVYWEIGHT_ABOVE_LIMIT",
+    label="tonnage au-delà de 44 t",
+    nature=Nature.OUT_OF_SCOPE,
+    outcome=Outcome.DROP,
+    valid=pl.col("vehicle_heavyweight_max_weight").is_null()
+    | (pl.col("vehicle_heavyweight_max_weight") <= 44),
+)
+
+
+_RESTRICTED = pl.col("vehicle_restricted_types")
+_SIZES = ("vehicle_max_height", "vehicle_max_width", "vehicle_max_length")
+
+
+def _positive(column: str) -> pl.Expr:
+    # A limit of 0 or less is no limit: sources write 0 for none.
+    return (pl.col(column) > 0).fill_null(False)
+
+
+# A threshold is never invented (no 3.5 t by default): without it, the restriction would
+# read as aimed at every heavy goods vehicle, or at nobody.
+THRESHOLD_MISSING = Rule(
+    code="THRESHOLD_MISSING",
+    label="gabarit ou poids lourds sans seuil",
+    nature=Nature.DATA_DEFECT,
+    outcome=Outcome.DROP,
+    valid=~(
+        # Not every vehicle, yet none named: a gauge whose limits were all missing.
+        (
+            ~pl.col("vehicle_all_vehicles").fill_null(True)
+            & (_RESTRICTED.list.len().fill_null(0) == 0)
+        )
+        | (
+            _RESTRICTED.list.contains(HEAVY_GOODS_VEHICLE).fill_null(False)
+            & ~_positive("vehicle_heavyweight_max_weight")
+        )
+        | (
+            _RESTRICTED.list.contains(DIMENSIONS).fill_null(False)
+            & ~pl.any_horizontal(_positive(size) for size in _SIZES)
+        )
+    ),
+)

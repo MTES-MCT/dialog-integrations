@@ -13,7 +13,6 @@ from integrations.co_lyon.chaussees_trottoirs.data_source_integration import (
     DataSourceIntegration,
     chain_segments,
     compute_measure_fields,
-    discard_impossible_tonnages,
     discard_pedestrian_areas_off_the_road_network,
     explode_into_measures,
     read_order_number,
@@ -595,12 +594,7 @@ def test_the_name_based_rule_drops_private_nameless_and_non_road_areas():
 
 def _qualified_measures(df: pl.DataFrame) -> pl.DataFrame:
     """Raw rows carried up to the point where the two pedestrian rules apply."""
-    return (
-        df.pipe(read_order_number)
-        .pipe(discard_impossible_tonnages)
-        .pipe(explode_into_measures)
-        .pipe(compute_measure_fields)
-    )
+    return df.pipe(read_order_number).pipe(explode_into_measures).pipe(compute_measure_fields)
 
 
 # --- What the free text and the road manager say -----------------------

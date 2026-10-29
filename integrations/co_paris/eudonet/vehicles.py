@@ -11,7 +11,6 @@ from api.dia_log_client.models import (
 from toolkit.rules.vehicles import pedestrians_or_cycles_named
 from toolkit.transforms.titles import truncate_text
 
-from .counts import count_by
 from .vocabulary import (
     ALL_VEHICLES_LABELS,
     EXEMPTED_OTHER,
@@ -45,9 +44,8 @@ VEHICLE_COLUMNS: dict[str, Any] = {
     "vehicle_other_exempted_type_text": pl.Utf8,
 }
 
-# Why a measure is dropped, in this order when several apply.
+# Why a measure is dropped.
 OUTSIDE_THE_CLOSED_LIST = "outside"
-UNREADABLE_LIMIT = "unreadable"
 
 
 @dataclass
@@ -108,8 +106,6 @@ def read_vehicle_set(
     rejection = None
     if outside:
         rejection = OUTSIDE_THE_CLOSED_LIST
-    elif not restricted and label in (LABEL_DIMENSION_LIMIT, LABEL_CATEGORY_LIMIT):
-        rejection = UNREADABLE_LIMIT
     else:
         tally.kept_as_other.update(kept_as_other)
         tally.unknown_exemptions.update(unknown_exemptions)
@@ -118,7 +114,9 @@ def read_vehicle_set(
         exempted.insert(0, VehicleExemptedTypeEnum.DESSERTELOCALE.value)
 
     columns = {
-        "vehicle_all_vehicles": not restricted,
+        # A gauge or category limit never targets every vehicle, readable or not.
+        "vehicle_all_vehicles": not restricted
+        and label not in (LABEL_DIMENSION_LIMIT, LABEL_CATEGORY_LIMIT),
         "vehicle_restricted_types": restricted or None,
         "vehicle_exempted_types": exempted or None,
         "vehicle_heavyweight_max_weight": weight,
@@ -138,8 +136,7 @@ def read_vehicle_set(
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     """`vehicleSet`, read from the named parameters of the measure.
 
-    Drops a measure restricting a value outside the closed list, and a gauge or
-    category limit with no readable vehicle: an empty set would close the road to everyone.
+    Drops a measure restricting a value outside the closed list.
     """
     tally = VehicleTally()
     read = [
@@ -161,10 +158,6 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
             f"enumeration, kept as 'other' + free text: {dict(tally.unknown_exemptions)}"
         )
     motives = {
-        UNREADABLE_LIMIT: lambda dropped: (
-            f"gauge or category measures with no readable vehicle value: "
-            f"{count_by(dropped, 'm_type')}"
-        ),
         OUTSIDE_THE_CLOSED_LIST: lambda dropped: (
             "measures restricting a vehicle value outside the closed list: "
             f"{dict(tally.outside_restrictions)}. Qualify it in vocabulary.py."

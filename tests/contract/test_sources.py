@@ -150,7 +150,9 @@ def test_a_source_can_evaluate_every_rule_it_declares(organization, source):
     instance = source(SimpleNamespace(organization=organization), client=None)
     canonical_rows = instance.select_regulation_measure_fields(_clean_data(organization, source))
 
-    assert apply_rules(canonical_rows, list(instance.active_rules)).unevaluated == []
+    # As the base class applies them: a canonical column the source does not produce is null.
+    result = apply_rules(canonical_rows, list(instance.active_rules), canonical=True)
+    assert result.unevaluated == []
 
 
 @pytest.mark.parametrize("organization, source", SOURCES, ids=_id)

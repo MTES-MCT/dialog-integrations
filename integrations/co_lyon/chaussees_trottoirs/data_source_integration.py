@@ -61,10 +61,6 @@ PEDESTRIAN_AREA_SPEED_KEY = "AIRE_PIETONNE_V5"
 # segments on 2026-09-22).
 PEDESTRIAN_AREA_LABEL = "Aire Piétonne"
 
-# API cap, the French legal maximum for a heavy goods vehicle: anything above is a
-# structure's load capacity that landed in the same column.
-MAX_HEAVYWEIGHT_TONNES = 44
-
 # Speed kept next to the ZTL ban, like a pedestrian area's walking pace (decided on
 # 2026-10-01 with the DiaLog team, 338 segments).
 ZTL_REPLACES_SPEED = False
@@ -164,7 +160,6 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         return (
             raw_data.pipe(read_order_number)
-            .pipe(discard_impossible_tonnages)
             .pipe(explode_into_measures)
             .pipe(self.count_dataset_restrictions)
             # After the counter, so the segments outside count as stated and not retained.
@@ -309,31 +304,6 @@ def exempts_public_services() -> pl.Expr:
     return (pl.col("_measure_kind") == "dimensions") & pl.col(
         "precisionreglementation"
     ).str.contains(PUBLIC_SERVICE_EXEMPTION).fill_null(False)
-
-
-def discard_impossible_tonnages(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop the tonnages no vehicle can carry (50 to 230 t): a structure's load capacity.
-
-    The API refused 6 regulations over them on 2026-09-07. Only the tonnage goes, so the
-    row keeps its other dimension limits.
-    """
-    impossible = pl.col("limitationtonnage") > MAX_HEAVYWEIGHT_TONNES
-    n_impossible = df.select(impossible.fill_null(False).sum()).item()
-    if n_impossible:
-        values = sorted(
-            set(df.filter(impossible)["limitationtonnage"].to_list())  # type: ignore[arg-type]
-        )
-        logger.warning(
-            f"Dropping the tonnage of {n_impossible} segments above "
-            f"{MAX_HEAVYWEIGHT_TONNES} t — a structure's load capacity, not a vehicle "
-            f"limit: {values}"
-        )
-    return df.with_columns(
-        pl.when(impossible)
-        .then(None)
-        .otherwise(pl.col("limitationtonnage"))
-        .alias("limitationtonnage")
-    )
 
 
 def explode_into_measures(df: pl.DataFrame) -> pl.DataFrame:

@@ -62,6 +62,10 @@ DESCRIPTION_CONFIG = {
 
 PEDESTRIANS_OR_CYCLES = pedestrians_or_cycles_named(pl.col("DESCRIPTIF"))
 
+LIMITS = [
+    descriptif for descriptif, config in DESCRIPTION_CONFIG.items() if config.threshold_column
+]
+
 # CONDITION and DESCR are read in full or the row is dropped: once the wordings below
 # are removed, only punctuation may remain. Even "30" or "sauf" means something (2026-09-24).
 # "Riveraine" is the producer's other word for it (confirmed 2026-09-25).
@@ -155,8 +159,10 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(discard_misleading_rows)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
-            .pipe(compute_regulation_fields)
             .pipe(compute_vehicle_fields)
+            # Before the regulation: its title is its first row's.
+            .pipe(self.apply_rules)
+            .pipe(compute_regulation_fields)
         )
 
     def cast_boolean_column(self, column_name: str) -> pl.Expr:
@@ -287,16 +293,10 @@ def discard_misleading_rows(df: pl.DataFrame) -> pl.DataFrame:
     A rawGeoJSON location carries no direction: "Sens interdit / Sens unique" is one-way
     whatever SENS says (audit of 2026-09-23) and would come out closed both ways.
     """
-    lacks_threshold = pl.any_horizontal(
-        (pl.col("DESCRIPTIF") == descriptif) & ~(pl.col(config.threshold_column).fill_null(0) > 0)
-        for descriptif, config in DESCRIPTION_CONFIG.items()
-        if config.threshold_column
-    )
     motives = {
         "one-way street": pl.col("DESCRIPTIF") == "Sens interdit / Sens unique",
         "not both directions, SENS other than 0": pl.col("SENS").fill_null(-1) != 0,
         "free text in CONDITION or DESCR not read in full": ~text_reading("fully_read"),
-        "vehicle restriction without threshold": lacks_threshold,
     }
 
     counts = df.select(**{motive: rule.sum() for motive, rule in motives.items()}).row(
@@ -310,6 +310,18 @@ def discard_misleading_rows(df: pl.DataFrame) -> pl.DataFrame:
     return df.filter(~discarded)
 
 
+def threshold(column: str) -> pl.Expr:
+    """The column's limit, 0 meaning none. A limit label without its own threshold carries
+    none: a weight on a height limit is a slip, not the limit."""
+    lacks_own = pl.any_horizontal(
+        (pl.col("DESCRIPTIF") == descriptif) & ~(pl.col(config.threshold_column).fill_null(0) > 0)
+        for descriptif, config in DESCRIPTION_CONFIG.items()
+        if config.threshold_column
+    )
+    value = pl.col(column)
+    return pl.when(value.is_null() | (value == 0) | lacks_own).then(None).otherwise(value.round(2))
+
+
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Dimensions (0 means none), exemptions and restricted types."""
     exempted_types_mapping = {
@@ -320,18 +332,11 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     # and DiaLog keeps them as sent.
     df = df.with_columns(
         [
-            pl.when((pl.col("POIDS").is_null()) | (pl.col("POIDS") == 0))
-            .then(None)
-            .otherwise(pl.col("POIDS").round(2))
-            .alias("vehicle_heavyweight_max_weight"),
-            pl.when((pl.col("HAUTEUR").is_null()) | (pl.col("HAUTEUR") == 0))
-            .then(None)
-            .otherwise(pl.col("HAUTEUR").round(2))
-            .alias("vehicle_max_height"),
-            pl.when((pl.col("LARGEUR").is_null()) | (pl.col("LARGEUR") == 0))
-            .then(None)
-            .otherwise(pl.col("LARGEUR").round(2))
-            .alias("vehicle_max_width"),
+            threshold("POIDS").alias("vehicle_heavyweight_max_weight"),
+            threshold("HAUTEUR").alias("vehicle_max_height"),
+            threshold("LARGEUR").alias("vehicle_max_width"),
+            # No length in the layer; set, so the rules judge the row before it is grouped.
+            pl.lit(None, dtype=pl.Float64).alias("vehicle_max_length"),
         ]
     )
 
@@ -385,10 +390,10 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     df = df.with_columns(
-        pl.when(pl.col("vehicle_restricted_types").is_not_null())
-        .then(False)
-        .otherwise(True)
-        .alias("vehicle_all_vehicles")
+        # A weight or size limit never targets every vehicle, its threshold missing or not.
+        (pl.col("vehicle_restricted_types").is_null() & ~pl.col("DESCRIPTIF").is_in(LIMITS)).alias(
+            "vehicle_all_vehicles"
+        )
     )
 
     return df.drop("_config_exempted_types", "_local_access")
