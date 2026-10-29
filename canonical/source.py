@@ -8,7 +8,7 @@ from api.dia_log_client import Client
 from canonical.regulation_measure import RegulationMeasure, unknown_canonical_columns
 from settings import OrganizationSettings
 from toolkit.rules.apply import RulesResult, apply_rules
-from toolkit.rules.rule import Nature, Rule
+from toolkit.rules.rule import Outcome, Rule
 
 
 class BaseDataSourceIntegration:
@@ -97,7 +97,7 @@ class BaseDataSourceIntegration:
         rules = [
             rule
             for rule in self.rules
-            if rule.code not in self._applied_codes or rule.nature is Nature.DECISION
+            if rule.code not in self._applied_codes or rule.outcome is Outcome.DROP
         ]
         result = apply_rules(df, rules, source=self.name or "")
         if again := {c: n for c, n in result.applied.items() if c in self._applied_codes}:
@@ -108,7 +108,7 @@ class BaseDataSourceIntegration:
     def _count(self, result: RulesResult, rules: list[Rule]) -> None:
         for rule in rules:
             if applied := result.applied.get(rule.code):
-                key = f"{rule.label} ({rule.nature.value})"
+                key = f"{rule.label} ({rule.nature.value}, {rule.outcome.value})"
                 self.rule_counts[key] = self.rule_counts.get(key, 0) + applied
 
     def fetch_raw_data(self) -> pl.DataFrame:

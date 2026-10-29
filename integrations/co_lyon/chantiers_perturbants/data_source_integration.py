@@ -6,9 +6,7 @@ were past their end date, so a regulation published here expires on its own, on 
 right day. `validite` and `avancement` hold one value on 100 % of rows: neither filters.
 """
 
-import datetime
 import json
-from zoneinfo import ZoneInfo
 
 import polars as pl
 from loguru import logger
@@ -21,7 +19,8 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from integrations.co_lyon.grand_lyon import fetch_layer
-from toolkit.transforms.local_time import PARIS, end_of_local_day, start_of_local_day
+from toolkit.rules.period import EXPIRED
+from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 from toolkit.transforms.time_slots import to_iso_slots
 
 from .description import RESIDUAL_MAX_CHARS, read_description
@@ -56,6 +55,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "chantiers_perturbants"
     identifier_prefix = "MGL-CHP-"
     raw_data_schema = LyonChantiersPerturbantsRawDataSchema
+    # The producer withdraws a site on its end date: this only guards against a stale row.
+    rules = (EXPIRED,)
 
     def fetch_raw_data(self) -> pl.DataFrame:
         return fetch_layer(WFS_LAYER)
@@ -177,7 +178,7 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Temporary period from `debutchantier` to `finchantier`, with its daily slots.
 
     Long durations are reported, not dropped: whether a multi-year "temporary" restriction
-    is a defect or real is a case-by-case call (R-38, R-40 for the dropped rows).
+    is a defect or real is a case-by-case call (R-38).
     """
     missing = pl.col("debutchantier").is_null() | pl.col("finchantier").is_null()
     n_missing = df.select(missing.sum()).item()
@@ -190,14 +191,6 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     if n_inverted:
         logger.warning(f"Dropping {n_inverted} rows ending before they start")
     df = df.filter(~inverted)
-
-    # The producer withdraws a site on its end date, so this only guards against creating a
-    # stale row (R-40). Local on purpose: other sources withdraw on their own habits.
-    expired = pl.col("finchantier") < today_in_paris()
-    n_expired = df.select(expired.sum()).item()
-    if n_expired:
-        logger.warning(f"Dropping {n_expired} rows whose work site is already over (R-40)")
-    df = df.filter(~expired)
 
     warn_long_durations(df)
 
@@ -221,11 +214,6 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
             pl.lit(False).alias("period_is_permanent"),
         ]
     )
-
-
-def today_in_paris() -> datetime.date:
-    """The producer's calendar day: the runner may sit in another zone."""
-    return datetime.datetime.now(ZoneInfo(PARIS)).date()
 
 
 def warn_long_durations(df: pl.DataFrame) -> None:

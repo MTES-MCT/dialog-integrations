@@ -12,13 +12,13 @@ from typing import Literal, Union, get_args, get_origin, get_type_hints
 import polars as pl
 from loguru import logger
 
-from canonical.regulation_measure import DEFECT_COLUMN, RegulationMeasure
-from toolkit.rules.rule import Nature, Rule
+from canonical.regulation_measure import RegulationMeasure
+from toolkit.rules.rule import Outcome, Rule
 from toolkit.transforms.local_time import PARIS, parse_instant
 
 INSTANT = pl.Datetime("us", PARIS)
 INSTANT_COLUMNS = {"period_start_date", "period_end_date"}
-OUTCOMES = {Nature.DECISION: "left out", Nature.DEFECT: "marked", Nature.SIGNAL: "flagged"}
+LOGGED_AS = {Outcome.DROP: "left out", Outcome.FLAG: "flagged"}
 
 
 @dataclass
@@ -37,7 +37,7 @@ def apply_rules(
     rule_inputs: dict[str, pl.Expr] | None = None,
     source: str = "",
 ) -> RulesResult:
-    """Leave out the rows a decision applies to, mark those a defect applies to."""
+    """Leave out the rows a dropping rule applies to, log those a flagging one applies to."""
     if not rules or df.is_empty():
         return RulesResult(df)
     view = canonical_view(df, rule_inputs or {})
@@ -46,9 +46,8 @@ def apply_rules(
     if not evaluable:
         return result
 
-    verdicts = view.select(rule.applies.alias(rule.code) for rule in evaluable)
+    verdicts = view.select(rule.expression().alias(rule.code) for rule in evaluable)
     left_out = pl.Series([False] * df.height)
-    defect = pl.Series([None] * df.height, dtype=pl.String)
     for rule in evaluable:
         verdict = verdicts[rule.code]
         if unreadable := verdict.null_count():
@@ -59,20 +58,10 @@ def apply_rules(
             continue
         result.applied[rule.code] = applied
         _log(source, rule, applied, view.filter(applies))
-        if rule.nature is Nature.DECISION:
+        if rule.outcome is Outcome.DROP:
             left_out = left_out | applies
-        elif rule.nature is Nature.DEFECT:
-            defect = defect.zip_with(
-                defect.is_not_null() | ~applies, pl.repeat(rule.label, df.height, eager=True)
-            )
 
-    frame = df
-    if defect.is_not_null().any():
-        marked = pl.Series(DEFECT_COLUMN, defect)
-        if DEFECT_COLUMN in frame.columns:
-            marked = frame[DEFECT_COLUMN].cast(pl.String).fill_null(marked)
-        frame = frame.with_columns(marked.alias(DEFECT_COLUMN))
-    result.frame = frame.filter(~left_out)
+    result.frame = df.filter(~left_out)
     return result
 
 
@@ -122,12 +111,10 @@ CANONICAL_TYPES = _canonical_types()
 
 
 def _log(source: str, rule: Rule, applied: int, rows: pl.DataFrame) -> None:
-    reference = f", {rule.reference}" if rule.reference else ""
     sample = ""
     if "regulation_identifier" in rows.columns:
         identifiers = rows["regulation_identifier"].cast(pl.String).unique().sort().to_list()
         sample = f": {identifiers[:5]}"
     logger.warning(
-        f"{source}: {applied} rows {OUTCOMES[rule.nature]}, {rule.label} ({rule.code}{reference})"
-        f"{sample}"
+        f"{source}: {applied} rows {LOGGED_AS[rule.outcome]}, {rule.label} ({rule.code}){sample}"
     )

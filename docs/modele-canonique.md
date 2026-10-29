@@ -34,7 +34,6 @@ ligne passe les contrôles de `checks/rows.py` :
 * limitation de vitesse sans vitesse ;
 * emprise `rawGeoJSON` sans géométrie ;
 * coordonnées hors bornes ou en ordre (latitude, longitude).
-* une ligne marquée d'un défaut par une règle métier (`row_defect`, ci-dessous).
 
 Un arrêté dont une ligne échoue est laissé de côté **en entier**, et laissé tel que DiaLog
 le détient : ni créé, ni mis à jour, ni clos. Il compte parmi les « écartés par la
@@ -45,14 +44,21 @@ tranches (`-01`, `-02`…) comprises.
 
 ## Les règles métier
 
-Une règle (`toolkit/rules/rule.py`) a un code, un libellé, souvent un numéro de règle, et
-une **nature** :
+Une règle (`toolkit/rules/rule.py`) a un code, un libellé, une **nature**, ce qui la
+fait s'appliquer :
+
+* **hors périmètre** : la donnée est juste, mais pas à publier ;
+* **limite de DiaLog** : DiaLog ne sait pas encore l'exprimer ;
+* **défaut de la donnée** : la donnée est cassée chez le producteur ;
+* **à vérifier** : plausible, mais à regarder ;
+
+et une **conséquence**, ce que deviennent ses lignes :
 
 * **écarté** : la ligne est retirée ;
-* **défaut** : la ligne est marquée (`row_defect`), et son arrêté laissé tel que DiaLog le
-  détient, comme pour un contrôle commun qui échoue : une ligne cassée ne doit pas clore
-  ce qui était juste ;
 * **signalé** : journalisé, rien n'est retiré.
+
+Les deux se choisissent séparément : un défaut de la donnée est écarté, ou seulement
+signalé s'il ne rend pas la mesure fausse.
 
 Elle s'écrit une fois, en expression Polars sur les noms canoniques. Une source déclare
 dans `rules` les règles de `toolkit/rules/` qu'elle applique, chacune à la place de son

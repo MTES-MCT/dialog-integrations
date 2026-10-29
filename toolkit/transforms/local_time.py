@@ -79,6 +79,11 @@ def from_epoch_ms(column: str) -> pl.Expr:
     )
 
 
+def today_in_paris() -> date:
+    """The producer's calendar day: the runner may sit in another zone."""
+    return datetime.now(ZoneInfo(PARIS)).date()
+
+
 def parse_instant(value) -> datetime | None:
     """ISO text, a date or a datetime as an aware instant; a naive one is read in Paris."""
     if value is None:

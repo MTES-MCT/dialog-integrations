@@ -11,7 +11,6 @@ import json
 
 import polars as pl
 
-from canonical.regulation_measure import DEFECT_COLUMN
 from toolkit.transforms.local_time import parse_instant
 
 END_BEFORE_START = "fin avant début"
@@ -62,14 +61,6 @@ def failing_rows(df: pl.DataFrame) -> pl.DataFrame:
     if "location_geometry" in df.columns:
         bad = [_bad_coordinates(value) for value in df["location_geometry"].to_list()]
         reasons.append(_flag(df, pl.Series(bad), BAD_COORDINATES))
-
-    if DEFECT_COLUMN in df.columns:
-        reasons.append(
-            df.filter(pl.col(DEFECT_COLUMN).is_not_null()).select(
-                pl.col("regulation_identifier").cast(pl.Utf8),
-                reason=pl.col(DEFECT_COLUMN).cast(pl.Utf8),
-            )
-        )
 
     return pl.concat(reasons).unique(maintain_order=True)
 

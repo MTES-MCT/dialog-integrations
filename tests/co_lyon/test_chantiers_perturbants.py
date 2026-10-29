@@ -1,14 +1,13 @@
 """Unit tests for the Lyon "chantiers perturbants" transformation."""
 
-import datetime
 import json
 
 import polars as pl
 import pytest
 from loguru import logger
 
-from integrations.co_lyon.chantiers_perturbants import data_source_integration
 from integrations.co_lyon.chantiers_perturbants.data_source_integration import (
+    DataSourceIntegration,
     compute_location_fields,
     compute_measure_fields,
     compute_period_fields,
@@ -17,6 +16,7 @@ from integrations.co_lyon.chantiers_perturbants.data_source_integration import (
     compute_vehicle_fields,
 )
 from integrations.co_lyon.chantiers_perturbants.description import read_description
+from toolkit.rules.period import EXPIRED
 from toolkit.transforms.time_slots import parse_time_slots
 
 GEOMETRY = json.dumps(
@@ -55,16 +55,6 @@ def frame(*rows):
 def timed(*rows):
     """The frame as `compute_period_fields` receives it: time slots already read."""
     return compute_time_slot_fields(frame(*rows))
-
-
-# Every date in this file is later than this, so the expiry guard of
-# `compute_period_fields` never fires by accident as the calendar moves on.
-TODAY = datetime.date(2026, 1, 1)
-
-
-@pytest.fixture(autouse=True)
-def frozen_today(monkeypatch):
-    monkeypatch.setattr(data_source_integration, "today_in_paris", lambda: TODAY)
 
 
 @pytest.fixture
@@ -309,20 +299,9 @@ def test_period_drops_broken_dates(start, end):
     assert result.height == 0
 
 
-def test_a_work_site_already_over_is_not_created(warnings):
+def test_a_work_site_already_over_is_not_created():
     """R-40: the producer withdraws sites on their end date; a stale row must not slip in."""
-    yesterday = (TODAY - datetime.timedelta(days=1)).isoformat()
-    result = compute_period_fields(timed(row(debutchantier="2025-12-01", finchantier=yesterday)))
-    assert result.height == 0
-    assert any("already over" in message for message in warnings)
-
-
-def test_a_work_site_ending_today_is_still_in_force(warnings):
-    result = compute_period_fields(
-        timed(row(debutchantier="2025-12-01", finchantier=TODAY.isoformat()))
-    )
-    assert result.height == 1
-    assert not any("already over" in message for message in warnings)
+    assert EXPIRED in DataSourceIntegration.rules
 
 
 def test_multi_year_work_sites_are_reported_but_published(warnings):
