@@ -6,10 +6,12 @@ import polars as pl
 
 from integrations.dp_aveyron.restrictions_gabarits.data_source_integration import (
     MAX_IDENTIFIER_LENGTH,
+    PEDESTRIANS_OR_CYCLES,
     compute_period_fields,
     compute_regulation_fields,
     measure_group_key,
 )
+from toolkit.rules.apply import apply_rules
 
 
 def signs(**overrides):
@@ -206,3 +208,9 @@ def test_the_two_digit_year_the_producer_sometimes_writes_is_read_as_this_centur
     result = compute_period_fields(df)
 
     assert result["period_start_date"].to_list() == ["2018-01-12T00:00:00+01:00"]
+
+
+def test_signs_for_pedestrians_and_cyclists_are_left_out():
+    df = pl.concat([signs(panneau_type=[sign]) for sign in ("B9a", "B9b", "B13")])
+    result = apply_rules(df, [PEDESTRIANS_OR_CYCLES])
+    assert result.frame["panneau_type"].to_list() == ["B13"]

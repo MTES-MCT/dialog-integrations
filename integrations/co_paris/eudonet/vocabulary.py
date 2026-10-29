@@ -178,7 +178,7 @@ EXEMPTED_TAXI = "taxi"
 EXEMPTED_OTHER = "other"
 
 # Published as "other" + the label (closed list, 2026-10-26). Any other unmapped value drops
-# its measure, "cycles" included (DiaLog never restricts pedestrians and cycles).
+# its measure.
 RESTRICTIONS_KEPT_AS_OTHER = frozenset(
     {
         "aux véhicules de plus de 2 mètres",

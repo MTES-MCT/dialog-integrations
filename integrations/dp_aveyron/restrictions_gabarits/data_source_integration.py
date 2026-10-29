@@ -18,6 +18,7 @@ from integrations.dp_aveyron.restrictions_gabarits.schema import (
     AveyronPrescriptionsRoutieresRawDataSchema,
 )
 from toolkit.connectors import opendatasoft
+from toolkit.rules.vehicles import pedestrian_or_cycle_sign
 from toolkit.transforms.local_time import start_of_local_day
 from toolkit.transforms.periods import permanent_period
 from toolkit.transforms.titles import truncate
@@ -42,6 +43,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             raw_data.pipe(unnest_measures)
             # One row per sign a record lists: the unit of the retention rate.
             .pipe(self.count_dataset_restrictions)
+            .pipe(self.apply_rules, PEDESTRIANS_OR_CYCLES)
             .pipe(filter_unrelevant)
             .pipe(compute_measure_fields)
             .pipe(compute_location_fields)
@@ -77,8 +79,8 @@ def unnest_measures(df: pl.DataFrame):
     )
 
 
-# Pedestrians and cyclists are the only signs left out: DiaLog has no vehicle type for
-# them, and `other` would describe a restriction on traffic as one on vehicles.
+PEDESTRIANS_OR_CYCLES = pedestrian_or_cycle_sign(pl.col("panneau_type"))
+
 PANNEAUX = {
     "B9i": "Interdiction caravanes",
     "B18c": "Interdiction Transport Matieres dangereuse",

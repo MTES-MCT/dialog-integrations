@@ -8,6 +8,7 @@ from loguru import logger
 from api.dia_log_client.models import (
     PostApiRegulationsAddBodyMeasuresItemVehicleSetType0ExemptedTypesType0Item as VehicleExemptedTypeEnum,  # noqa: E501
 )
+from toolkit.rules.vehicles import pedestrians_or_cycles_named
 from toolkit.transforms.titles import truncate_text
 
 from .counts import count_by
@@ -195,3 +196,20 @@ def _keep_stricter(current: float | None, candidate: float | None) -> float | No
     if current is None:
         return candidate
     return min(current, candidate)
+
+
+def _restricted_labels(params: list[list[str]] | None) -> str:
+    return MULTI_VALUE_SEPARATOR.join(
+        pair[1]
+        for pair in params or []
+        if len(pair) == 2 and pair[0].strip() in RESTRICTION_PARAMETERS
+    )
+
+
+PEDESTRIAN_OR_CYCLE_VEHICLES = pedestrians_or_cycles_named(
+    pl.col("m_params").map_elements(
+        lambda params: _restricted_labels(params.to_list() if params is not None else None),
+        return_dtype=pl.String,
+        skip_nulls=False,
+    )
+)

@@ -22,6 +22,7 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.rules.vehicles import pedestrians_or_cycles_named
 from toolkit.transforms.local_time import start_of_local_day
 from toolkit.transforms.periods import permanent_period
 from toolkit.transforms.time_slots import _clock, to_iso_slots
@@ -58,6 +59,8 @@ DESCRIPTION_CONFIG = {
     "Limitation Largeur": C(MTE.NOENTRY, threshold_column="LARGEUR"),
     "Sens interdit / Sens unique": C(MTE.NOENTRY),
 }
+
+PEDESTRIANS_OR_CYCLES = pedestrians_or_cycles_named(pl.col("DESCRIPTIF"))
 
 # CONDITION and DESCR are read in full or the row is dropped: once the wordings below
 # are removed, only punctuation may remain. Even "30" or "sauf" means something (2026-09-24).
@@ -147,7 +150,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         return (
-            raw_data.pipe(compute_measure_fields)
+            raw_data.pipe(self.apply_rules, PEDESTRIANS_OR_CYCLES)
+            .pipe(compute_measure_fields)
             .pipe(discard_misleading_rows)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)

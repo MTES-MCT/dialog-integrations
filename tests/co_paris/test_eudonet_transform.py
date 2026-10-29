@@ -23,6 +23,7 @@ from integrations.co_paris.eudonet.location_filters import (
     load_refused_locations,
 )
 from integrations.co_paris.eudonet.measures import (
+    PEDESTRIAN_OR_CYCLE_MEASURES,
     add_pedestrian_area_speed,
     compute_measure_fields,
 )
@@ -42,6 +43,7 @@ from integrations.co_paris.eudonet.regulations import (
     filter_police_prefecture,
 )
 from integrations.co_paris.eudonet.vehicles import (
+    PEDESTRIAN_OR_CYCLE_VEHICLES,
     compute_vehicle_fields,
 )
 from integrations.co_paris.eudonet.vocabulary import (
@@ -51,6 +53,7 @@ from integrations.co_paris.eudonet.vocabulary import (
 )
 from run.organization import BaseIntegration
 from tests.co_paris.eudonet_fixture import load_fixture
+from toolkit.rules.apply import apply_rules
 from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
 from toolkit.transforms.titles import ELLIPSIS as TITLE_ELLIPSIS
 from toolkit.transforms.titles import TITLE_MAX_LENGTH
@@ -664,12 +667,44 @@ def test_a_category_without_an_equivalent_becomes_other_plus_its_label():
     assert df.get_column("vehicle_all_vehicles").to_list() == [False]
 
 
-@pytest.mark.parametrize("label", ["cycles", "aux véhicules de plus de 12 T"])
-def test_a_restriction_outside_the_closed_list_drops_its_measure(label, captured_logs):
-    """Cycles are never restricted; a new value waits for a human."""
+def test_a_restriction_outside_the_closed_list_drops_its_measure(captured_logs):
+    """A new value waits for a human."""
+    label = "aux véhicules de plus de 12 T"
     row = make_row(m_type="limitation catégorielle", m_params=[["véhicule concerné (1)", label]])
     assert pipeline(row).height == 0
     assert any("outside the closed list" in line and label in line for line in captured_logs)
+
+
+def test_a_measure_restricting_cycles_is_left_out_not_one_exempting_them():
+    restricting = make_row(
+        m_file_id=1, m_params=[["véhicule concerné (2)", "des taxis ; des cycles"]]
+    )
+    shared_lane = make_row(
+        m_file_id=2,
+        m_params=[["véhicule concerné (2)", "des  véhicules de transports en commun et cycles"]],
+    )
+    exempting = make_row(m_file_id=3, m_params=[["dérogation pour véhicule", "aux cycles"]])
+
+    result = apply_rules(
+        make_frame(restricting, shared_lane, exempting), [PEDESTRIAN_OR_CYCLE_VEHICLES]
+    )
+
+    assert result.frame["m_file_id"].to_list() == [3]
+
+
+@pytest.mark.parametrize(
+    "label, left_out",
+    [
+        ("interdiction double sens pour les cyclistes", True),
+        ("voie cyclable", True),
+        ("Feux piéton", True),
+        ("circulation interdite", False),
+        (None, False),
+    ],
+)
+def test_measures_aimed_at_pedestrians_or_cycles_are_left_out_by_label(label, left_out):
+    result = apply_rules(make_frame(make_row(m_type=label)), [PEDESTRIAN_OR_CYCLE_MEASURES])
+    assert result.frame.is_empty() is left_out
 
 
 @pytest.mark.parametrize("label", ["limitation dimensionnelle", "limitation catégorielle"])

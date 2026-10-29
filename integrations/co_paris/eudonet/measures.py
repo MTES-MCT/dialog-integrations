@@ -4,6 +4,7 @@ from collections import Counter
 import polars as pl
 from loguru import logger
 
+from toolkit.rules.vehicles import pedestrians_or_cycles_named
 from toolkit.transforms import pedestrian_area
 from toolkit.transforms.pedestrian_area import PEDESTRIAN_AREA_SPEED
 
@@ -19,6 +20,8 @@ from .vocabulary import (
     SPEED_PARAMETER,
     TIME_SLOT_PARAMETERS,
 )
+
+PEDESTRIAN_OR_CYCLE_MEASURES = pedestrians_or_cycles_named(pl.col("m_type"))
 
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:

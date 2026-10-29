@@ -7,11 +7,13 @@ import pytest
 
 from integrations.co_brest.integration import Integration
 from integrations.co_brest.permanent_lineaire.data_source_integration import (
+    PEDESTRIANS_OR_CYCLES,
     DataSourceIntegration,
     compute_period_fields,
     compute_regulation_fields,
 )
 from integrations.co_brest.permanent_lineaire.schema import Schema
+from toolkit.rules.apply import apply_rules
 
 
 @pytest.fixture
@@ -475,3 +477,18 @@ def test_compute_measure_fields_filters_invalid_speed():
 
     assert result.height == 1
     assert result["measure_max_speed"][0] == 50
+
+
+def test_bans_on_pedestrians_or_cycles_are_left_out():
+    df = pl.DataFrame(
+        {
+            "DESCRIPTIF": [
+                "Interdit aux cycles",
+                "Interdit aux piétons",
+                "Piste / Bande / Trottoir cyclable",
+                "Interdit aux cyclomoteurs",
+            ]
+        }
+    )
+    result = apply_rules(df, [PEDESTRIANS_OR_CYCLES])
+    assert result.frame["DESCRIPTIF"].to_list() == ["Interdit aux cyclomoteurs"]

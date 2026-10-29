@@ -19,7 +19,11 @@ from .location_filters import (
     discard_refused_locations,
 )
 from .locations import compute_location_fields
-from .measures import add_pedestrian_area_speed, compute_measure_fields
+from .measures import (
+    PEDESTRIAN_OR_CYCLE_MEASURES,
+    add_pedestrian_area_speed,
+    compute_measure_fields,
+)
 from .published_elsewhere import (
     ELSEWHERE_STATE_FILE,
     discard_published_elsewhere,
@@ -40,7 +44,7 @@ from .regulations import (
     filter_police_prefecture,
 )
 from .schema import EudonetRawDataSchema
-from .vehicles import compute_vehicle_fields
+from .vehicles import PEDESTRIAN_OR_CYCLE_VEHICLES, compute_vehicle_fields
 
 CREDENTIALS_ENV_VAR = "EUDONET_PARIS_CREDENTIALS"
 
@@ -91,7 +95,9 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             raw_data.pipe(filter_police_prefecture, self._publishes_police_prefecture())
             .pipe(compute_regulation_fields)
             .pipe(discard_published_elsewhere, self.numbers_published_elsewhere)
+            .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_MEASURES)
             .pipe(compute_measure_fields)
+            .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_VEHICLES)
             .pipe(compute_vehicle_fields)
             .pipe(compute_period_fields, today)
             .pipe(discard_location_complements)
