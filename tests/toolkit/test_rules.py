@@ -84,13 +84,13 @@ def test_period_bounds_are_compared_as_instants_whatever_their_shape():
     assert kept_by_date["fin"].to_list() == [date(2026, 4, 1)]
 
 
-def test_a_value_that_cannot_be_read_is_unreadable_and_kept():
-    df = rows(["A", "B"], period_end_date=["2026-02-01", "fin des travaux"])
+def test_a_value_missing_or_that_cannot_be_read_is_not_judged_by_the_rule():
+    df = rows(["A", "B", "C"], period_end_date=["2026-02-01", "fin des travaux", None])
 
     result = apply_rules(df, [rule("ENDED", Outcome.DROP, ENDS_BEFORE_2026_03)])
 
-    assert result.frame["regulation_identifier"].to_list() == ["B"]
-    assert result.unreadable == {"ENDED": 1}
+    assert result.frame["regulation_identifier"].to_list() == ["B", "C"]
+    assert result.applied == {"ENDED": 1}
 
 
 def test_a_rule_can_apply_to_the_whole_regulation():

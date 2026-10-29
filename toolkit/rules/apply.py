@@ -24,9 +24,8 @@ LOGGED_AS = {Outcome.DROP: "left out", Outcome.FLAG: "flagged"}
 @dataclass
 class RulesResult:
     frame: pl.DataFrame
-    # By rule code: rows it applied to, and rows it could not read.
+    # By rule code: rows it applied to.
     applied: dict[str, int] = field(default_factory=dict)
-    unreadable: dict[str, int] = field(default_factory=dict)
     # Rules reading a column the view lacks.
     unevaluated: list[str] = field(default_factory=list)
 
@@ -49,11 +48,9 @@ def apply_rules(
     verdicts = view.select(rule.expression().alias(rule.code) for rule in evaluable)
     left_out = pl.Series([False] * df.height)
     for rule in evaluable:
-        verdict = verdicts[rule.code]
-        if unreadable := verdict.null_count():
-            result.unreadable[rule.code] = unreadable
-            logger.warning(f"{source}: {unreadable} rows could not be read by {rule.code}")
-        applies = verdict.fill_null(False)
+        # A missing value is judged by the rule about it, so that no rule has to exclude
+        # the others.
+        applies = verdicts[rule.code].fill_null(False)
         if not (applied := int(applies.sum())):
             continue
         result.applied[rule.code] = applied
@@ -68,7 +65,7 @@ def apply_rules(
 def canonical_view(df: pl.DataFrame, rule_inputs: dict[str, pl.Expr]) -> pl.DataFrame:
     """The frame with `rule_inputs` added, canonical columns cast to their canonical types.
 
-    A value that does not cast becomes null, so the rule reading it reports it unreadable.
+    A value that does not cast becomes null, like a missing one.
     """
     view = df.with_columns(**rule_inputs) if rule_inputs else df
     return view.with_columns(

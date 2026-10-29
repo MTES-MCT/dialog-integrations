@@ -20,3 +20,13 @@ EXPIRED = Rule(
     outcome=Outcome.DROP,
     applies=_ended_before_today,
 )
+
+# Without an end nothing would ever close it; without a start the write date would stand in.
+DATES_MISSING = Rule(
+    code="DATES_MISSING",
+    label="arrêté temporaire sans date de début ou de fin",
+    nature=Nature.DATA_DEFECT,
+    outcome=Outcome.DROP,
+    applies=TEMPORARY
+    & (pl.col("period_start_date").is_null() | pl.col("period_end_date").is_null()),
+)

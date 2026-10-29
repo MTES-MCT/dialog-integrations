@@ -19,7 +19,7 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from integrations.co_lyon.grand_lyon import fetch_layer
-from toolkit.rules.period import EXPIRED
+from toolkit.rules.period import DATES_MISSING, EXPIRED
 from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 from toolkit.transforms.time_slots import to_iso_slots
 
@@ -55,8 +55,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "chantiers_perturbants"
     identifier_prefix = "MGL-CHP-"
     raw_data_schema = LyonChantiersPerturbantsRawDataSchema
-    # The producer withdraws a site on its end date: this only guards against a stale row.
-    rules = (EXPIRED,)
+    # The producer withdraws a site on its end date: EXPIRED only guards against a stale row.
+    rules = (EXPIRED, DATES_MISSING)
 
     def fetch_raw_data(self) -> pl.DataFrame:
         return fetch_layer(WFS_LAYER)
@@ -180,13 +180,8 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     Long durations are reported, not dropped: whether a multi-year "temporary" restriction
     is a defect or real is a case-by-case call.
     """
-    missing = pl.col("debutchantier").is_null() | pl.col("finchantier").is_null()
-    n_missing = df.select(missing.sum()).item()
-    if n_missing:
-        logger.warning(f"Dropping {n_missing} rows without both start and end dates")
-    df = df.filter(~missing)
-
-    inverted = pl.col("finchantier") < pl.col("debutchantier")
+    # A missing date is left to the rules, applied to the canonical rows.
+    inverted = (pl.col("finchantier") < pl.col("debutchantier")).fill_null(False)
     n_inverted = df.select(inverted.sum()).item()
     if n_inverted:
         logger.warning(f"Dropping {n_inverted} rows ending before they start")
@@ -197,9 +192,13 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     df = df.with_columns(
         pl.struct(["debutchantier", "time_slot_clocks"])
         .map_elements(
-            lambda row: to_iso_slots(
-                row["debutchantier"],
-                [(slot["start"], slot["end"]) for slot in row["time_slot_clocks"] or []],
+            lambda row: (
+                to_iso_slots(
+                    row["debutchantier"],
+                    [(slot["start"], slot["end"]) for slot in row["time_slot_clocks"] or []],
+                )
+                if row["debutchantier"] is not None
+                else []
             ),
             return_dtype=pl.List(pl.Struct({"start_time": pl.Utf8, "end_time": pl.Utf8})),
         )

@@ -8,7 +8,7 @@ import pytest
 from tests.sync_fixtures import measure_rows
 from toolkit.rules import period
 from toolkit.rules.apply import apply_rules
-from toolkit.rules.period import EXPIRED
+from toolkit.rules.period import DATES_MISSING, EXPIRED
 
 TODAY = date(2026, 1, 2)
 
@@ -26,8 +26,12 @@ def ending(*ends: str | None, category: str = "temporaryRegulation") -> pl.DataF
     )
 
 
+def kept_by(df: pl.DataFrame, rule) -> list[str]:
+    return apply_rules(df, [rule]).frame["regulation_identifier"].to_list()
+
+
 def kept(df: pl.DataFrame) -> list[str]:
-    return apply_rules(df, [EXPIRED]).frame["regulation_identifier"].to_list()
+    return kept_by(df, EXPIRED)
 
 
 def test_a_temporary_regulation_that_ended_yesterday_is_left_out():
@@ -44,10 +48,25 @@ def test_a_permanent_regulation_is_never_expired():
     assert kept(ending("2025-06-01T23:59:59+02:00", category="permanentRegulation")) == ["R0"]
 
 
-def test_a_temporary_regulation_without_an_end_is_kept_and_counted_unread():
-    result = apply_rules(ending(None), [EXPIRED])
-    assert result.frame.height == 1
-    assert result.unreadable == {"EXPIRED": 1}
+def test_a_missing_end_is_not_judged_by_expired():
+    assert kept(ending(None)) == ["R0"]
+
+
+@pytest.mark.parametrize("missing", ["period_start_date", "period_end_date"])
+def test_a_temporary_regulation_missing_a_date_is_left_out(missing):
+    df = ending("2026-01-02T23:59:59+01:00", "2026-01-02T23:59:59+01:00").with_columns(
+        pl.when(pl.col("regulation_identifier") == "R0")
+        .then(None)
+        .otherwise(pl.col(missing))
+        .alias(missing)
+    )
+    result = apply_rules(df, [DATES_MISSING])
+    assert result.frame["regulation_identifier"].to_list() == ["R1"]
+    assert result.applied == {"DATES_MISSING": 1}
+
+
+def test_a_permanent_regulation_needs_no_end():
+    assert kept_by(ending(None, category="permanentRegulation"), DATES_MISSING) == ["R0"]
 
 
 def test_today_is_read_at_each_run_not_at_import(monkeypatch):

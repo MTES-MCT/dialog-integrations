@@ -16,7 +16,7 @@ from integrations.co_lyon.chantiers_perturbants.data_source_integration import (
     compute_vehicle_fields,
 )
 from integrations.co_lyon.chantiers_perturbants.description import read_description
-from toolkit.rules.period import EXPIRED
+from toolkit.rules.period import DATES_MISSING, EXPIRED
 from toolkit.transforms.time_slots import parse_time_slots
 
 GEOMETRY = json.dumps(
@@ -286,22 +286,23 @@ def test_a_measure_without_hours_carries_no_time_slot():
     assert result.get_column("period_time_slots")[0].to_list() == []
 
 
-@pytest.mark.parametrize(
-    "start,end",
-    [
-        (None, "2026-10-09"),
-        ("2026-08-25", None),
-        ("2026-10-09", "2026-08-25"),  # ends before it starts
-    ],
-)
-def test_period_drops_broken_dates(start, end):
-    result = compute_period_fields(timed(row(debutchantier=start, finchantier=end)))
+def test_period_drops_a_site_ending_before_it_starts():
+    result = compute_period_fields(timed(row(debutchantier="2026-10-09", finchantier="2026-08-25")))
     assert result.height == 0
 
 
 def test_a_work_site_already_over_is_not_created():
     """The producer withdraws sites on their end date; a stale row must not slip in."""
     assert EXPIRED in DataSourceIntegration.rules
+
+
+@pytest.mark.parametrize("start,end", [(None, "2026-10-09"), ("2026-08-25", None)])
+def test_a_work_site_missing_a_date_reaches_the_rules_with_that_date_missing(start, end):
+    result = compute_period_fields(timed(row(debutchantier=start, finchantier=end)))
+
+    assert DATES_MISSING in DataSourceIntegration.rules
+    missing = pl.col("period_start_date").is_null() | pl.col("period_end_date").is_null()
+    assert result.select(missing).to_series().to_list() == [True]
 
 
 def test_multi_year_work_sites_are_reported_but_published(warnings):

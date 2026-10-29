@@ -33,7 +33,7 @@ class Rule:
     label: str
     nature: Nature
     outcome: Outcome
-    # True on the rows the rule applies to; null on a row it cannot read. A function when
+    # True on the rows the rule applies to; null counts as false. A function when
     # the expression reads the clock, so that it is built at each run, not at import.
     applies: pl.Expr | Callable[[], pl.Expr]
 
