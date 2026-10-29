@@ -34,8 +34,6 @@ class Production:
     funnels: list[SourceFunnel] = field(default_factory=list)
     stores: dict[str, SnapshotStore] = field(default_factory=dict)
     unbuilt: set[str] = field(default_factory=set)
-    # Left out by the common checks; also in `unbuilt`, but counted under their reason.
-    checked_out: set[str] = field(default_factory=set)
     # Built or not, by source: what the volume guard compares with the previous run.
     produced_by_source: dict[str, int] = field(default_factory=dict)
     prefix_of: dict[str, str | None] = field(default_factory=dict)
@@ -73,8 +71,7 @@ def run_all(integration: BaseIntegration, outcome: IntegrationOutcome, limit_to)
 
         logger.info(f"Total records from source {name}: {clean_data.shape[0]}")
         unbuilt_before = len(production.unbuilt)
-        clean_data = apply_checks(name, clean_data, production.checked_out, outcome)
-        production.unbuilt |= production.checked_out
+        clean_data = apply_checks(name, clean_data, outcome)
 
         source_regulations = integration.create_regulations(clean_data, source, production.unbuilt)
         production.produced_by_source[name] = (
@@ -129,27 +126,23 @@ def run_all(integration: BaseIntegration, outcome: IntegrationOutcome, limit_to)
     return production
 
 
-def apply_checks(
-    name: str, clean_data: pl.DataFrame, checked_out: set[str], outcome: IntegrationOutcome
-) -> pl.DataFrame:
-    """Leave out, whole, every regulation with a row failing a common check.
+def apply_checks(name: str, clean_data: pl.DataFrame, outcome: IntegrationOutcome) -> pl.DataFrame:
+    """Leave out every row failing a common check; the rest of its regulation still goes.
 
-    They go into `checked_out`, then into `unbuilt`: neither sent nor taken for gone.
-    Counted with what the pipeline leaves out; the reasons are in the log only.
+    The regulations they belong to are counted with what the pipeline leaves out; the
+    reasons are in the log only.
     """
     failing = checks.failing_rows(clean_data)
     if failing.is_empty():
         return clean_data
     for (reason,), group in failing.group_by("reason", maintain_order=True):
-        identifiers = group["regulation_identifier"].unique().to_list()
+        identifiers = sorted(group["regulation_identifier"].unique().to_list())
         logger.warning(
-            f"{name}: {len(identifiers)} regulations left out ({reason}), left as "
-            f"DiaLog has them: {sorted(identifiers)[:5]}"
+            f"{name}: {group['row'].n_unique()} rows of {len(identifiers)} regulations left "
+            f"out ({reason}): {identifiers[:5]}"
         )
-    left_out = set(failing["regulation_identifier"].to_list())
-    checked_out |= left_out
-    outcome.refused += len(left_out)
-    return clean_data.filter(~pl.col("regulation_identifier").cast(pl.Utf8).is_in(list(left_out)))
+    outcome.refused += failing["regulation_identifier"].n_unique()
+    return clean_data.filter(~pl.int_range(pl.len()).is_in(failing["row"].unique().to_list()))
 
 
 def compute_clean_data(source: BaseDataSourceIntegration) -> tuple[pl.DataFrame, int | None]:

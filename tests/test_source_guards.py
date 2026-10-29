@@ -248,7 +248,9 @@ def test_totals_written_before_sources_were_counted_still_load(tmp_path):
     assert TotalsStore("co_test", base_dir=tmp_path, target="h").load() == Totals(3, 2)
 
 
-def test_a_regulation_failing_a_check_is_left_whole_and_not_taken_for_gone(monkeypatch, tmp_path):
+def test_a_row_failing_a_check_is_left_out_and_the_rest_of_its_regulation_goes(
+    monkeypatch, tmp_path
+):
     import polars as pl
 
     class _Source(BaseDataSourceIntegration):
@@ -256,8 +258,9 @@ def test_a_regulation_failing_a_check_is_left_whole_and_not_taken_for_gone(monke
         identifier_prefix = A
 
         def fetch_raw_data(self):
-            rows = measure_rows([f"{A}bad", f"{A}bad", f"{A}new"])
-            return rows.with_columns(measure_max_speed=pl.Series([30, None, 30], dtype=pl.Int64))
+            rows = measure_rows([f"{A}bad", f"{A}bad", f"{A}gone", f"{A}new"])
+            speeds = pl.Series([30, None, None, 30], dtype=pl.Int64)
+            return rows.with_columns(measure_max_speed=speeds)
 
         def validate_raw_data(self, raw_data):
             return raw_data
@@ -265,10 +268,10 @@ def test_a_regulation_failing_a_check_is_left_whole_and_not_taken_for_gone(monke
         def compute_clean_data(self, raw_data):
             return raw_data
 
-    integration = _integration(monkeypatch, tmp_path, [_Source], [f"{A}bad"])
+    integration = _integration(monkeypatch, tmp_path, [_Source], [f"{A}bad", f"{A}gone"])
 
     outcome = integration.integrate_regulations()
 
     assert _api(integration).posted == [f"{A}new"]
-    assert _api(integration).deleted == []
-    assert (outcome.refused, outcome.errors) == (1, 0)
+    assert _api(integration).deleted == [f"{A}gone"]
+    assert (outcome.refused, outcome.errors) == (2, 0)

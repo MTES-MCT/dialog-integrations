@@ -81,7 +81,7 @@ def run(
         )
     outcome.planned = plan.planned
     outcome.held = plan.held
-    if not_built := production.unbuilt - production.checked_out:
+    if not_built := production.unbuilt:
         logger.warning(
             f"{len(not_built)} regulations could not be built, left as DiaLog has them: "
             f"{sorted(not_built)[:10]}"

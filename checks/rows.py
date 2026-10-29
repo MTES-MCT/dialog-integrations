@@ -1,8 +1,7 @@
 """Checks every source's canonical rows must pass before a payload is built.
 
-A regulation with one failing row is left out whole, as DiaLog has it: sending the rest
-would drop a measure, taking it for gone would close or delete it. What the API refuses
-on its own is left to it.
+A failing row is left out, and the rest of its regulation goes as usual: a regulation
+left without rows is taken for gone. What the API refuses on its own is left to it.
 """
 
 from __future__ import annotations
@@ -25,10 +24,12 @@ LONGITUDES = (-6.0, 10.0)
 
 
 def failing_rows(df: pl.DataFrame) -> pl.DataFrame:
-    """One row per (regulation_identifier, reason) that fails a check; empty when all pass."""
+    """One row per (row index, reason) that fails a check; empty when all pass."""
     reasons: list[pl.DataFrame] = []
     if "regulation_identifier" not in df.columns or df.is_empty():
-        return pl.DataFrame(schema={"regulation_identifier": pl.Utf8, "reason": pl.Utf8})
+        return pl.DataFrame(
+            schema={"row": pl.UInt32, "regulation_identifier": pl.Utf8, "reason": pl.Utf8}
+        )
 
     if {"period_start_date", "period_end_date"} <= set(df.columns):
         # An unreadable date is the API's to refuse, not this check's.
@@ -67,8 +68,9 @@ def failing_rows(df: pl.DataFrame) -> pl.DataFrame:
 
 def _flag(df: pl.DataFrame, mask: pl.Series, reason: str) -> pl.DataFrame:
     return (
-        df.filter(mask)
-        .select(pl.col("regulation_identifier").cast(pl.Utf8))
+        df.with_row_index("row")
+        .filter(mask)
+        .select("row", pl.col("regulation_identifier").cast(pl.Utf8))
         .with_columns(reason=pl.lit(reason))
     )
 

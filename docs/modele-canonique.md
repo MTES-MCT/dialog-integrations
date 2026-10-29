@@ -35,12 +35,13 @@ ligne passe les contrôles de `checks/rows.py` :
 * emprise `rawGeoJSON` sans géométrie ;
 * coordonnées hors bornes ou en ordre (latitude, longitude).
 
-Un arrêté dont une ligne échoue est laissé de côté **en entier**, et laissé tel que DiaLog
-le détient : ni créé, ni mis à jour, ni clos. Il compte parmi les « écartés par la
+Une ligne qui échoue est **écartée**, et le reste de son arrêté part normalement : on suit
+le producteur, moins ses lignes invalides. Un arrêté qui n'a plus de ligne est tenu pour
+disparu, donc clos ou supprimé. Les arrêtés touchés comptent parmi les « écartés par la
 pipeline » de Tchap ; le motif est dans le journal de l'exécution.
 
-Un arrêté dont une mesure n'a pas pu être construite suit le même chemin, toutes ses
-tranches (`-01`, `-02`…) comprises.
+Un arrêté dont une mesure n'a pas pu être construite, lui, est laissé tel que DiaLog le
+détient, toutes ses tranches (`-01`, `-02`…) comprises : ni créé, ni mis à jour, ni clos.
 
 ## Les règles métier
 
