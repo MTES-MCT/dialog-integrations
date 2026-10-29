@@ -13,7 +13,6 @@ from integrations.dp_aveyron.limitations_vitesse.data_source_integration import 
     compute_period_fields,
     compute_regulation_fields,
     compute_split_order,
-    discard_directional_stretches,
     discard_refused_segments,
     discard_vehicle_class_limits,
     measure_group_key,
@@ -403,22 +402,6 @@ def test_the_blocklist_matches_on_the_whole_stretch_not_a_prefix():
     kept = discard_refused_segments(refusable(location_to_abscissa=[520]))
 
     assert kept.height == 1
-
-
-def test_only_what_applies_both_ways_is_sent_while_production_ignores_the_direction():
-    """Production ignores the direction: a one-way limit would be broadcast both ways."""
-    df = pl.DataFrame(
-        {
-            "location_road_number": ["D1", "D2", "D3"],
-            "location_direction": [
-                DirectionEnum.BOTH.value,
-                DirectionEnum.A_TO_B.value,
-                DirectionEnum.B_TO_A.value,
-            ],
-        }
-    )
-
-    assert discard_directional_stretches(df)["location_road_number"].to_list() == ["D1"]
 
 
 def test_only_a_limit_true_both_ways_and_for_every_vehicle_leaves_the_pipeline():

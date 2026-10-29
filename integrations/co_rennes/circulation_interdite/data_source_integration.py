@@ -15,6 +15,7 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.rules.location import one_way_street_named
 from toolkit.transforms.periods import permanent_period
 
 from .schema import RennesCirculationInterditeRawDataSchema
@@ -28,6 +29,8 @@ URL = (
 LOCAL_FILE = "explorations/co_rennes/data/sens_circulation.parquet"
 
 MODE = "remote"
+
+ONE_WAY_STREET = one_way_street_named(pl.col("sens_circule"))
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
@@ -53,7 +56,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def compute_clean_data(self, raw_data):
         return (
-            raw_data.pipe(compute_measure_fields)
+            raw_data.pipe(self.apply_rules, ONE_WAY_STREET)
+            .pipe(compute_measure_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
             .pipe(compute_regulation_fields)

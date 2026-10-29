@@ -22,6 +22,7 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+from toolkit.rules.location import one_direction, one_way_street_named
 from toolkit.rules.vehicles import pedestrians_or_cycles_named
 from toolkit.transforms.local_time import start_of_local_day
 from toolkit.transforms.periods import permanent_period
@@ -61,6 +62,10 @@ DESCRIPTION_CONFIG = {
 }
 
 PEDESTRIANS_OR_CYCLES = pedestrians_or_cycles_named(pl.col("DESCRIPTIF"))
+# SENS 0 is both ways.
+ONE_DIRECTION = one_direction(pl.col("SENS"), 0)
+# One-way whatever SENS says (audit of 2026-09-23).
+ONE_WAY_STREET = one_way_street_named(pl.col("DESCRIPTIF"))
 
 LIMITS = [
     descriptif for descriptif, config in DESCRIPTION_CONFIG.items() if config.threshold_column
@@ -154,8 +159,9 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         return (
-            raw_data.pipe(self.apply_rules, PEDESTRIANS_OR_CYCLES)
+            raw_data.pipe(self.apply_rules, PEDESTRIANS_OR_CYCLES, ONE_WAY_STREET)
             .pipe(compute_measure_fields)
+            .pipe(self.apply_rules, ONE_DIRECTION)
             .pipe(discard_misleading_rows)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
@@ -290,12 +296,11 @@ def discard_misleading_rows(df: pl.DataFrame) -> pl.DataFrame:
     """Drop the rows DiaLog would publish wrong; each motive is counted on the whole input,
     not on what the previous ones left, so a row can count under several.
 
-    A rawGeoJSON location carries no direction: "Sens interdit / Sens unique" is one-way
-    whatever SENS says (audit of 2026-09-23) and would come out closed both ways.
+    A rawGeoJSON location carries no direction: a missing SENS may be one way, and would
+    come out both ways.
     """
     motives = {
-        "one-way street": pl.col("DESCRIPTIF") == "Sens interdit / Sens unique",
-        "not both directions, SENS other than 0": pl.col("SENS").fill_null(-1) != 0,
+        "no SENS": pl.col("SENS").is_null(),
         "free text in CONDITION or DESCR not read in full": ~text_reading("fully_read"),
     }
 

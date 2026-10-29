@@ -23,6 +23,7 @@ import polars as pl
 from loguru import logger
 
 from api.dia_log_client.models import DirectionEnum, RoadTypeEnum
+from toolkit.rules.location import one_direction
 
 SCOPE_POINT = "Un point"
 SCOPE_SECTION = "Une section"
@@ -44,9 +45,9 @@ CITY_CODE_BY_DISTRICT = {
     **{f"{n}ème arrondissement": f"751{n:02d}" for n in range(2, 21)},
 }
 
-# `2711` "Sens": any value but both ways drops the location rather than widen it: no
-# one-direction measure until DiaLog carries the side of the road (2026-10-26).
+# `2711` "Sens"; empty reads as both ways.
 BOTH_DIRECTIONS_LABEL = "dans les deux sens"
+ONE_DIRECTION = one_direction(pl.col("l_direction"), BOTH_DIRECTIONS_LABEL)
 # `2712` "côté" values that limit a location to one side of the street, which the DiaLog
 # write API cannot carry (2026-10-23): dropped rather than widened to both sides.
 ONE_SIDE_LABELS = ("côté pair", "côté impair")
@@ -90,7 +91,6 @@ _INPUT_COLUMNS = [
     "l_road_name",
     "l_district",
     "l_side",
-    "l_direction",
     "l_status",
     "l_from_house_number",
     "l_from_road_name",
@@ -258,8 +258,6 @@ def resolve_location(row: dict) -> dict:
     road_name = official_street_name((row["l_road_name"] or "").strip())
     if not road_name:
         return {**fields, "_location_rejection": "no road name"}
-    if row["l_direction"] not in (None, BOTH_DIRECTIONS_LABEL):
-        return {**fields, "_location_rejection": "one direction only"}
     if row["l_side"] in ONE_SIDE_LABELS:
         return {**fields, "_location_rejection": "one side of the street only"}
 

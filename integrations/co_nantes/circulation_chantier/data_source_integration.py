@@ -13,6 +13,7 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from toolkit.connectors import arcgis
+from toolkit.rules.location import one_way_street_named
 from toolkit.transforms.local_time import from_epoch_ms
 
 from .schema import NantesCirculationChantierRawDataSchema
@@ -26,6 +27,8 @@ URL = (
 
 IDENTIFIER_PREFIX = "NM-CC-"
 
+ONE_WAY_STREET = one_way_street_named(pl.col("contrainte_auto"))
+
 
 class DataSourceIntegration(BaseDataSourceIntegration):
     raw_data_schema = NantesCirculationChantierRawDataSchema
@@ -37,7 +40,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def compute_clean_data(self, raw_data):
         return (
-            raw_data.pipe(compute_measure_fields)
+            raw_data.pipe(self.apply_rules, ONE_WAY_STREET)
+            .pipe(compute_measure_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
             .pipe(compute_regulation_fields)

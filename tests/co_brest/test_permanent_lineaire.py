@@ -7,6 +7,8 @@ import pytest
 
 from integrations.co_brest.integration import Integration
 from integrations.co_brest.permanent_lineaire.data_source_integration import (
+    ONE_DIRECTION,
+    ONE_WAY_STREET,
     PEDESTRIANS_OR_CYCLES,
     DataSourceIntegration,
     compute_period_fields,
@@ -298,10 +300,6 @@ def test_discard_misleading_rows():
 
     columns = ["NOARR", "DESCRIPTIF", "SENS", "CONDITION", "DESCR", "POIDS", "HAUTEUR"]
     rows = [
-        ("one-way-0", "Sens interdit / Sens unique", 0, None, None, 0.0, 0.0),
-        ("one-way-1", "Sens interdit / Sens unique", 1, None, None, 0.0, 0.0),
-        ("one-direction", "Limitation Vitesse", 1, None, None, 0.0, 0.0),
-        ("unknown-direction", "Interdit dans les 2 sens", 2, None, None, 0.0, 0.0),
         ("undirected", "Limitation Vitesse", None, None, None, 0.0, 0.0),
         ("unread-note", "Stationnement interdit", 0, None, "en épis", 0.0, 0.0),
         (
@@ -521,3 +519,26 @@ def test_bans_on_pedestrians_or_cycles_are_left_out():
     )
     result = apply_rules(df, [PEDESTRIANS_OR_CYCLES])
     assert result.frame["DESCRIPTIF"].to_list() == ["Interdit aux cyclomoteurs"]
+
+
+def test_a_restriction_holding_one_way_only_is_left_out():
+    df = pl.DataFrame(
+        {
+            "NOARR": ["both-ways", "one-direction", "other-direction", "undirected"],
+            "SENS": [0, 1, 2, None],
+        }
+    )
+    result = apply_rules(df, [ONE_DIRECTION])
+    # A missing SENS is left to `discard_misleading_rows`.
+    assert result.frame["NOARR"].to_list() == ["both-ways", "undirected"]
+
+
+def test_a_one_way_street_is_left_out_whatever_sens_says():
+    df = pl.DataFrame(
+        {
+            "DESCRIPTIF": ["Sens interdit / Sens unique", "Interdit dans les 2 sens"],
+            "SENS": [0, 0],
+        }
+    )
+    result = apply_rules(df, [ONE_WAY_STREET])
+    assert result.frame["DESCRIPTIF"].to_list() == ["Interdit dans les 2 sens"]

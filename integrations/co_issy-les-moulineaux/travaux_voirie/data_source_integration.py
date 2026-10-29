@@ -12,6 +12,7 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from canonical.source import BaseDataSourceIntegration
+from toolkit.rules.location import one_way_street_named
 from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 from toolkit.transforms.titles import truncate
 
@@ -27,6 +28,7 @@ MEASURE_TYPE_BY_LABEL = {
     "Stationnement gênant": MeasureTypeEnum.PARKINGPROHIBITED.value,
     "Limitation vitesse": MeasureTypeEnum.SPEEDLIMITATION.value,
 }
+ONE_WAY_STREET = one_way_street_named(pl.col("mesure_titre"))
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
@@ -67,6 +69,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             raw_data.pipe(explode_measures)
             # One row per measure a work site lists: the unit of the retention rate.
             .pipe(self.count_dataset_restrictions)
+            .pipe(self.apply_rules, ONE_WAY_STREET)
             .pipe(compute_measure_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)

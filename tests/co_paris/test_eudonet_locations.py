@@ -12,6 +12,7 @@ from api.dia_log_client.models import (
 from canonical.regulation_measure import RegulationMeasure
 from integrations.co_paris.eudonet import locations
 from integrations.co_paris.eudonet.locations import (
+    ONE_DIRECTION,
     Bound,
     city_codes,
     compute_location_fields,
@@ -20,6 +21,7 @@ from integrations.co_paris.eudonet.locations import (
     parse_house_number_range,
 )
 from run.organization import BaseIntegration
+from toolkit.rules.apply import apply_rules
 
 INPUT_COLUMNS = {
     "l_file_id": pl.Int64,
@@ -366,20 +368,27 @@ def test_a_location_not_limited_to_one_direction_goes_both_ways(column, label):
     assert row["location_direction"] == "BOTH"
 
 
+@pytest.mark.parametrize("label", ["côté pair", "côté impair"])
+def test_a_location_limited_to_one_side_is_dropped(label):
+    """Never widened to both sides, never published on one."""
+    assert compute_location_fields(frame(point("4", l_side=label))).height == 0
+
+
 @pytest.mark.parametrize(
-    "column, label",
+    "label, left_out",
     [
-        ("l_direction", "du début vers la fin du segment"),
-        ("l_direction", "de la fin vers le début du segment"),
-        ("l_direction", "dans le sens de la circulation générale"),
-        ("l_direction", "dans le sens inverse de la circulation générale"),
-        ("l_side", "côté pair"),
-        ("l_side", "côté impair"),
+        ("du début vers la fin du segment", True),
+        ("de la fin vers le début du segment", True),
+        ("dans le sens de la circulation générale", True),
+        ("dans le sens inverse de la circulation générale", True),
+        ("dans les deux sens", False),
+        (None, False),
     ],
 )
-def test_a_location_limited_to_one_direction_or_one_side_is_dropped(column, label):
-    """Never widened to both directions or both sides, never published on one."""
-    assert compute_location_fields(frame(point("4", **{column: label}))).height == 0
+def test_a_location_limited_to_one_direction_is_left_out(label, left_out):
+    """Never widened to both directions, never published on one."""
+    result = apply_rules(frame(point("4", l_direction=label)), [ONE_DIRECTION])
+    assert result.frame.is_empty() is left_out
 
 
 def test_a_bound_numbered_on_the_crossing_street_drops_the_location():

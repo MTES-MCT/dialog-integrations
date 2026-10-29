@@ -18,8 +18,9 @@ from .location_filters import (
     discard_points_beyond_parking,
     discard_refused_locations,
 )
-from .locations import compute_location_fields
+from .locations import ONE_DIRECTION, compute_location_fields
 from .measures import (
+    ONE_WAY_STREET,
     PEDESTRIAN_OR_CYCLE_MEASURES,
     add_pedestrian_area_speed,
     compute_measure_fields,
@@ -95,7 +96,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             raw_data.pipe(filter_police_prefecture, self._publishes_police_prefecture())
             .pipe(compute_regulation_fields)
             .pipe(discard_published_elsewhere, self.numbers_published_elsewhere)
-            .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_MEASURES)
+            # Before the period and vehicle fields: no other rule can be judged yet.
+            .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_MEASURES, ONE_DIRECTION, ONE_WAY_STREET)
             .pipe(compute_measure_fields)
             .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_VEHICLES)
             .pipe(compute_vehicle_fields)

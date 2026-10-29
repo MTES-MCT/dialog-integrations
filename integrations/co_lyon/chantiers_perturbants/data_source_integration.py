@@ -19,6 +19,7 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from integrations.co_lyon.grand_lyon import fetch_layer
+from toolkit.rules.location import one_way_street_named
 from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
 from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 from toolkit.transforms.time_slots import to_iso_slots
@@ -41,6 +42,7 @@ MEASURE_TYPE_BY_PERTURBATION = {
     # Dropped: "Circulation réduite*" has no DiaLog type, "Circulation sens
     # unique" needs a direction the layer lacks.
 }
+ONE_WAY_STREET = one_way_street_named(pl.col("typeperturbation"))
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
@@ -66,7 +68,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         return (
-            raw_data.pipe(compute_measure_fields)
+            raw_data.pipe(self.apply_rules, ONE_WAY_STREET)
+            .pipe(compute_measure_fields)
             .pipe(compute_time_slot_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)

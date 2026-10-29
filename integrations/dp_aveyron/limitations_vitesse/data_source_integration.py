@@ -63,9 +63,6 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             # stand alone, not keep the "both ways" its discarded twin gave it (D840).
             .pipe(discard_vehicle_class_limits)
             .pipe(compute_location_fields)
-            # Production ignores `direction`: a one-way limit would be broadcast both ways.
-            # Remove this line once the back end reads it.
-            .pipe(discard_directional_stretches)
             # After the locations: the blocklist names stretches by their milestones.
             .pipe(discard_refused_segments)
             # Before the rows are grouped into regulations.
@@ -128,22 +125,6 @@ def discard_vehicle_class_limits(df: pl.DataFrame) -> pl.DataFrame:
             f"their general limit is published alone: {values}"
         )
     return df.filter(~conflicting)
-
-
-def discard_directional_stretches(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop the stretches whose limit depends on the direction of travel.
-
-    A stopgap: DiaLog's production ignores the direction of a numbered-road location, so the
-    D920 at PR 39+719 (90 one way, 50 the other) would get two contradictory limits both ways.
-    """
-    both_ways = pl.col("location_direction") == DirectionEnum.BOTH.value
-    n_directional = df.select((~both_ways).sum()).item()
-    if n_directional:
-        logger.warning(
-            f"Discarding {n_directional}/{df.height} stretches whose limit depends on the "
-            "direction: production ignores it"
-        )
-    return df.filter(both_ways)
 
 
 def compute_split_order(df: pl.DataFrame) -> pl.DataFrame:
