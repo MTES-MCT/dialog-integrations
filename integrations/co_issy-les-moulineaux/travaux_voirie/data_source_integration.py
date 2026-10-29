@@ -27,10 +27,6 @@ MEASURE_TYPE_BY_LABEL = {
     "Limitation vitesse": MeasureTypeEnum.SPEEDLIMITATION.value,
 }
 
-PUBLISHED_MEASURE_TYPES = [
-    MeasureTypeEnum.PARKINGPROHIBITED.value,
-]
-
 TITLE_MAX_LENGTH = 255
 TITLE_ELLIPSIS = "..."
 
@@ -114,14 +110,8 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
             f"Dropping {unmapped.get_column('count').sum()} measures without DiaLog equivalent: "
             f"{dict(zip(unmapped.get_column('mesure_titre'), unmapped.get_column('count')))}"
         )
-    df = df.filter(pl.col("measure_type_").is_not_null())
-
-    is_published = pl.col("measure_type_").is_in(PUBLISHED_MEASURE_TYPES)
-    unsupported = df.filter(~is_published).get_column("measure_type_")
-    if unsupported.len():
-        counts = dict(unsupported.value_counts(sort=True).iter_rows())
-        logger.warning(f"Dropping {unsupported.len()} measures requiring a segment: {counts}")
-    return df.filter(is_published)
+    # Every location is a point: only parking bans pass the common rules.
+    return df.filter(pl.col("measure_type_").is_not_null())
 
 
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:

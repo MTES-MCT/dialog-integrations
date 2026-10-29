@@ -124,9 +124,6 @@ def test_une_ligne_par_mesure_publiable(clean_data):
 
 def test_types_reserves_aux_troncons_ecartes(clean_data):
     """The source gives a point only: a speed limit or a closure needs a segment."""
-    module = _load_module()
-    assert module.PUBLISHED_MEASURE_TYPES == [MeasureTypeEnum.PARKINGPROHIBITED.value]
-
     publies = set(clean_data["measure_type_"])
     assert MeasureTypeEnum.SPEEDLIMITATION.value not in publies
     assert MeasureTypeEnum.NOENTRY.value not in publies

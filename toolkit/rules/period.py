@@ -5,12 +5,12 @@ import polars as pl
 from toolkit.rules.rule import Nature, Outcome, Rule
 from toolkit.transforms.local_time import today_in_paris
 
-TEMPORARY = pl.col("regulation_category") == "temporaryRegulation"
+NOT_TEMPORARY = pl.col("regulation_category") != "temporaryRegulation"
 
 
-def _ended_before_today() -> pl.Expr:
+def _not_ended() -> pl.Expr:
     # On the Paris calendar: a regulation ending today is in force until midnight.
-    return TEMPORARY & (pl.col("period_end_date").dt.date() < today_in_paris())
+    return NOT_TEMPORARY | (pl.col("period_end_date").dt.date() >= today_in_paris())
 
 
 EXPIRED = Rule(
@@ -18,7 +18,7 @@ EXPIRED = Rule(
     label="arrêté temporaire terminé",
     nature=Nature.OUT_OF_SCOPE,
     outcome=Outcome.DROP,
-    applies=_ended_before_today,
+    valid=_not_ended,
 )
 
 # Without an end nothing would ever close it; without a start the write date would stand in.
@@ -27,8 +27,8 @@ DATES_MISSING = Rule(
     label="arrêté temporaire sans date de début ou de fin",
     nature=Nature.DATA_DEFECT,
     outcome=Outcome.DROP,
-    applies=TEMPORARY
-    & (pl.col("period_start_date").is_null() | pl.col("period_end_date").is_null()),
+    valid=NOT_TEMPORARY
+    | (pl.col("period_start_date").is_not_null() & pl.col("period_end_date").is_not_null()),
 )
 
 # Multi-year "temporary" restrictions have degraded DiaLog's feed before, but some are real,
@@ -39,11 +39,11 @@ LONG_DURATION = Rule(
     nature=Nature.SUSPICIOUS,
     outcome=Outcome.FLAG,
     # In calendar days: instants on either side of a clock change are an hour apart.
-    applies=TEMPORARY
-    & (
+    valid=NOT_TEMPORARY
+    | (
         (
             pl.col("period_end_date").dt.date() - pl.col("period_start_date").dt.date()
         ).dt.total_days()
-        > 365
+        <= 365
     ),
 )

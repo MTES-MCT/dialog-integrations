@@ -44,7 +44,7 @@ def measures_of(regulation) -> list:
 
 
 def offline_source() -> DataSourceIntegration:
-    source = DataSourceIntegration.__new__(DataSourceIntegration)
+    source = DataSourceIntegration(None, None)  # type: ignore[arg-type]
     # The Métropole's bounding box: every fixture segment lies inside the real perimeter,
     # so the result matches the downloaded one without calling geo.api.gouv.fr.
     source.perimeter = Perimeter.build("epci", "200046977", [box(4.69, 45.55, 5.07, 45.94)])
@@ -581,7 +581,7 @@ def test_the_filter_only_touches_pedestrian_areas(clean_data):
 
 def test_the_name_based_rule_drops_private_nameless_and_non_road_areas():
     """The name-based rule alone also drops one labelled area."""
-    source = DataSourceIntegration.__new__(DataSourceIntegration)
+    source = DataSourceIntegration(None, None)  # type: ignore[arg-type]
     qualified = source.validate_raw_data(pl.read_csv(FIXTURE)).pipe(_qualified_measures)
 
     kept = discard_pedestrian_areas_off_the_road_network(qualified)
@@ -708,7 +708,7 @@ def test_compute_clean_data_uses_the_injected_perimeter(monkeypatch):
     monkeypatch.setattr(
         perimeter_module.Perimeter, "fetch", lambda *a, **k: pytest.fail("fetch must not be called")
     )
-    source = DataSourceIntegration.__new__(DataSourceIntegration)
+    source = DataSourceIntegration(None, None)  # type: ignore[arg-type]
     source.perimeter = Perimeter.build("epci", "test", [box(4.0, 45.0, 6.0, 47.0)])
     df = pl.DataFrame(
         {

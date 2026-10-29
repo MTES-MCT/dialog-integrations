@@ -637,7 +637,7 @@ def test_two_tonnages_on_one_measure_keep_the_stricter(second):
 
 
 def test_all_vehicles_alone_produces_only_that_field():
-    source = DataSourceIntegration.__new__(DataSourceIntegration)
+    source = DataSourceIntegration(None, None)  # type: ignore[arg-type]
     integration = BaseIntegration.__new__(BaseIntegration)
     measure = pipeline(make_row()).pipe(source.select_regulation_measure_fields).row(0, named=True)
     dto = integration.create_save_vehicle_dto(measure)  # type: ignore[arg-type]

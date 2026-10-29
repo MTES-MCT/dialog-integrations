@@ -48,8 +48,8 @@ def test_a_permanent_regulation_is_never_expired():
     assert kept(ending("2025-06-01T23:59:59+02:00", category="permanentRegulation")) == ["R0"]
 
 
-def test_a_missing_end_is_not_judged_by_expired():
-    assert kept(ending(None)) == ["R0"]
+def test_a_missing_end_cannot_be_validated_by_expired_either():
+    assert kept(ending(None)) == []
 
 
 @pytest.mark.parametrize("missing", ["period_start_date", "period_end_date"])

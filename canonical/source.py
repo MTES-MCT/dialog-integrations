@@ -8,6 +8,7 @@ from api.dia_log_client import Client
 from canonical.regulation_measure import RegulationMeasure, unknown_canonical_columns
 from settings import OrganizationSettings
 from toolkit.rules.apply import RulesResult, apply_rules
+from toolkit.rules.common import COMMON_RULES
 from toolkit.rules.rule import Outcome, Rule
 
 
@@ -34,8 +35,11 @@ class BaseDataSourceIntegration:
     # The source's columns read as canonical ones, for `apply_rules` before its canonical
     # frame exists (a source that groups by order number applies them before grouping).
     rule_inputs: dict[str, pl.Expr] = {}
-    # The rules of `toolkit/rules/` this source applies, each in place of its own code.
+    # The rules of `toolkit/rules/` this source applies on top of the common ones, each in
+    # place of its own code.
     rules: tuple[Rule, ...] = ()
+    # Common rules this source does not apply, by code, with the reason.
+    disabled_rules: dict[str, str] = {}
 
     organization_settings: OrganizationSettings
     client: Client
@@ -82,9 +86,14 @@ class BaseDataSourceIntegration:
         clean_data = self.select_regulation_measure_fields(clean_data)
         return clean_data
 
+    @property
+    def active_rules(self) -> tuple[Rule, ...]:
+        common = tuple(rule for rule in COMMON_RULES if rule.code not in self.disabled_rules)
+        return common + self.rules
+
     def apply_rules(self, df: pl.DataFrame, *own_rules: Rule) -> pl.DataFrame:
-        """Apply the source's `rules` and any rule of its own, counting each."""
-        rules = [*self.rules, *own_rules]
+        """Apply the common rules, the source's `rules` and any rule of its own, counting each."""
+        rules = [*self.active_rules, *own_rules]
         if not rules:
             return df
         result = apply_rules(df, rules, self.rule_inputs, source=self.name or "")
@@ -96,10 +105,10 @@ class BaseDataSourceIntegration:
         """Apply the rules to the canonical rows; a decision already applied must find nothing."""
         rules = [
             rule
-            for rule in self.rules
+            for rule in self.active_rules
             if rule.code not in self._applied_codes or rule.outcome is Outcome.DROP
         ]
-        result = apply_rules(df, rules, source=self.name or "")
+        result = apply_rules(df, rules, source=self.name or "", canonical=True)
         if again := {c: n for c, n in result.applied.items() if c in self._applied_codes}:
             logger.error(f"{self.name}: rules already applied still apply to rows: {again}")
         self._count(result, rules)

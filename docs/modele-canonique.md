@@ -61,9 +61,17 @@ et une **conséquence**, ce que deviennent ses lignes :
 Les deux se choisissent séparément : un défaut de la donnée est écarté, ou seulement
 signalé s'il ne rend pas la mesure fausse.
 
-Elle s'écrit une fois, en expression Polars sur les noms canoniques. Une source déclare
-dans `rules` les règles de `toolkit/rules/` qu'elle applique, chacune à la place de son
-propre code : ajouter une règle à la banque ne change aucune autre source.
+Elle s'écrit une fois, en expression Polars sur les noms canoniques, comme un
+**validateur** : elle dit ce qu'est une ligne valide, et une ligne qu'elle ne peut pas
+valider échoue, valeur manquante ou illisible comprise. Une valeur légitimement absente se
+dit donc valide dans la règle (une rue nommée n'a pas de géométrie). Ainsi une règle
+nourrie d'une mauvaise colonne écarte tout, et la chute de volume se voit, au lieu de ne
+rien juger en silence. Les **règles
+communes** (`toolkit/rules/common.py`, aujourd'hui l'emprise ponctuelle hors
+stationnement) s'appliquent à toutes les sources sans qu'elles écrivent rien ; une source
+qui en écarte une le déclare, avec sa raison : `disabled_rules = {"POINT_NOT_PARKING":
+"…"}`. Les autres règles de `toolkit/rules/`, une source les déclare dans `rules`, chacune
+à la place de son propre code.
 
 Une source qui ne regroupe pas n'a rien d'autre à écrire : la classe de base applique ses
 règles à ses lignes canoniques. Une source qui regroupe par numéro d'arrêté les applique

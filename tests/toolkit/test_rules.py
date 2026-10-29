@@ -11,12 +11,12 @@ from tests.sync_fixtures import measure_rows
 from toolkit.rules.apply import apply_rules
 from toolkit.rules.rule import Nature, Outcome, Rule
 
-ENDS_BEFORE_2026_03 = pl.col("period_end_date") < pl.datetime(2026, 3, 1, time_zone="Europe/Paris")
-SPEED_ABOVE_40 = pl.col("measure_max_speed") > 40
+ENDS_FROM_2026_03 = pl.col("period_end_date") >= pl.datetime(2026, 3, 1, time_zone="Europe/Paris")
+SPEED_UP_TO_40 = pl.col("measure_max_speed") <= 40
 
 
-def rule(code: str, outcome: Outcome, applies: pl.Expr) -> Rule:
-    return Rule(code, code.lower().replace("_", " "), Nature.OUT_OF_SCOPE, outcome, applies)
+def rule(code: str, outcome: Outcome, valid: pl.Expr) -> Rule:
+    return Rule(code, code.lower().replace("_", " "), Nature.OUT_OF_SCOPE, outcome, valid)
 
 
 def rows(identifiers, **columns) -> pl.DataFrame:
@@ -28,7 +28,7 @@ def rows(identifiers, **columns) -> pl.DataFrame:
 def test_a_decision_leaves_its_rows_out_and_keeps_the_others_in_order():
     df = rows(["A", "B", "C"], measure_max_speed=[30, 50, 20])
 
-    result = apply_rules(df, [rule("FAST", Outcome.DROP, SPEED_ABOVE_40)])
+    result = apply_rules(df, [rule("FAST", Outcome.DROP, SPEED_UP_TO_40)])
 
     assert result.frame["regulation_identifier"].to_list() == ["A", "C"]
     assert result.frame.columns == df.columns
@@ -38,7 +38,7 @@ def test_a_decision_leaves_its_rows_out_and_keeps_the_others_in_order():
 def test_a_signal_changes_nothing_but_is_counted():
     df = rows(["A", "B"], measure_max_speed=[30, 50])
 
-    result = apply_rules(df, [rule("FAST", Outcome.FLAG, SPEED_ABOVE_40)])
+    result = apply_rules(df, [rule("FAST", Outcome.FLAG, SPEED_UP_TO_40)])
 
     assert result.frame.equals(df)
     assert result.applied == {"FAST": 1}
@@ -47,8 +47,8 @@ def test_a_signal_changes_nothing_but_is_counted():
 def test_overlapping_rules_each_count_their_rows():
     df = rows(["A", "B"], measure_max_speed=[30, 50])
     rules = [
-        rule("FAST", Outcome.DROP, SPEED_ABOVE_40),
-        rule("ANY", Outcome.DROP, pl.col("measure_max_speed") > 0),
+        rule("FAST", Outcome.DROP, SPEED_UP_TO_40),
+        rule("ANY", Outcome.DROP, pl.col("measure_max_speed") <= 0),
     ]
 
     assert apply_rules(df, rules).applied == {"FAST": 1, "ANY": 2}
@@ -59,7 +59,7 @@ def test_a_source_column_is_read_under_its_canonical_name_and_stays_out_of_the_f
 
     result = apply_rules(
         df,
-        [rule("FAST", Outcome.DROP, SPEED_ABOVE_40)],
+        [rule("FAST", Outcome.DROP, SPEED_UP_TO_40)],
         rule_inputs={"measure_max_speed": pl.col("vitesse")},
     )
 
@@ -73,10 +73,10 @@ def test_period_bounds_are_compared_as_instants_whatever_their_shape():
     )
     by_date = pl.DataFrame({"fin": [date(2026, 2, 1), date(2026, 4, 1)]})
 
-    kept = apply_rules(df, [rule("ENDED", Outcome.DROP, ENDS_BEFORE_2026_03)]).frame
+    kept = apply_rules(df, [rule("ENDED", Outcome.DROP, ENDS_FROM_2026_03)]).frame
     kept_by_date = apply_rules(
         by_date,
-        [rule("ENDED", Outcome.DROP, ENDS_BEFORE_2026_03)],
+        [rule("ENDED", Outcome.DROP, ENDS_FROM_2026_03)],
         rule_inputs={"period_end_date": pl.col("fin")},
     ).frame
 
@@ -84,22 +84,32 @@ def test_period_bounds_are_compared_as_instants_whatever_their_shape():
     assert kept_by_date["fin"].to_list() == [date(2026, 4, 1)]
 
 
-def test_a_value_missing_or_that_cannot_be_read_is_not_judged_by_the_rule():
-    df = rows(["A", "B", "C"], period_end_date=["2026-02-01", "fin des travaux", None])
+def test_a_value_missing_or_that_cannot_be_read_fails_the_rule():
+    df = rows(["A", "B", "C"], period_end_date=["2026-04-01", "fin des travaux", None])
 
-    result = apply_rules(df, [rule("ENDED", Outcome.DROP, ENDS_BEFORE_2026_03)])
+    result = apply_rules(df, [rule("ENDED", Outcome.DROP, ENDS_FROM_2026_03)])
 
-    assert result.frame["regulation_identifier"].to_list() == ["B", "C"]
-    assert result.applied == {"ENDED": 1}
+    assert result.frame["regulation_identifier"].to_list() == ["A"]
+    assert result.applied == {"ENDED": 2}
+
+
+def test_on_canonical_rows_a_column_the_source_lacks_fails_the_rule_like_a_missing_value():
+    df = rows(["A"])
+    tall = rule("TALL", Outcome.DROP, pl.col("vehicle_max_height") <= 4)
+
+    result = apply_rules(df, [tall], canonical=True)
+
+    assert result.unevaluated == []
+    assert result.frame.is_empty()
 
 
 def test_a_rule_can_apply_to_the_whole_regulation():
     df = rows(["A", "A", "B"], period_end_date=["2026-02-01", "2026-04-01", "2026-02-01"])
-    every_measure_ended = pl.col("period_end_date").max().over("regulation_identifier") < (
+    a_measure_still_runs = pl.col("period_end_date").max().over("regulation_identifier") >= (
         pl.datetime(2026, 3, 1, time_zone="Europe/Paris")
     )
 
-    kept = apply_rules(df, [rule("ENDED", Outcome.DROP, every_measure_ended)]).frame
+    kept = apply_rules(df, [rule("ENDED", Outcome.DROP, a_measure_still_runs)]).frame
 
     assert kept["regulation_identifier"].to_list() == ["A", "A"]
 
@@ -107,7 +117,7 @@ def test_a_rule_can_apply_to_the_whole_regulation():
 def test_a_rule_reading_a_missing_column_is_reported_unevaluated():
     df = rows(["A"])
 
-    result = apply_rules(df, [rule("HEAVY", Outcome.DROP, pl.col("vehicle_max_height") > 4)])
+    result = apply_rules(df, [rule("HEAVY", Outcome.DROP, pl.col("vehicle_max_height") <= 4)])
 
     assert result.unevaluated == ["HEAVY"]
     assert result.frame.equals(df)
@@ -115,8 +125,8 @@ def test_a_rule_reading_a_missing_column_is_reported_unevaluated():
 
 # --- Through a source -------------------------------------------------------------
 
-FAST = Rule("FAST", "trop rapide", Nature.OUT_OF_SCOPE, Outcome.DROP, SPEED_ABOVE_40)
-SLOW = Rule("SLOW", "trop lent", Nature.SUSPICIOUS, Outcome.FLAG, pl.col("measure_max_speed") < 25)
+FAST = Rule("FAST", "trop rapide", Nature.OUT_OF_SCOPE, Outcome.DROP, SPEED_UP_TO_40)
+SLOW = Rule("SLOW", "trop lent", Nature.SUSPICIOUS, Outcome.FLAG, pl.col("measure_max_speed") >= 25)
 
 
 class _Source(BaseDataSourceIntegration):
@@ -196,7 +206,7 @@ def test_a_source_applies_its_own_rules_with_the_common_ones():
         "hors liste",
         Nature.OUT_OF_SCOPE,
         Outcome.DROP,
-        pl.col("regulation_identifier") == "C",
+        pl.col("regulation_identifier") != "C",
     )
 
     class Own(_Source):
@@ -204,3 +214,26 @@ def test_a_source_applies_its_own_rules_with_the_common_ones():
             return self.apply_rules(raw_data, own)
 
     assert Own().compute_data_regulations()["regulation_identifier"].to_list() == ["A"]
+
+
+def test_the_common_rules_apply_to_a_source_that_declares_nothing():
+    class Points(_Source):
+        rules = ()
+        frame = rows(["A", "B"]).with_columns(
+            location_geometry=pl.lit('{"type": "Point", "coordinates": [2.3, 48.8]}'),
+            measure_type_=pl.Series(["speedLimitation", "parkingProhibited"]),
+        )
+
+    assert Points().compute_data_regulations()["regulation_identifier"].to_list() == ["B"]
+
+
+def test_a_source_may_disable_a_common_rule_with_its_reason():
+    class Points(_Source):
+        rules = ()
+        disabled_rules = {"POINT_NOT_PARKING": "test"}
+        frame = rows(["A"]).with_columns(
+            location_geometry=pl.lit('{"type": "Point", "coordinates": [2.3, 48.8]}'),
+            measure_type_=pl.lit("speedLimitation"),
+        )
+
+    assert Points().compute_data_regulations().height == 1

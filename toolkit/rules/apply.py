@@ -24,7 +24,7 @@ LOGGED_AS = {Outcome.DROP: "left out", Outcome.FLAG: "flagged"}
 @dataclass
 class RulesResult:
     frame: pl.DataFrame
-    # By rule code: rows it applied to.
+    # By rule code: rows that failed it.
     applied: dict[str, int] = field(default_factory=dict)
     # Rules reading a column the view lacks.
     unevaluated: list[str] = field(default_factory=list)
@@ -35,11 +35,22 @@ def apply_rules(
     rules: list[Rule],
     rule_inputs: dict[str, pl.Expr] | None = None,
     source: str = "",
+    canonical: bool = False,
 ) -> RulesResult:
-    """Leave out the rows a dropping rule applies to, log those a flagging one applies to."""
+    """Leave out the rows a dropping rule cannot validate, log those a flagging one cannot.
+
+    On `canonical` rows, a canonical column the source does not produce is read as null: it
+    is judged like any missing value, not skipped.
+    """
     if not rules or df.is_empty():
         return RulesResult(df)
     view = canonical_view(df, rule_inputs or {})
+    if canonical:
+        view = view.with_columns(
+            pl.lit(None, dtype=dtype).alias(name)
+            for name, dtype in CANONICAL_TYPES.items()
+            if name not in view.columns
+        )
     evaluable = [rule for rule in rules if rule.reads <= set(view.columns)]
     result = RulesResult(df, unevaluated=[r.code for r in rules if r not in evaluable])
     if not evaluable:
@@ -48,15 +59,15 @@ def apply_rules(
     verdicts = view.select(rule.expression().alias(rule.code) for rule in evaluable)
     left_out = pl.Series([False] * df.height)
     for rule in evaluable:
-        # A missing value is judged by the rule about it, so that no rule has to exclude
-        # the others.
-        applies = verdicts[rule.code].fill_null(False)
-        if not (applied := int(applies.sum())):
+        # A rule validates: what it cannot say is valid, a missing or unreadable value
+        # included, fails it. A rule fed the wrong column fails every row, and shows.
+        fails = ~verdicts[rule.code].fill_null(False)
+        if not (failed := int(fails.sum())):
             continue
-        result.applied[rule.code] = applied
-        _log(source, rule, applied, view.filter(applies))
+        result.applied[rule.code] = failed
+        _log(source, rule, failed, view.filter(fails))
         if rule.outcome is Outcome.DROP:
-            left_out = left_out | applies
+            left_out = left_out | fails
 
     result.frame = df.filter(~left_out)
     return result
@@ -107,11 +118,11 @@ def _canonical_types() -> dict[str, pl.DataType]:
 CANONICAL_TYPES = _canonical_types()
 
 
-def _log(source: str, rule: Rule, applied: int, rows: pl.DataFrame) -> None:
+def _log(source: str, rule: Rule, failed: int, rows: pl.DataFrame) -> None:
     sample = ""
     if "regulation_identifier" in rows.columns:
         identifiers = rows["regulation_identifier"].cast(pl.String).unique().sort().to_list()
         sample = f": {identifiers[:5]}"
     logger.warning(
-        f"{source}: {applied} rows {LOGGED_AS[rule.outcome]}, {rule.label} ({rule.code}){sample}"
+        f"{source}: {failed} rows {LOGGED_AS[rule.outcome]}, {rule.label} ({rule.code}){sample}"
     )
