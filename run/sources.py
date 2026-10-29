@@ -14,7 +14,6 @@ from loguru import logger
 
 from api.dia_log_client.models import PostApiRegulationsAddBody
 from canonical.source import BaseDataSourceIntegration
-from checks import rows as checks
 from report.sync_report import SourceFunnel
 from run.datasets import dataset_label
 from sync.digest import Digest, compute_regulation_digest
@@ -71,7 +70,6 @@ def run_all(integration: BaseIntegration, outcome: IntegrationOutcome, limit_to)
 
         logger.info(f"Total records from source {name}: {clean_data.shape[0]}")
         unbuilt_before = len(production.unbuilt)
-        clean_data = apply_checks(name, clean_data, outcome)
 
         source_regulations = integration.create_regulations(clean_data, source, production.unbuilt)
         production.produced_by_source[name] = (
@@ -124,25 +122,6 @@ def run_all(integration: BaseIntegration, outcome: IntegrationOutcome, limit_to)
             production.source_of[identifier] = name
 
     return production
-
-
-def apply_checks(name: str, clean_data: pl.DataFrame, outcome: IntegrationOutcome) -> pl.DataFrame:
-    """Leave out every row failing a common check; the rest of its regulation still goes.
-
-    The regulations they belong to are counted with what the pipeline leaves out; the
-    reasons are in the log only.
-    """
-    failing = checks.failing_rows(clean_data)
-    if failing.is_empty():
-        return clean_data
-    for (reason,), group in failing.group_by("reason", maintain_order=True):
-        identifiers = sorted(group["regulation_identifier"].unique().to_list())
-        logger.warning(
-            f"{name}: {group['row'].n_unique()} rows of {len(identifiers)} regulations left "
-            f"out ({reason}): {identifiers[:5]}"
-        )
-    outcome.refused += failing["regulation_identifier"].n_unique()
-    return clean_data.filter(~pl.int_range(pl.len()).is_in(failing["row"].unique().to_list()))
 
 
 def compute_clean_data(source: BaseDataSourceIntegration) -> tuple[pl.DataFrame, int | None]:

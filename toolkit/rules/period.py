@@ -47,3 +47,14 @@ LONG_DURATION = Rule(
         <= 365
     ),
 )
+
+# A missing or unreadable date is not judged here: the dates rule or the API catches it.
+END_BEFORE_START = Rule(
+    code="END_BEFORE_START",
+    label="fin avant début",
+    nature=Nature.DATA_DEFECT,
+    outcome=Outcome.DROP,
+    valid=pl.col("period_start_date").is_null()
+    | pl.col("period_end_date").is_null()
+    | (pl.col("period_end_date") >= pl.col("period_start_date")),
+)

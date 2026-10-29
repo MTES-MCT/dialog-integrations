@@ -25,24 +25,6 @@ le modèle ne porte pas encore. Une colonne de travail d'une source commence par
 
 L'équipe l'appelle aussi le « pivot » : c'est le même objet.
 
-## Les contrôles communs
-
-Après la transformation de la source et avant la construction des corps d'écriture, chaque
-ligne passe les contrôles de `checks/rows.py` :
-
-* fin avant début ;
-* limitation de vitesse sans vitesse ;
-* emprise `rawGeoJSON` sans géométrie ;
-* coordonnées hors bornes ou en ordre (latitude, longitude).
-
-Une ligne qui échoue est **écartée**, et le reste de son arrêté part normalement : on suit
-le producteur, moins ses lignes invalides. Un arrêté qui n'a plus de ligne est tenu pour
-disparu, donc clos ou supprimé. Les arrêtés touchés comptent parmi les « écartés par la
-pipeline » de Tchap ; le motif est dans le journal de l'exécution.
-
-Un arrêté dont une mesure n'a pas pu être construite, lui, est laissé tel que DiaLog le
-détient, toutes ses tranches (`-01`, `-02`…) comprises : ni créé, ni mis à jour, ni clos.
-
 ## Les règles métier
 
 Une règle (`toolkit/rules/rule.py`) a un code, un libellé, une **nature**, ce qui la
@@ -107,3 +89,28 @@ règles compte pour les deux.
 
 Le rapport de synchronisation donne, par source, le nombre de lignes de chaque règle ; le
 journal, quelques identifiants.
+
+## Le contrat du modèle canonique
+
+Après toute la transformation de la source, la classe de base applique aux lignes
+canoniques finales les règles du contrat (`CONTRACT_RULES`, dans
+`toolkit/rules/common.py`) :
+
+* fin avant début ;
+* limitation de vitesse sans vitesse ;
+* emprise `rawGeoJSON` sans géométrie ;
+* coordonnées hors bornes ou en ordre (latitude, longitude).
+
+Ce sont des règles comme les autres : nature « défaut de la donnée », lignes écartées,
+comptées par règle au rapport. Deux différences : elles passent en dernier, pour qu'aucune
+étape de la source ne puisse produire après elles une ligne qui les enfreint, et aucune
+source ne peut les désactiver.
+
+Une ligne écartée par une règle n'emporte pas son arrêté : le reste part normalement, on
+suit le producteur moins ses lignes invalides. Un arrêté qui n'a plus de ligne est tenu
+pour disparu, donc clos ou supprimé.
+
+Un arrêté dont une mesure n'a pas pu être construite, lui, est laissé tel que DiaLog le
+détient, toutes ses tranches (`-01`, `-02`…) comprises : ni créé, ni mis à jour, ni clos.
+Il compte parmi les « écartés par la pipeline » de Tchap ; le motif est dans le journal
+de l'exécution.

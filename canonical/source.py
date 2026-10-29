@@ -8,7 +8,7 @@ from api.dia_log_client import Client
 from canonical.regulation_measure import RegulationMeasure, unknown_canonical_columns
 from settings import OrganizationSettings
 from toolkit.rules.apply import RulesResult, apply_rules
-from toolkit.rules.common import COMMON_RULES
+from toolkit.rules.common import COMMON_RULES, CONTRACT_RULES
 from toolkit.rules.rule import Outcome, Rule
 
 
@@ -104,9 +104,12 @@ class BaseDataSourceIntegration:
     def _apply_rules_to_canonical(self, df: pl.DataFrame) -> pl.DataFrame:
         """Apply the rules to the canonical rows; a decision already applied must find nothing."""
         rules = [
-            rule
-            for rule in self.active_rules
-            if rule.code not in self._applied_codes or rule.outcome is Outcome.DROP
+            *(
+                rule
+                for rule in self.active_rules
+                if rule.code not in self._applied_codes or rule.outcome is Outcome.DROP
+            ),
+            *CONTRACT_RULES,
         ]
         result = apply_rules(df, rules, source=self.name or "", canonical=True)
         if again := {c: n for c, n in result.applied.items() if c in self._applied_codes}:

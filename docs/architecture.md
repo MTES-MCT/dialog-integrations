@@ -18,21 +18,20 @@ flowchart TD
         B["Lecture<br/>fetch_raw_data · toolkit/connectors/"]
         C["Validation du format brut<br/>schema.py (Pandera)"]
         D["Transformation propre à la source<br/>compute_clean_data · toolkit/transforms/<br/>filtres, découpage, règles métier"]
-        E["Modèle canonique<br/>canonical/regulation_measure.py<br/>une ligne = une mesure sur une emprise"]
+        E["Modèle canonique et son contrat<br/>canonical/ · toolkit/rules/common.py<br/>une ligne = une mesure sur une emprise"]
         A --> B --> C --> D --> E
     end
 
     subgraph ORG["L'organisation — run/integrate.py"]
-        F["Contrôles communs<br/>checks/rows.py"]
         G["Corps d'écriture de l'API<br/>payloads/"]
         H["Décider quoi écrire<br/>sync/plan.py<br/>créer · mettre à jour · clore · supprimer"]
         I["Rapport<br/>report/sync_report.py"]
         J["Écritures vers DiaLog<br/>dialog/"]
         K["Mémoire de la nuit<br/>sync/snapshot.py · sync/totals.py"]
-        F --> G --> H --> I --> J --> K
+        G --> H --> I --> J --> K
     end
 
-    E --> F
+    E --> G
     J --> L[("DiaLog")]
     K -.->|"lu la nuit suivante"| H
     J --> M["Message Tchap et résumé GitHub<br/>report/"]
@@ -64,14 +63,14 @@ flowchart LR
 
 Ici, chaque source fait l'essentiel de son travail **sur son propre format** : elle filtre,
 découpe, applique les règles métier, regroupe par numéro d'arrêté, puis n'arrive au modèle
-canonique qu'à la fin. Après lui ne restent que les contrôles communs et l'envoi. Le modèle
+canonique qu'à la fin. Après lui ne restent que les règles du contrat et l'envoi. Le modèle
 canonique est donc surtout le **contrat de sortie** de chaque source : ce qu'elle doit
 produire, quelle que soit la façon dont elle y arrive.
 
 Conséquence pour qui lit le code : une règle métier partagée se cherche dans
-`toolkit/rules/`. Celles de `toolkit/rules/common.py` et les contrôles de
-`checks/rows.py` valent pour toutes les sources, sauf celles qui en désactivent une
-(`disabled_rules`, avec la raison). Un filtre propre à un producteur se cherche dans sa
+`toolkit/rules/`. Celles de `toolkit/rules/common.py` valent pour toutes les sources :
+les règles communes sauf pour celles qui en désactivent une (`disabled_rules`, avec la
+raison), les règles du contrat toujours. Un filtre propre à un producteur se cherche dans sa
 source (`integrations/{org}/{source}/data_source_integration.py`). Une règle s'écrit une
 fois, et une source l'applique à l'étape de sa transformation qu'elle choisit (voir
 [Le modèle canonique et les contrôles](modele-canonique.md#les-règles-métier)).
@@ -87,8 +86,6 @@ integrations.toml
 canonical/          le contrat entre une source et la suite
   regulation_measure.py   les colonnes du modèle canonique
   source.py               le gabarit d'une source : lire → valider → transformer → garder le canonique
-checks/
-  rows.py           les contrôles communs sur les lignes canoniques
 payloads/           des lignes canoniques aux corps d'écriture de l'API
   regulations.py    regroupement par arrêté, découpage en tranches
   measures.py       mesure, période, emprise, véhicules
@@ -122,7 +119,7 @@ toolkit/            ce qu'une source peut appeler
   transforms/       heures locales, créneaux, périmètre de compétence, troncature des
                     intitulés, période permanente, types de véhicules déduits des
                     seuils, jumeau 5 km/h de l'aire piétonne
-  rules/            les règles métier partagées, et leur application
+  rules/            les règles métier partagées, celles du contrat, et leur application
 integrations/       un dossier par organisation DiaLog, rien d'autre
 api/                client de l'API DiaLog, généré (non versionné)
 tests/

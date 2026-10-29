@@ -8,6 +8,8 @@ import pytest
 from tests.sync_fixtures import measure_rows
 from toolkit.rules.apply import apply_rules
 from toolkit.rules.location import (
+    COORDINATES_OUT_OF_BOUNDS,
+    GEOMETRY_MISSING,
     ONE_DIRECTION,
     POINT_NOT_PARKING,
     one_direction,
@@ -79,3 +81,41 @@ def test_a_label_naming_a_one_way_street_is_left_out(label, left_out):
     result = apply_rules(df, [one_way_street_named(pl.col("label"))])
 
     assert result.frame.is_empty() is left_out
+
+
+@pytest.mark.parametrize(
+    "road_type,geometry,left_out",
+    [
+        ("rawGeoJSON", " ", True),
+        ("rawGeoJSON", None, True),
+        ("rawGeoJSON", LINE, False),
+        ("lane", None, False),
+    ],
+)
+def test_a_raw_geojson_location_needs_a_geometry(road_type, geometry, left_out):
+    df = measure_rows(["R0"]).with_columns(
+        location_road_type=pl.lit(road_type),
+        location_geometry=pl.Series([geometry], dtype=pl.String),
+    )
+    assert apply_rules(df, [GEOMETRY_MISSING]).frame.is_empty() is left_out
+
+
+def line(*points) -> str:
+    return json.dumps({"type": "LineString", "coordinates": [list(p) for p in points]})
+
+
+@pytest.mark.parametrize(
+    "geometry,left_out",
+    [
+        (line((-4.48, 48.39), (-4.47, 48.40)), False),
+        (line((48.39, -4.48), (48.40, -4.47)), True),
+        (line((200.0, 48.0), (201.0, 48.0)), True),
+        # La Réunion, correctly ordered, is outside the metropolitan box.
+        (line((55.45, -20.88), (55.46, -20.89)), False),
+        ("not json", False),
+        (None, False),
+    ],
+)
+def test_coordinates_out_of_bounds_or_in_latitude_longitude_order_are_left_out(geometry, left_out):
+    df = measure_rows(["R0"]).with_columns(location_geometry=pl.Series([geometry], dtype=pl.String))
+    assert apply_rules(df, [COORDINATES_OUT_OF_BOUNDS]).frame.is_empty() is left_out

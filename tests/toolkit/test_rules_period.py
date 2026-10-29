@@ -8,7 +8,7 @@ import pytest
 from tests.sync_fixtures import measure_rows
 from toolkit.rules import period
 from toolkit.rules.apply import apply_rules
-from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
+from toolkit.rules.period import DATES_MISSING, END_BEFORE_START, EXPIRED, LONG_DURATION
 
 TODAY = date(2026, 1, 2)
 
@@ -102,3 +102,20 @@ def test_a_temporary_regulation_over_a_year_is_flagged_and_kept(start, end, flag
 def test_a_permanent_regulation_is_never_too_long():
     df = lasting("2020-01-01T00:00:00+01:00", "2030-01-01T00:00:00+01:00", "permanentRegulation")
     assert apply_rules(df, [LONG_DURATION]).applied == {}
+
+
+@pytest.mark.parametrize(
+    "start,end,left_out",
+    [
+        ("2026-02-01", "2026-01-01", True),
+        ("2026-01-01", "2026-02-01", False),
+        (None, "2026-01-01", False),
+        ("2026-01-01", None, False),
+    ],
+)
+def test_an_end_before_the_start_is_left_out(start, end, left_out):
+    df = measure_rows(["R0"]).with_columns(
+        period_start_date=pl.Series([start], dtype=pl.String),
+        period_end_date=pl.Series([end], dtype=pl.String),
+    )
+    assert apply_rules(df, [END_BEFORE_START]).frame.is_empty() is left_out

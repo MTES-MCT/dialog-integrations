@@ -257,3 +257,15 @@ def test_a_source_may_disable_a_common_rule_with_its_reason():
         )
 
     assert Points().compute_data_regulations().height == 1
+
+
+def test_the_contract_rules_apply_to_every_source_and_cannot_be_disabled():
+    class SpeedMissing(_Source):
+        rules = ()
+        disabled_rules = {"SPEED_MISSING": "test"}
+        frame = rows(["A"], measure_max_speed=[None])
+
+    source = SpeedMissing()
+
+    assert source.compute_data_regulations().is_empty()
+    assert source.rule_counts == {"limitation sans vitesse (défaut de la donnée, écarté)": 1}

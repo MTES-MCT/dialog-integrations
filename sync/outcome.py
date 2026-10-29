@@ -36,8 +36,8 @@ class IntegrationOutcome:
     # Outages do not fail the run: only a non-zero exit of the command does.
     error_causes: dict[str, int] = field(default_factory=dict)
     rejections: int = 0
-    # Regulations the pipeline itself left out (a zone over parallel roads, a failed check,
-    # a measure it cannot build): not an API failure, retried every day.
+    # Regulations the pipeline itself left out (a zone over parallel roads, a measure it
+    # cannot build): not an API failure, retried every day.
     refused: int = 0
     planned: dict[str, int] = field(default_factory=dict)
     held: dict[str, int] = field(default_factory=dict)

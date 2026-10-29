@@ -13,12 +13,11 @@ import pytest
 
 import registry
 from canonical.regulation_measure import unknown_canonical_columns
-from checks import rows as checks
 from run.organization import BaseIntegration
 from settings import Organization
 from sync.digest import compute_regulation_digest
 from toolkit.rules.apply import apply_rules
-from toolkit.rules.common import COMMON_RULES
+from toolkit.rules.common import COMMON_RULES, CONTRACT_RULES
 
 ORGANIZATIONS = [o.name for o in Organization]  # type: ignore[attr-defined]
 
@@ -103,6 +102,12 @@ def _clean_data(organization, source_class) -> pl.DataFrame:
     return source.compute_clean_data(source.validate_raw_data(raw))
 
 
+def test_a_column_named_like_the_canonical_model_but_missing_from_it_is_reported():
+    assert unknown_canonical_columns(
+        ["regulation_identifier", "vehicle_critair_types", "locaton_label", "location_lable"]
+    ) == ["location_lable", "vehicle_critair_types"]
+
+
 @pytest.mark.parametrize("organization, source", WITH_FIXTURE, ids=_id)
 def test_a_source_names_no_column_the_canonical_model_lacks(organization, source):
     clean = _clean_data(organization, source)
@@ -111,13 +116,13 @@ def test_a_source_names_no_column_the_canonical_model_lacks(organization, source
 
 
 @pytest.mark.parametrize("organization, source", WITH_FIXTURE, ids=_id)
-def test_a_source_passes_the_common_checks(organization, source):
+def test_a_source_passes_the_contract_rules(organization, source):
     instance = source(SimpleNamespace(organization=organization), client=None)
     canonical_rows = instance.select_regulation_measure_fields(_clean_data(organization, source))
 
-    failing = checks.failing_rows(canonical_rows)
+    result = apply_rules(canonical_rows, list(CONTRACT_RULES), canonical=True)
 
-    assert failing.is_empty(), failing.group_by("reason").len().to_dicts()
+    assert result.applied == {}
 
 
 @pytest.mark.parametrize("organization, source", WITH_FIXTURE, ids=_id)

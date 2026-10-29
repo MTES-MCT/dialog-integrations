@@ -71,7 +71,7 @@ uv run dialog integrate co_lyon --env=dev --dry-run
 
 Calcule tout — extraction, transformation, lots — et **n'écrit rien**, ni dans DiaLog ni dans l'instantané. Seule requête réseau vers DiaLog : le `GET /api/organization/identifiers`, en lecture. Le rapport donne l'entonnoir (lignes brutes, lignes nettoyées, arrêtés, mesures), les lots avec leurs plafonds, les identifiants concernés, un diff champ par champ pour chaque mise à jour, et les lots retenus. Le même rapport est journalisé avant écriture en exécution réelle.
 
-`--json` imprime le résultat de l'exécution sur la sortie standard (`{"success": true, "created": n, "updated": n, "deleted": n, "closed": n, "refused": n, "held": {…}, "source": {…}}` — `refused` compte les arrêtés que la pipeline elle-même a écartés : zone couvrant plusieurs routes parallèles, contrôle commun, mesure impossible à construire) ; les journaux restent sur la sortie d'erreur, donc `uv run dialog integrate co_lyon --json > result.json` produit un fichier propre. C'est ce que consomme la CI.
+`--json` imprime le résultat de l'exécution sur la sortie standard (`{"success": true, "created": n, "updated": n, "deleted": n, "closed": n, "refused": n, "held": {…}, "source": {…}}` — `refused` compte les arrêtés que la pipeline elle-même a écartés : zone couvrant plusieurs routes parallèles, mesure impossible à construire) ; les journaux restent sur la sortie d'erreur, donc `uv run dialog integrate co_lyon --json > result.json` produit un fichier propre. C'est ce que consomme la CI.
 
 ## Volumétries source
 

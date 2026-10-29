@@ -242,7 +242,7 @@ def test_totals_written_before_sources_were_counted_still_load(tmp_path):
     assert TotalsStore("co_test", base_dir=tmp_path, target="h").load() == Totals(3, 2)
 
 
-def test_a_row_failing_a_check_is_left_out_and_the_rest_of_its_regulation_goes(
+def test_a_row_failing_a_rule_is_left_out_and_the_rest_of_its_regulation_goes(
     monkeypatch, tmp_path
 ):
     import polars as pl
@@ -268,4 +268,5 @@ def test_a_row_failing_a_check_is_left_out_and_the_rest_of_its_regulation_goes(
 
     assert _api(integration).posted == [f"{A}new"]
     assert _api(integration).deleted == [f"{A}gone"]
-    assert (outcome.refused, outcome.errors) == (2, 0)
+    # Neither regulation is left out by the pipeline: one goes, the other is gone.
+    assert (outcome.refused, outcome.errors) == (0, 0)
