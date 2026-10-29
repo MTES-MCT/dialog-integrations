@@ -1,4 +1,4 @@
-"""Date the undated permanent periods at the moment of writing (R-39).
+"""Date the undated permanent periods at the moment of writing.
 
 The start date stays null up to the snapshot, so it never reads as a change: dated with the
 run day earlier, every such regulation would look modified each morning. A creation takes

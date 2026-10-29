@@ -113,7 +113,7 @@ def read_vehicle_set(
         tally.kept_as_other.update(kept_as_other)
         tally.unknown_exemptions.update(unknown_exemptions)
     if label == LABEL_PEDESTRIAN_AREA:
-        # R-71: only the vehicles serving the area may enter.
+        # Only the vehicles serving the area may enter.
         exempted.insert(0, VehicleExemptedTypeEnum.DESSERTELOCALE.value)
 
     columns = {
@@ -137,9 +137,8 @@ def read_vehicle_set(
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     """`vehicleSet`, read from the named parameters of the measure.
 
-    Drops a measure restricting a value outside the closed list (R-34), and a gauge or
-    category limit with no readable vehicle: an empty set would close the road to everyone
-    (R-35).
+    Drops a measure restricting a value outside the closed list, and a gauge or
+    category limit with no readable vehicle: an empty set would close the road to everyone.
     """
     tally = VehicleTally()
     read = [
@@ -162,11 +161,11 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
         )
     motives = {
         UNREADABLE_LIMIT: lambda dropped: (
-            f"gauge or category measures with no readable vehicle value (R-35): "
+            f"gauge or category measures with no readable vehicle value: "
             f"{count_by(dropped, 'm_type')}"
         ),
         OUTSIDE_THE_CLOSED_LIST: lambda dropped: (
-            "measures restricting a vehicle value outside the closed list (R-34, Q-58): "
+            "measures restricting a vehicle value outside the closed list: "
             f"{dict(tally.outside_restrictions)}. Qualify it in vocabulary.py."
         ),
     }

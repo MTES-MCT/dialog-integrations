@@ -75,7 +75,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """A gauge restriction is a noEntry for the vehicles it names (R-33)."""
+    """A gauge restriction is a noEntry for the vehicles it names."""
     return df.with_columns(
         [
             pl.lit(MeasureTypeEnum.NOENTRY.value).alias("measure_type_"),

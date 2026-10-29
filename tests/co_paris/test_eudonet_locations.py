@@ -156,7 +156,7 @@ def city_codes_of(*rows: dict) -> list[str | None]:
 
 
 def test_a_missing_arrondissement_is_the_only_one_of_its_street():
-    """Rue Dulong has addresses in the 17th only: a gap filled, not a guess (R-06)."""
+    """Rue Dulong has addresses in the 17th only: a gap filled, not a guess."""
     assert city_codes_of(point("4", l_district=None)) == ["75117"]
 
 

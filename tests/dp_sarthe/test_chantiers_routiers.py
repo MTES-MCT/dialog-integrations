@@ -30,7 +30,7 @@ def test_road_closures_map_to_no_entry():
 
 
 def test_unknown_values_are_dropped_not_forced_to_no_entry():
-    """A speed limitation must never be published as a road closure (R-02)."""
+    """A speed limitation must never be published as a road closure."""
     df = compute_measure_fields(
         _df("Limitation de vitesse", "Neutralisation d'une voie", "Chaussée rétrécie", None)
     )

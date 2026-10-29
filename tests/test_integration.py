@@ -515,7 +515,7 @@ def test_a_dry_run_reports_closures_without_reading_anything(monkeypatch, tmp_pa
     assert f"  - {PREFIX}gone" in outcome.report
 
 
-# --- Dating: an undated permanent period is dated when DiaLog is written (R-39) --------
+# --- Dating: an undated permanent period is dated when DiaLog is written --------
 
 from tests.sync.test_dating import _read, _read_measure  # noqa: E402
 

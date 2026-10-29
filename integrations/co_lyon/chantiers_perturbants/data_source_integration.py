@@ -37,8 +37,8 @@ MEASURE_TYPE_BY_PERTURBATION = {
     "Circulation alternée": MeasureTypeEnum.ALTERNATEROAD.value,
     "Circulation alternée de jour": MeasureTypeEnum.ALTERNATEROAD.value,
     "Circulation alternée de nuit": MeasureTypeEnum.ALTERNATEROAD.value,
-    # Dropped: "Circulation réduite*" has no DiaLog type (R-32 bis), "Circulation sens
-    # unique" needs a direction the layer lacks (R-32).
+    # Dropped: "Circulation réduite*" has no DiaLog type, "Circulation sens
+    # unique" needs a direction the layer lacks.
 }
 
 # Above this, a "temporary" restriction stops looking temporary. It is reported, not
@@ -106,7 +106,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Read the description in full, or drop the row (R-78).
+    """Read the description in full, or drop the row.
 
     Hours read in full are published whatever the type says: "de jour" / "de nuit" only
     tells that hours exist, and a night slot need not cross midnight (decided 2026-10-10).
@@ -158,7 +158,7 @@ def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
         if n_unusable:
             logger.warning(
                 f"Dropping {n_unusable} rows: {reason}. Publishing them would overstate "
-                "the restriction (R-78)"
+                "the restriction"
             )
         df = df.filter(~unusable)
 
@@ -178,7 +178,7 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Temporary period from `debutchantier` to `finchantier`, with its daily slots.
 
     Long durations are reported, not dropped: whether a multi-year "temporary" restriction
-    is a defect or real is a case-by-case call (R-38).
+    is a defect or real is a case-by-case call.
     """
     missing = pl.col("debutchantier").is_null() | pl.col("finchantier").is_null()
     n_missing = df.select(missing.sum()).item()
@@ -338,7 +338,7 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Every vehicle (R-34), except residents when the description says so (R-36)."""
+    """Every vehicle, except residents when the description says so."""
     exempts_residents = (
         pl.col("descripchantierinternet")
         .cast(pl.Utf8)

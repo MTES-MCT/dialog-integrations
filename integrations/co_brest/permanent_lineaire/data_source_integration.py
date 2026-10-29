@@ -57,7 +57,7 @@ DESCRIPTION_CONFIG = {
     "Sens interdit / Sens unique": C(MTE.NOENTRY),
 }
 
-# CONDITION and DESCR are read in full or the row is dropped (R-78): once the wordings below
+# CONDITION and DESCR are read in full or the row is dropped: once the wordings below
 # are removed, only punctuation may remain. Even "30" or "sauf" means something (2026-09-24).
 # "Riveraine" is the producer's other word for it (confirmed 2026-09-25).
 LOCAL_ACCESS = re.compile(
@@ -278,11 +278,11 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def discard_misleading_rows(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop the rows DiaLog would publish wrong; each motive is counted on the whole input
-    (R-79), so a row can count under several.
+    """Drop the rows DiaLog would publish wrong; each motive is counted on the whole input,
+    not on what the previous ones left, so a row can count under several.
 
     A rawGeoJSON location carries no direction: "Sens interdit / Sens unique" is one-way
-    whatever SENS says (audit of 2026-09-23) and would come out closed both ways (R-32).
+    whatever SENS says (audit of 2026-09-23) and would come out closed both ways.
     """
     lacks_threshold = pl.any_horizontal(
         (pl.col("DESCRIPTIF") == descriptif) & ~(pl.col(config.threshold_column).fill_null(0) > 0)
@@ -290,10 +290,10 @@ def discard_misleading_rows(df: pl.DataFrame) -> pl.DataFrame:
         if config.threshold_column
     )
     motives = {
-        "one-way street (R-32)": pl.col("DESCRIPTIF") == "Sens interdit / Sens unique",
-        "not both directions, SENS other than 0 (R-32)": pl.col("SENS").fill_null(-1) != 0,
-        "free text in CONDITION or DESCR not read in full (R-78)": ~text_reading("fully_read"),
-        "vehicle restriction without threshold (R-35)": lacks_threshold,
+        "one-way street": pl.col("DESCRIPTIF") == "Sens interdit / Sens unique",
+        "not both directions, SENS other than 0": pl.col("SENS").fill_null(-1) != 0,
+        "free text in CONDITION or DESCR not read in full": ~text_reading("fully_read"),
+        "vehicle restriction without threshold": lacks_threshold,
     }
 
     counts = df.select(**{motive: rule.sum() for motive, rule in motives.items()}).row(
@@ -308,7 +308,7 @@ def discard_misleading_rows(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Dimensions (0 means none), exemptions and restricted types (R-33)."""
+    """Dimensions (0 means none), exemptions and restricted types."""
     exempted_types_mapping = {
         descriptif: config.exempted_types for descriptif, config in DESCRIPTION_CONFIG.items()
     }

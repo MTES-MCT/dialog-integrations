@@ -203,7 +203,7 @@ def test_a_temporary_regulation_that_ended_is_dropped():
     ids=["no end: nothing would close it", "no start: the write date would stand in"],
 )
 def test_a_temporary_regulation_needs_both_its_dates(dates):
-    """R-37: a temporary period has a start and an end."""
+    """A temporary period has a start and an end."""
     row = make_row(a_type="Temporaire", a_reason="Travaux", **dates)
     assert compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON).height == 0
 
@@ -235,7 +235,7 @@ def test_the_title_survives_a_word_paste():
 
 @pytest.mark.parametrize("raw_title", [None, "", "   ", "<p></p>", "&nbsp;"])
 def test_an_empty_title_is_built_rather_than_blocking(raw_title):
-    """R-24: a title is never a reason to drop a regulation."""
+    """A title is never a reason to drop a regulation."""
     row = make_row(a_title_html=raw_title)
     title = compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON).get_column(
         "regulation_title"
@@ -374,7 +374,7 @@ def test_the_speed_is_read_from_its_parameter(value, expected):
 
 @pytest.mark.parametrize("params", [None, [["valeur de la vitesse", ""]]])
 def test_a_speed_limitation_without_a_speed_is_dropped(params, captured_logs):
-    """R-02: 30 or 50 is a decision, not a default."""
+    """30 or 50 is a decision, not a default."""
     row = make_row(m_type="limitation de vitesse", m_params=params)
     df = compute_measure_fields(compute_regulation_fields(make_frame(row), FIXTURE_EXTRACTED_ON))
     assert df.height == 0
@@ -398,7 +398,7 @@ def test_no_speed_leaks_onto_another_measure_type():
 
 @pytest.mark.parametrize("label", ["sens interdit (ou sens unique)", "mise en impasse"])
 def test_one_ways_and_dead_ends_are_out_of_the_model(label, captured_logs):
-    """R-32 freeze for the one-way; a dead end is not a closure of the street (R-02)."""
+    """No one-way until DiaLog carries the side; a dead end is not a closure of the street."""
     row = make_row(m_type=label, l_direction="du début vers la fin du segment")
     assert pipeline(row).height == 0
     assert any("without a DiaLog equivalent" in line and label in line for line in captured_logs)
@@ -409,7 +409,7 @@ def test_the_one_way_of_the_fixture_is_dropped(clean):
 
 
 def test_a_filled_time_slot_drops_the_measure(captured_logs):
-    """R-78: "les dimanches et jours fériés" is not expressible, so the measure goes."""
+    """A slot like "les dimanches et jours fériés" is not expressible, so the measure goes."""
     row = make_row(
         m_params=[["Jours et Horaires", "de 20h00 à 7h00 ainsi que les dimanches et jours fériés"]]
     )
@@ -422,7 +422,7 @@ def test_an_empty_time_slot_is_no_time_slot():
 
 
 def test_a_filled_lane_drops_the_measure(captured_logs):
-    """R-78: a closure of the bus lane alone must not close the whole street."""
+    """A closure of the bus lane alone must not close the whole street."""
     row = make_row(
         m_type="circulation interdite",
         m_params=[
@@ -442,14 +442,14 @@ def test_an_empty_lane_is_no_lane():
 
 
 def test_every_location_of_a_measure_shares_its_group_key():
-    """R-76: one Eudonet measure is one DiaLog measure, whatever its number of locations."""
+    """One Eudonet measure is one DiaLog measure, whatever its number of locations."""
     df = pipeline(make_row(l_file_id=1), make_row(l_file_id=2), make_row(m_file_id=11))
     assert df.get_column("measure_group_key").to_list() == ["10", "10", "11"]
     assert DataSourceIntegration.group_locations_by_measure
 
 
 def test_a_pedestrian_area_is_a_ban_with_local_access_and_a_walking_pace_twin():
-    """R-71: `noEntry` + `desserteLocale` + Paris's own exemptions, and 5 km/h for all."""
+    """`noEntry` + `desserteLocale` + Paris's own exemptions, and 5 km/h for all."""
     row = make_row(
         m_type="aire piétonne",
         m_params=[
@@ -490,7 +490,7 @@ def test_the_police_prefecture_is_published_only_behind_its_constant(publish, ke
 
 
 def test_the_number_behind_another_channel_identifier_is_read_without_normalising():
-    """`Paris_` is cut, a bare number is taken whole, ours are skipped (R-80)."""
+    """`Paris_` is cut, a bare number is taken whole, ours are skipped."""
     numbers = index_by_eudonet_number(
         [
             ("Paris_2024P12345", "Paris (préfecture)"),
@@ -514,7 +514,7 @@ def test_the_frozen_identifiers_of_the_prefecture_channel_are_readable():
 
 
 def test_a_number_another_channel_published_is_not_created_again():
-    """One act, one entry in DiaLog: the regulation already in place stays (R-80)."""
+    """One act, one entry in DiaLog: the regulation already in place stays."""
     df = make_frame(
         make_row(),
         make_row(a_identifier="2024T11570"),
@@ -529,7 +529,7 @@ def test_a_number_another_channel_published_is_not_created_again():
 
 
 def test_a_single_point_carries_only_a_parking_ban():
-    """R-74: a ban, a speed or a gauge stands on a stretch of road, not on a house number."""
+    """A ban, a speed or a gauge stands on a stretch of road, not on a house number."""
     df = pl.DataFrame(
         {
             "a_identifier": ["1", "2", "3"],
@@ -556,7 +556,7 @@ def test_a_refused_location_is_dropped_and_its_regulation_goes_with_the_others(m
 
 
 def test_a_location_complement_that_narrows_the_measure_drops_the_location(captured_logs):
-    """R-81: "sur 2 places" or a day and an hour is not read, so the location goes."""
+    """A complement like "sur 2 places", or a day and an hour, is not read, so the location goes."""
     df = make_frame(
         make_row(l_file_id=10),
         make_row(l_file_id=11, l_point_location_complement="sur 2 places.,"),
@@ -608,7 +608,7 @@ def test_the_versioned_blacklist_is_readable():
 
 @pytest.mark.parametrize("weight_label, weight", [("3,5 T", 3.5), ("7,5 T", 7.5), ("19 T", 19.0)])
 def test_a_tonnage_limit_is_a_no_entry_for_heavy_goods_vehicles(weight_label, weight):
-    """R-33: a gauge limit is `noEntry` restricted to the vehicles it names, not a closure."""
+    """A gauge limit is `noEntry` restricted to the vehicles it names, not a closure."""
     row = make_row(
         m_type="limitation catégorielle",
         m_params=[["véhicule concerné (1)", f"aux véhicules de plus de {weight_label}"]],
@@ -655,7 +655,7 @@ def test_hazardous_materials_have_their_own_type():
 
 def test_a_length_in_metres_is_not_turned_into_a_dimension():
     """The label never says which dimension, and none of the 26 325 measures of 2026-09-08
-    carries a length, height or width beside it (R-35)."""
+    carries a length, height or width beside it."""
     row = make_row(
         m_type="limitation dimensionnelle",
         m_params=[
@@ -686,7 +686,7 @@ def test_a_category_without_an_equivalent_becomes_other_plus_its_label():
 
 @pytest.mark.parametrize("label", ["cycles", "aux véhicules de plus de 12 T"])
 def test_a_restriction_outside_the_closed_list_drops_its_measure(label, captured_logs):
-    """Cycles are never restricted (R-34); a new value waits for a human."""
+    """Cycles are never restricted; a new value waits for a human."""
     row = make_row(m_type="limitation catégorielle", m_params=[["véhicule concerné (1)", label]])
     assert pipeline(row).height == 0
     assert any("outside the closed list" in line and label in line for line in captured_logs)
@@ -694,7 +694,7 @@ def test_a_restriction_outside_the_closed_list_drops_its_measure(label, captured
 
 @pytest.mark.parametrize("label", ["limitation dimensionnelle", "limitation catégorielle"])
 def test_an_unreadable_gauge_is_dropped_and_counted(label, captured_logs):
-    """R-35: neither a closure for everyone, nor "other" with no threshold."""
+    """Neither a closure for everyone, nor "other" with no threshold."""
     row = make_row(m_type=label, m_params=[["véhicule concerné (1)", "à tous les véhicules"]])
     assert pipeline(row).height == 0
     assert any("no readable vehicle value" in line for line in captured_logs)
@@ -780,7 +780,7 @@ def test_the_penal_qualification_is_not_a_vehicle_restriction():
 
 
 def test_a_filled_parameter_of_an_unknown_name_drops_its_measure(captured_logs):
-    """It may narrow the measure like a time slot does (R-81): never published wider."""
+    """It may narrow the measure like a time slot does: never published wider."""
     known = make_row(
         m_params=[["véhicule concerné (3)", "à tous les véhicules"], ["caractère aggravant", "x"]]
     )
@@ -826,7 +826,7 @@ def test_a_permanent_period_has_no_end():
 
 
 def test_a_permanent_without_a_start_is_dated_on_first_write(captured_logs):
-    """R-39: never the signature, never the moving "Modifié le"; `sync/dating.py` dates it
+    """Never the signature, never the moving "Modifié le"; `sync/dating.py` dates it
     when DiaLog is written."""
     row = make_row(
         a_start_date=None,
@@ -840,7 +840,7 @@ def test_a_permanent_without_a_start_is_dated_on_first_write(captured_logs):
 
 
 def test_a_start_after_its_end_rejects_the_whole_regulation(captured_logs):
-    """R-38. Every row of the order goes, not only the one that shows the mistake."""
+    """Date controls: every row of the order goes, not only the one that shows the mistake."""
     valid = make_row(
         a_identifier="2026T10001",
         a_type="Temporaire",
@@ -853,7 +853,7 @@ def test_a_start_after_its_end_rejects_the_whole_regulation(captured_logs):
     impossible = {**valid, "a_start_date": date(2027, 1, 15), "m_file_id": 2, "l_file_id": 2}
     assert pipeline(valid).height == 1
     assert pipeline(valid, impossible).height == 0
-    assert any("R-38 date controls" in line for line in captured_logs)
+    assert any("failing the date controls" in line for line in captured_logs)
 
 
 def test_a_typo_on_the_year_rejects_the_regulation_the_state_still_calls_in_force(clean):
@@ -944,7 +944,7 @@ def test_the_funnel_of_the_fixture_is_the_one_we_expect(raw, clean):
     assert after_state.height == 76  # 1 Abrogé + 1 Non signé + 1 Périmé
     after_type = compute_measure_fields(after_state)
     assert after_type.height == 61
-    assert clean.height == 58  # 2025T15489 and 2026T17998, R-38 date controls
+    assert clean.height == 58  # 2025T15489 and 2026T17998, by the date controls
     assert dict(
         zip(*clean.get_column("measure_type_").value_counts(sort=True).to_dict().values())
     ) == {

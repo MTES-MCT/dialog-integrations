@@ -23,7 +23,7 @@ class BaseDataSourceIntegration:
     identifier_prefix: str | None = None
 
     # Opt-in: collapse the rows sharing a `measure_group_key` into a single measure
-    # carrying every one of their locations (R-28). Off by default: the sources already
+    # carrying every one of their locations. Off by default: the sources already
     # in production emit one measure per row.
     group_locations_by_measure: bool = False
 

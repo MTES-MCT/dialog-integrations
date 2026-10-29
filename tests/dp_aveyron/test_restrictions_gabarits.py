@@ -41,7 +41,7 @@ def test_identifier_comes_from_the_arrete_number():
 
 
 def test_a_sign_without_an_arrete_joins_the_departmental_regulation_of_its_measure():
-    """R-28: a source row is not an arrete. Numberless rows group by sign and value."""
+    """A source row is not an arrete. Numberless rows group by sign and value."""
     result = compute_regulation_fields(signs(numero_dar=[None]))
 
     assert result["regulation_identifier"].to_list() == ["AV-GB-B13-3-5"]
@@ -173,7 +173,7 @@ def test_a_numbered_arrete_is_dated_from_the_earliest_day_its_rows_carry():
 
 
 def test_a_grouped_fallback_is_dated_from_the_run_not_from_one_of_its_members():
-    """R-39: one real fallback mixes acts from 2003 to 2019, so no member's date fits."""
+    """One real fallback mixes acts from 2003 to 2019, so no member's date fits."""
     df = compute_regulation_fields(
         signs(
             numero_dar=[None, None, None],

@@ -29,8 +29,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "limitation_vitesse"
     identifier_prefix = "AV-LV-"
 
-    # R-28: one measure per signature, carrying every stretch. The grouped fallbacks of the
-    # default limits (R-70) carry thousands, hence the ceiling.
+    # One measure per signature, carrying every stretch. The grouped fallbacks of the
+    # default limits carry thousands, hence the ceiling.
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
 
@@ -100,7 +100,7 @@ REFUSED_SEGMENTS: frozenset[str] = frozenset(
 
 
 # A vehicle-class limit (`50 PL>12t`, 62 of 5 814 rows on 2026-09-22) makes "every vehicle at
-# 90" false and names no usable tonnage (R-35), so the stretch is dropped. A condition
+# 90" false and names no usable tonnage, so the stretch is dropped. A condition
 # (`70 chaussee mouillee`, 11 rows) leaves the general limit true: kept (decided 2026-09-22).
 # Deliberately wider than the values observed.
 VEHICLE_CLASS_PATTERN = r"(?i)\bPL\b|poids.lourd|camion|autocar|\bbus\b|\bcar\b|>\s*\d+\s*t\b"
@@ -117,7 +117,7 @@ def discard_vehicle_class_limits(df: pl.DataFrame) -> pl.DataFrame:
         values = sorted(df.filter(conflicting)["limit_spec"].unique().to_list())
         logger.warning(
             f"Discarding {n_conflicting}/{df.height} stretches whose limit differs for a "
-            f"vehicle class we cannot publish (R-35): {values}"
+            f"vehicle class we cannot publish: {values}"
         )
     n_conditional = df.select((specified & ~conflicting).sum()).item()
     if n_conditional:
@@ -140,7 +140,7 @@ def discard_directional_stretches(df: pl.DataFrame) -> pl.DataFrame:
     if n_directional:
         logger.warning(
             f"Discarding {n_directional}/{df.height} stretches whose limit depends on the "
-            "direction: production ignores it (D-19)"
+            "direction: production ignores it"
         )
     return df.filter(both_ways)
 
@@ -190,7 +190,7 @@ def discard_refused_segments(df: pl.DataFrame):
 
 
 def measure_group_key() -> pl.Expr:
-    """`V70`: rows sharing it in one regulation collapse into one measure (R-28).
+    """`V70`: rows sharing it in one regulation collapse into one measure.
 
     The speed is enough: every measure here applies to all vehicles, and the direction
     travels on each location.
@@ -223,7 +223,7 @@ def compute_measure_fields(df: pl.DataFrame):
 def compute_period_fields(df: pl.DataFrame):
     """Permanent, every day, no end, and a null start date.
 
-    The source has no date (R-39), and the day of the run would make every limit look
+    The source has no date, and the day of the run would make every limit look
     modified each morning. `sync/dating.py` fills the null when DiaLog is written.
     """
     return df.with_columns(
@@ -289,7 +289,7 @@ def compute_location_fields(df: pl.DataFrame):
 
 MAX_IDENTIFIER_LENGTH = 60  # API contract
 
-# Prefixed so our batch stays recognisable and removable in one go (R-29).
+# Prefixed so our batch stays recognisable and removable in one go.
 IDENTIFIER_PREFIX = "AV-LV"
 
 
@@ -302,11 +302,11 @@ def normalize_reference(reference: pl.Expr) -> pl.Expr:
 
 
 def compute_regulation_fields(df: pl.DataFrame):
-    """Identifier, title and category of the permanent regulation (R-28).
+    """Identifier, title and category of the permanent regulation.
 
     `AV-LV-{num_arrete}`, or `AV-LV-{V70}`: one grouped arrete per speed for the rows citing
-    none (R-70). Identifying by stretch would invent one legal act per section and move with
-    every redrawn trace. Rows are deduplicated on SEGMENT_KEY (R-75).
+    none. Identifying by stretch would invent one legal act per section and move with
+    every redrawn trace. Rows are deduplicated on SEGMENT_KEY.
     """
     df = df.with_columns(normalize_reference(pl.col("num_arrete")).alias("num_arrete"))
 
@@ -315,7 +315,7 @@ def compute_regulation_fields(df: pl.DataFrame):
     if n_no_arrete > 0:
         logger.info(
             f"{n_no_arrete}/{df.height} rows cite no num_arrete: gathered into one grouped "
-            "fallback per speed (R-70)"
+            "fallback per speed"
         )
 
     # Keep the row carrying an arrete number when the same measure appears with and without,

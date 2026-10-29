@@ -1,4 +1,4 @@
-"""Tests for dating the undated permanent periods at the moment of writing (R-39)."""
+"""Tests for dating the undated permanent periods at the moment of writing."""
 
 import json
 from datetime import datetime

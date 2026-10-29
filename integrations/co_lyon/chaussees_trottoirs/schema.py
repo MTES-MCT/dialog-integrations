@@ -8,7 +8,7 @@ import pandera.polars as pa
 
 class LyonChausseesTrottoirsRawDataSchema(pa.DataFrameModel):
     # From the road reference system, so better than a `gid`, but not stable for good:
-    # segments get split and merged, ~20 a month, as the producer confirmed (R-22).
+    # segments get split and merged, ~20 a month, as the producer confirmed.
     codetroncon: str
     codefuv: str | None = pa.Field(nullable=True)
 

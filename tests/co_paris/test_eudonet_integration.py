@@ -46,7 +46,7 @@ def _eudonet_source():
 
 
 def test_a_municipality_the_export_cannot_serve_falls_back_on_its_last_read(monkeypatch):
-    """R-80: a number held back yesterday is not created tonight because of a 504."""
+    """A number held back yesterday is not created tonight because of a 504."""
 
     def first_night(self, insee_code):
         return [("2024T11570", "Paris")] if insee_code == "75104" else []
@@ -63,7 +63,7 @@ def test_a_municipality_the_export_cannot_serve_falls_back_on_its_last_read(monk
 
 
 def test_a_municipality_never_read_is_read_as_empty_and_the_run_goes_on(monkeypatch):
-    """The other municipalities still hold their numbers back (R-80)."""
+    """The other municipalities still hold their numbers back."""
 
     def one_timeout(self, insee_code):
         if insee_code == "75104":

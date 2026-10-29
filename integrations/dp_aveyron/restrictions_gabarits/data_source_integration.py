@@ -29,7 +29,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "restrictions_gabarits"
     identifier_prefix = "AV-GB-"
 
-    # R-28: one measure per sign and value, carrying every stretch it applies to.
+    # One measure per sign and value, carrying every stretch it applies to.
     group_locations_by_measure = True
 
     def fetch_raw_data(self) -> pl.DataFrame:
@@ -45,7 +45,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_location_fields)
             # Before the rows are grouped into regulations.
             .pipe(self.apply_rules)
-            # After the regulation: a measure carries one period over its group of rows (R-28).
+            # After the regulation: a measure carries one period over its group of rows.
             .pipe(compute_regulation_fields)
             .pipe(compute_period_fields)
             .pipe(compute_vehicle_fields)
@@ -110,7 +110,7 @@ def sign_value() -> pl.Expr:
 
 
 def measure_group_key() -> pl.Expr:
-    """`B13-3-5`: rows sharing it in one regulation collapse into one measure (R-28).
+    """`B13-3-5`: rows sharing it in one regulation collapse into one measure.
 
     The decimal point becomes a hyphen: the key ends up in fallback identifiers, in URL paths.
     """
@@ -147,8 +147,8 @@ def compute_measure_fields(df: pl.DataFrame):
 def compute_period_fields(df: pl.DataFrame):
     """Permanent, every day, no end; the start is the day the arrete was signed, or null.
 
-    A measure carries one period (R-28): a numbered arrete takes the earliest date of its
-    rows; a grouped fallback mixes acts from 2003 to 2019, so it gets none (R-39).
+    A measure carries one period: a numbered arrete takes the earliest date of its
+    rows; a grouped fallback mixes acts from 2003 to 2019, so it gets none.
     `sync/dating.py` fills the nulls when DiaLog is written.
     """
     # Some dates are dd/mm/yy, which inference would read as year 18.
@@ -204,7 +204,7 @@ def compute_location_fields(df: pl.DataFrame):
 
 MAX_IDENTIFIER_LENGTH = 60  # API contract
 
-# Prefixed so our batch stays recognisable and removable in one go (R-29).
+# Prefixed so our batch stays recognisable and removable in one go.
 IDENTIFIER_PREFIX = "AV-GB"
 # What the producer writes when there is no arrete to refer to. Treated as an absence,
 # otherwise every one of them lands in a single catch-all regulation.
@@ -220,7 +220,7 @@ def normalize_reference(reference: pl.Expr) -> pl.Expr:
 
 
 def compute_regulation_fields(df: pl.DataFrame):
-    """Identifier, title and category of the permanent regulation (R-28, R-20, R-23).
+    """Identifier, title and category of the permanent regulation.
 
     `AV-GB-{numero_dar}`, or `AV-GB-{B13-3-5}`: one grouped arrete per sign and value for the
     rows citing none. Identifying by stretch would invent one legal act per section and move

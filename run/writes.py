@@ -97,7 +97,7 @@ def create_all(
         identifier = str(regulation.identifier)
         logger.info(f"Creating regulation {index + 1}/{len(regulations)}: {identifier}")
         logger.info(f"Contains {len(regulation.measures)} measures.")  # type: ignore
-        # An undated permanent period starts the day it is published (R-39).
+        # An undated permanent period starts the day it is published.
         date_creation(regulation, day)
         outcome = integration._create_regulation(regulation)
         if outcome == "created":

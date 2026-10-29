@@ -383,7 +383,7 @@ def test_read_free_text():
 
 
 def test_compute_vehicle_fields_restricts_to_the_threshold():
-    """A gauge limit targets the vehicles over it, never every vehicle (R-33)."""
+    """A gauge limit targets the vehicles over it, never every vehicle."""
     from integrations.co_brest.permanent_lineaire.data_source_integration import (
         compute_vehicle_fields,
     )

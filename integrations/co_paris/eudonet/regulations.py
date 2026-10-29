@@ -30,7 +30,7 @@ IS_TEMPORARY = pl.col("a_type") == TYPE_TEMPORARY_LABEL
 
 
 def filter_police_prefecture(df: pl.DataFrame, publish: bool) -> pl.DataFrame:
-    """Keep or drop the acts of the police prefecture (R-73), counted either way."""
+    """Keep or drop the acts of the police prefecture, counted either way."""
     is_prefecture = (pl.col("a_service") == SERVICE_POLICE_PREFECTURE).fill_null(False)
     prefecture = df.filter(is_prefecture)
     if not prefecture.height:
@@ -44,7 +44,7 @@ def filter_police_prefecture(df: pl.DataFrame, publish: bool) -> pl.DataFrame:
         return df
     logger.warning(
         f"Dropping {prefecture.height} rows of {regulations} police prefecture regulations "
-        "(R-73: another authority)"
+        "(another authority)"
     )
     return df.filter(~is_prefecture)
 
@@ -53,7 +53,7 @@ def compute_regulation_fields(df: pl.DataFrame, today: date) -> pl.DataFrame:
     """The regulation half of the canonical model, and the perimeter filter again, for a
     frozen extract replayed after some acts ended.
 
-    `1101` « N° d'arrêté » is unique and stable for the life of the act (R-23), in both its
+    `1101` « N° d'arrêté » is unique and stable for the life of the act, in both its
     shapes (`2021T113851`, `1996-10345`): used as is, so two acts can never collide.
     """
     return (
@@ -70,7 +70,7 @@ def _discard_unnumbered(df: pl.DataFrame) -> pl.DataFrame:
     if unnumbered.height:
         logger.warning(
             f"Dropping {unnumbered.height} rows of {unnumbered['a_file_id'].n_unique()} "
-            "regulations without an order number (1101): no stable identifier (R-01)"
+            "regulations without an order number (1101): no stable identifier"
         )
     return df.filter(pl.col("a_identifier").is_not_null())
 
@@ -113,13 +113,13 @@ def _discard_unusable_temporaries(df: pl.DataFrame, today: date) -> pl.DataFrame
     if undated.height:
         logger.warning(
             f"Dropping {undated.height} rows of {undated['a_identifier'].n_unique()} temporary "
-            "regulations without an end date: nothing would ever close them (R-37)"
+            "regulations without an end date: nothing would ever close them"
         )
     unstarted = df.filter(IS_TEMPORARY & pl.col("a_start_date").is_null())
     if unstarted.height:
         logger.warning(
             f"Dropping {unstarted.height} rows of {unstarted['a_identifier'].n_unique()} "
-            "temporary regulations without a start date: the write date would stand in (R-37)"
+            "temporary regulations without a start date: the write date would stand in"
         )
     return df.filter(
         ~IS_TEMPORARY
@@ -192,7 +192,7 @@ def _discard_implausible_dates(df: pl.DataFrame, today: date) -> pl.DataFrame:
         return df
     dropped = df.filter(pl.col("a_identifier").is_in(rejected))
     logger.warning(
-        f"Dropping {dropped.height} rows of {len(rejected)} regulations failing the R-38 "
+        f"Dropping {dropped.height} rows of {len(rejected)} regulations failing the "
         f"date controls (start > end, start after {max_start_year}, end after "
         f"{max_end_year}): {rejected[:20]}"
     )
@@ -213,7 +213,7 @@ def _warn_long_or_undated(df: pl.DataFrame) -> pl.DataFrame:
     if undated.height:
         logger.warning(
             f"{undated.height} permanent rows have no start date: dated on first write, never "
-            "on the signature (R-39)"
+            "on the signature"
         )
     return df
 

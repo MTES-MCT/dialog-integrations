@@ -32,10 +32,10 @@ ACCEPTED_STATES_BY_TYPE: dict[str, dict[str, str]] = {
     TYPE_TEMPORARY_LABEL: {"En vigueur": "8640", "Publié": "13789", "Signé": "8642"},
 }
 
-# All 32 values of catalog `1202`. `None`: outside the five DiaLog types (R-30), dropped and
-# counted, never bent into an approaching type (R-02).
+# All 32 values of catalog `1202`. `None`: outside the five DiaLog types, dropped and
+# counted, never bent into an approaching type.
 MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
-    # R-71: the producer names the area, so it is published as `noEntry` + `desserteLocale`
+    # The producer names the area, so it is published as `noEntry` + `desserteLocale`
     # plus a 5 km/h twin (`add_pedestrian_area_speed`).
     "aire piétonne": MeasureTypeEnum.NOENTRY.value,
     "cédez le passage": None,
@@ -50,19 +50,19 @@ MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
     "interdiction de tourner": None,
     "interdiction double sens pour les cyclistes": None,
     # A gauge or a category limit is not a sixth type: it is `noEntry` restricted to the
-    # vehicles the parameters describe (R-33).
+    # vehicles the parameters describe.
     "limitation catégorielle": MeasureTypeEnum.NOENTRY.value,
     "limitation de vitesse": MeasureTypeEnum.SPEEDLIMITATION.value,
     "limitation dimensionnelle": MeasureTypeEnum.NOENTRY.value,
     "Mesure libre": None,
     # A dead end closes one end of the street, not the street: as `noEntry` both ways it
-    # would read as a full closure (R-02, decision of 2026-09-23).
+    # would read as a full closure (decision of 2026-09-23).
     "mise en impasse": None,
     "obligation d'allumage des feux": None,
     "obligation de mouvement": None,
     "périmètre zone": None,
     "rétablissement double sens": None,
-    # R-32 freeze: no one-direction measure until DiaLog carries the side of the road.
+    # No one-direction measure until DiaLog carries the side of the road.
     "sens interdit (ou sens unique)": None,
     "stationnement réservé": None,
     "stop": None,
@@ -88,8 +88,8 @@ PEDESTRIAN_AREA_SPEED = 5
 
 SERVICE_POLICE_PREFECTURE = "Préfecture de Police"
 
-# `1114` Raison. Everything the catalog holds beyond these lands on `other` + free text
-# (R-27); permanent regulations carry no reason at all and get their own text.
+# `1114` Raison. Everything the catalog holds beyond these lands on `other` + free text;
+# permanent regulations carry no reason at all and get their own text.
 REGULATION_SUBJECT_BY_REASON: dict[str, str] = {
     "Travaux": PostApiRegulationsAddBodySubject.ROADMAINTENANCE.value,
     "Evènement": PostApiRegulationsAddBodySubject.EVENT.value,
@@ -126,11 +126,11 @@ IGNORED_PARAMETERS = frozenset({"caractère aggravant"})
 
 SPEED_PARAMETER = "valeur de la vitesse"
 
-# A filled time slot drops the measure (R-78): the only value seen on a mappable measure
+# A filled time slot drops the measure: the only value seen on a mappable measure
 # names public holidays, which DiaLog cannot express.
 TIME_SLOT_PARAMETERS = frozenset({"Jours et Horaires"})
 
-# A filled lane drops the measure (R-78): DiaLog would close the whole street, not the one
+# A filled lane drops the measure: DiaLog would close the whole street, not the one
 # lane named (19 values on 2026-09-08, all a single lane).
 LANE_PARAMETERS = frozenset({"voie concernée"})
 
@@ -150,7 +150,7 @@ COMPLEMENT_CONNECTORS = frozenset(
     }
 )
 
-# The only value that means "no restriction at all" (R-34).
+# The only value that means "no restriction at all".
 ALL_VEHICLES_LABELS = frozenset({"à tous les véhicules"})
 
 
@@ -158,7 +158,7 @@ ALL_VEHICLES_LABELS = frozenset({"à tous les véhicules"})
 class VehicleRestriction:
     """One `restrictedTypes` entry, with the weight the label carries — and only that.
 
-    A `None` weight stays `None`: `heavyweightMaxWeight` is never filled from a guess (R-35).
+    A `None` weight stays `None`: `heavyweightMaxWeight` is never filled from a guess.
     """
 
     restricted_type: str
@@ -180,7 +180,7 @@ EXEMPTED_TAXI = "taxi"
 EXEMPTED_OTHER = "other"
 
 # Published as "other" + the label (closed list, 2026-10-26). Any other unmapped value drops
-# its measure, "cycles" included (R-34: pedestrians and cycles are never restricted).
+# its measure, "cycles" included (DiaLog never restricts pedestrians and cycles).
 RESTRICTIONS_KEPT_AS_OTHER = frozenset(
     {
         "aux véhicules de plus de 2 mètres",
@@ -220,7 +220,7 @@ EXEMPTION_BY_LABEL: dict[str, str] = {
     "des taxis": EXEMPTED_TAXI,
 }
 
-# Every parameter name the code reads; a filled one outside drops its measure (R-81).
+# Every parameter name the code reads; a filled one outside drops its measure.
 KNOWN_PARAMETERS = (
     RESTRICTION_PARAMETERS
     | EXEMPTION_PARAMETERS

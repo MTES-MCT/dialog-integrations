@@ -2,7 +2,7 @@
 
 One Polars row per feature: its properties, plus `geometry` as a GeoJSON string so the
 frame stays a plain table Pandera can validate. GeoServer answers `SRSNAME=EPSG:4326` in
-lon/lat order (R-52); `assert_lon_lat_bbox` fails loudly when it does not.
+lon/lat order; `assert_lon_lat_bbox` fails loudly when it does not.
 """
 
 import json

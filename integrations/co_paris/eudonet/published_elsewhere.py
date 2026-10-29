@@ -1,4 +1,4 @@
-"""The acts another channel already published in DiaLog (R-80).
+"""The acts another channel already published in DiaLog.
 
 Bare `1101` numbers (the former PHP channel, into "Paris") are read live from the public
 export, municipality by municipality. The `Paris_{1101}` ones ("Paris (préfecture)", 100
@@ -64,12 +64,12 @@ def read_numbers_published_elsewhere(
     _save_state(state_path, read)
     if never_read:
         logger.warning(
-            f"R-80: the public export could not be read for {never_read}, never read before: "
+            f"The public export could not be read for {never_read}, never read before: "
             "read as empty, their regulations published by another channel may be created"
         )
     if unreadable:
         logger.warning(
-            f"R-80: the public export could not be read for {len(unreadable)} "
+            f"The public export could not be read for {len(unreadable)} "
             f"municipalities, their last successful read is used "
             f"({sum(len(read.get(code, [])) for code in unreadable)} regulations): {unreadable}"
         )
@@ -124,12 +124,12 @@ def index_by_eudonet_number(identifiers: Iterable[tuple[str, str]]) -> dict[str,
 
 
 def discard_published_elsewhere(df: pl.DataFrame, numbers: dict[str, str] | None) -> pl.DataFrame:
-    """Drop the regulations whose `1101` number another channel already published (R-80).
+    """Drop the regulations whose `1101` number another channel already published.
 
     `None` is a list never loaded (`fetch_raw_data` did not run): said, not passed over.
     """
     if numbers is None:
-        logger.warning("R-80: the numbers published elsewhere were never loaded, none held back")
+        logger.warning("The numbers published elsewhere were never loaded, none held back")
         return df
     if not numbers:
         return df
@@ -141,6 +141,6 @@ def discard_published_elsewhere(df: pl.DataFrame, numbers: dict[str, str] | None
         )
         logger.warning(
             f"Dropping {held_back.height} rows of {len(collisions)} regulations already "
-            f"published by another channel (R-80): {collisions}"
+            f"published by another channel: {collisions}"
         )
     return df.filter(~published)

@@ -45,12 +45,12 @@ from .vehicles import compute_vehicle_fields
 
 CREDENTIALS_ENV_VAR = "EUDONET_PARIS_CREDENTIALS"
 
-# The police prefecture signs about a third of the acts, under its own authority (R-73 by
-# analogy): staging only (2026-09-23), never the production host until Paris agrees.
+# The police prefecture signs about a third of the acts, under its own authority, like the
+# road of another manager: staging only (2026-09-23), never the production host until Paris agrees.
 PUBLISH_POLICE_PREFECTURE = True
 PRODUCTION_HOST = "dialog.beta.gouv.fr"
 
-# Ceiling on the locations of one POST (R-76).
+# Ceiling on the locations of one POST.
 MAX_LOCATIONS_PER_REGULATION = 1000
 
 
@@ -69,7 +69,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
     def fetch_raw_data(self) -> pl.DataFrame:
         """Read the perimeter from Eudonet, and the numbers other channels already published
-        in DiaLog (R-80), which `compute_clean_data` holds back."""
+        in DiaLog, which `compute_clean_data` holds back."""
         client = EudonetClient(self._credentials())
         tables = extract_tables(client, today_in_paris())
         self.numbers_published_elsewhere = self.fetch_numbers_published_elsewhere()

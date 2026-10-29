@@ -88,9 +88,9 @@ def test_maps_known_perturbations(perturbation, expected):
 @pytest.mark.parametrize(
     "perturbation",
     [
-        "Circulation réduite",  # narrowed carriageway: no DiaLog type (R-32 bis)
+        "Circulation réduite",  # narrowed carriageway: no DiaLog type
         "Circulation réduite de nuit",
-        "Circulation sens unique",  # would need a direction the layer lacks (R-32)
+        "Circulation sens unique",  # would need a direction the layer lacks
         "Une valeur jamais vue",
     ],
 )
@@ -153,7 +153,7 @@ def test_reads_hours_out_of_free_text(description, expected):
     ],
 )
 def test_keeps_rows_whose_description_is_read_in_full(description, expected):
-    """Hours, a resident exemption, and connectors between them: nothing is lost (R-78)."""
+    """Hours, a resident exemption, and connectors between them: nothing is lost."""
     result = timed(
         row(typeperturbation="Circulation interdite", descripchantierinternet=description)
     )
@@ -300,7 +300,7 @@ def test_period_drops_broken_dates(start, end):
 
 
 def test_a_work_site_already_over_is_not_created():
-    """R-40: the producer withdraws sites on their end date; a stale row must not slip in."""
+    """The producer withdraws sites on their end date; a stale row must not slip in."""
     assert EXPIRED in DataSourceIntegration.rules
 
 
@@ -393,7 +393,7 @@ def test_all_vehicles_by_default():
     "description", ["Sauf riverain", "Sauf riverains", "7h-17h sauf riverains"]
 )
 def test_residents_are_exempted_when_the_description_says_so(description):
-    """`Sauf riverains` is the one exemption the layer spells out (R-36)."""
+    """`Sauf riverains` is the one exemption the layer spells out."""
     result = compute_vehicle_fields(frame(row(descripchantierinternet=description)))
     assert result.get_column("vehicle_all_vehicles").to_list() == [True]
     assert result.get_column("vehicle_exempted_types").to_list() == [["localResident"]]

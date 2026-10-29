@@ -159,7 +159,7 @@ def test_foreign_order_keys_cut_at_underscores_only():
     assert "2019" not in keys and "2024" not in keys
 
 
-# --- Grouping rows into measures and regulations (R-28) -----------------------------
+# --- Grouping rows into measures and regulations -----------------------------
 
 
 def test_rows_sharing_an_order_number_land_in_one_regulation(clean_data):
@@ -170,7 +170,7 @@ def test_rows_sharing_an_order_number_land_in_one_regulation(clean_data):
 
 
 def test_a_numbered_order_carries_every_measure_present_on_all_its_segments(clean_data):
-    """Rue Germain's 2022-080: 20 km/h and 3.5 t on both segments, the order says both (R-28)."""
+    """Rue Germain's 2022-080: 20 km/h and 3.5 t on both segments, the order says both."""
     order = clean_data.filter(pl.col("regulation_identifier") == "MGL-CT-2022080")
     assert set(order["measure_group_key"]) == {"V20", "GABARIT_T3_5"}
     assert set(order["regulation_title"]) == {"Arrêté n°2022-080 – Métropole de Lyon"}
@@ -229,7 +229,7 @@ def test_a_project_annotation_detaches_the_order_but_keeps_the_measure(clean_dat
 
 
 def test_the_default_urban_speed_is_published_as_one_metropolitan_regulation(clean_data):
-    """A satnav needs the default speed as much as a decided one (R-70)."""
+    """A satnav needs the default speed as much as a decided one."""
     fifty = clean_data.filter(pl.col("measure_group_key") == "V50")
     assert set(fifty["regulation_identifier"]) == {"MGL-CT-V50"}
     assert set(fifty["measure_type_"]) == {"speedLimitation"}
@@ -242,7 +242,7 @@ def test_the_default_urban_speed_is_published_as_one_metropolitan_regulation(cle
 
 
 def test_the_default_rural_speed_is_published_too(clean_data):
-    """80 km/h outside a built-up area goes out like the 50 (R-70) — the tonnage stays."""
+    """80 km/h outside a built-up area goes out like the 50 — the tonnage stays."""
     eighty = clean_data.filter(pl.col("measure_group_key") == "V80")
     assert set(eighty["regulation_identifier"]) == {"MGL-CT-V80"}
     assert set(eighty["measure_max_speed"]) == {80}
@@ -283,7 +283,7 @@ def test_a_pedestrian_area_is_a_ban_and_a_walking_pace_limit_in_one_regulation(c
 
 
 def test_a_pedestrian_area_carries_the_local_access_exemption_like_a_ztl(clean_data):
-    """One enters a pedestrian area to reach an address, not to drive through (R-71)."""
+    """One enters a pedestrian area to reach an address, not to drive through."""
     area = clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")
     assert area["vehicle_exempted_types"].to_list() == [["desserteLocale"]] * area.height
     assert set(area["vehicle_all_vehicles"]) == {True}
@@ -302,7 +302,7 @@ def test_a_segment_without_geometry_is_dropped(clean_data):
 
 
 def test_every_period_is_permanent_and_undated(clean_data):
-    """R-39: we never presume a commencement date; `sync/dating.py` fills it when writing."""
+    """We never presume a commencement date; `sync/dating.py` fills it when writing."""
     assert clean_data["period_start_date"].null_count() == clean_data.height
     assert set(clean_data["period_is_permanent"]) == {True}
     assert clean_data["period_end_date"].null_count() == clean_data.height
@@ -500,7 +500,7 @@ def test_a_ztl_is_a_ban_with_a_local_access_exemption(clean_data):
 
 
 def test_the_ztl_publishes_its_speed_beside_the_ban(clean_data):
-    """The ZTL's speed is how one drives once let in (R-72); at 5 km/h it is no second ban."""
+    """The ZTL's speed is how one drives once let in; at 5 km/h it is no second ban."""
     labels = clean_data.filter(pl.col("measure_group_key") == "V30")["location_label"]
     assert any("Mercière" in label for label in labels)
 
@@ -548,7 +548,7 @@ def test_a_labelled_area_off_the_road_network_is_dropped_all_the_same(clean_data
 
 
 def test_five_kilometres_per_hour_alone_is_not_a_pedestrian_area(clean_data):
-    """Segments filed at 5 km/h without the label are never published (R-71)."""
+    """Segments filed at 5 km/h without the label are never published."""
     labels = list(
         clean_data.filter(pl.col("measure_group_key") == "AIRE_PIETONNE")["location_label"]
     )
@@ -603,7 +603,7 @@ def _qualified_measures(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-# --- What the free text and the road manager say (R-73, R-78) -----------------------
+# --- What the free text and the road manager say -----------------------
 
 
 def clean_with(**overrides) -> pl.DataFrame:
@@ -668,13 +668,13 @@ def test_the_exemption_reaches_the_api_next_to_other():
     ],
 )
 def test_a_direction_or_a_part_of_the_segment_in_the_text_drops_the_segment(text):
-    """R-78: a speed published both ways and end to end would state more than this."""
+    """A speed published both ways and end to end would state more than this."""
     assert clean_with(precisionreglementation=text).height == 0
 
 
 @pytest.mark.parametrize("manager", ["État", "Métropole gestion tiers public"])
 def test_a_road_of_another_manager_is_not_published(manager):
-    """R-73: the State's motorways are not the Métropole's to regulate."""
+    """The State's motorways are not the Métropole's to regulate."""
     assert clean_with(domanialite=manager).height == 0
 
 

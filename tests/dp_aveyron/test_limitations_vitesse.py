@@ -72,7 +72,7 @@ def test_identifier_normalises_what_the_producer_writes():
 
 
 def test_a_stretch_without_an_arrete_joins_the_departmental_regulation_of_its_speed():
-    """R-28: a source row is not an arrete. Numberless stretches group by measure."""
+    """A source row is not an arrete. Numberless stretches group by measure."""
     result = compute_regulation_fields(stretches(num_arrete=[None]))
 
     assert result["regulation_identifier"].to_list() == ["AV-LV-V70"]
@@ -159,7 +159,7 @@ def test_identifier_stays_within_the_api_cap():
 
 
 def test_default_limits_without_an_arrete_are_kept_and_grouped_by_speed():
-    """R-70: they restate the law, but a satnav needs them all the same."""
+    """They restate the law, but a satnav needs them all the same."""
     df = stretches(
         num_arrete=[None] * 4,
         agglo=["RODEZ", None, None, "RODEZ"],
@@ -358,7 +358,7 @@ def test_an_unknown_side_falls_back_to_both_ways():
 
 
 def test_the_period_is_permanent_and_undated():
-    """R-39: no date is presumed; `sync/dating.py` dates it when DiaLog is written."""
+    """No date is presumed; `sync/dating.py` dates it when DiaLog is written."""
     result = compute_period_fields(stretches())
 
     assert result["period_start_date"].to_list() == [None]

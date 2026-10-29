@@ -151,7 +151,8 @@ def test_without_opt_in_every_row_is_its_own_measure():
 
 
 def test_rows_sharing_a_group_key_become_one_measure_with_all_their_locations():
-    """A SIG publishes one row per segment; R-28 wants one measure carrying N locations."""
+    """A SIG publishes one row per segment; DiaLog wants one measure
+    carrying N locations."""
     [regulation] = regulations(
         rows(("A", "30", 1), ("A", "30", 2), ("A", "noEntry", 3), ("A", "30", 4)),
         group_locations_by_measure=True,

@@ -4,7 +4,8 @@
     Arrêté N°UC 22-272 du 12/05/22
     Proposition zone apaisable = Zone 30 - Arrêté n°2021-055 le 02/06/21
 
-A level-3 identifier (R-20): a clerk who reformats an entry creates a duplicate. The
+A last-resort identifier, read from free text: a clerk who reformats an entry creates a
+duplicate. The
 pattern absorbs the eight spellings observed on 2026-08-12, not a ninth.
 """
 

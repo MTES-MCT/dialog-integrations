@@ -1,6 +1,6 @@
 """Métropole de Lyon: chaussées et trottoirs, the GIS inventory of the road network.
 
-A row is a road segment (37 569), not an order, so rows are grouped (R-28): under the
+A row is a road segment (37 569), not an order, so rows are grouped: under the
 order number they cite for the measures present on all its segments, otherwise into one
 metropolitan-wide regulation per distinct measure. A segment's measures are qualified
 separately, so one segment can sit in two regulations.
@@ -37,26 +37,26 @@ from toolkit.transforms.perimeter import Perimeter, discard_outside_perimeter
 
 WFS_LAYER = "pvo_patrimoine_voirie.pvochausseetrottoir"
 
-# Prefixed so our batch stays removable as a block (R-29). The ~800 orders another channel
+# Prefixed so our batch stays removable as a block. The ~800 orders another channel
 # pushed to the organisation follow no convention to align with (52 municipality prefixes).
 IDENTIFIER_PREFIX = "MGL-CT"
 # Any identifier outside the stem belongs to that other channel (`foreign_order_keys`).
 ORGANISATION_STEM = "MGL-"
 
 # Roads of a manager we are sure is not the Métropole's to regulate, unpublished without an
-# agreement (R-73; scope settled on 2026-10-10): the State, 747 segments on 2026-10-10, and
+# agreement (scope settled on 2026-10-10): the State, 747 segments on 2026-10-10, and
 # 1 segment of a third public body. The Rhône département (80 segments) is kept: on this
 # territory the two are nearly one authority. On 2026-10-05 the Métropole said it does not
 # vouch for the State's data.
 ROAD_MANAGERS_WITHOUT_AGREEMENT = ("État", "Métropole gestion tiers public")
 
 # The source files a pedestrian area as 5 km/h, which alone would read as an advisory: it
-# goes out as `noEntry` except local access (R-71) plus the walking-pace limit.
+# goes out as `noEntry` except local access plus the walking-pace limit.
 PEDESTRIAN_AREA_SPEED = "5"
 PEDESTRIAN_AREA_SPEED_KEY = "AIRE_PIETONNE_V5"
 
 # Only the producer's label makes a 5 km/h segment a pedestrian area: inferring it from the
-# speed would ban driving on streets such as Rue du Pavé (R-35, R-71; 3 332 unlabelled
+# speed would ban driving on streets such as Rue du Pavé (3 332 unlabelled
 # segments on 2026-09-22).
 PEDESTRIAN_AREA_LABEL = "Aire Piétonne"
 
@@ -64,12 +64,12 @@ PEDESTRIAN_AREA_LABEL = "Aire Piétonne"
 # structure's load capacity that landed in the same column.
 MAX_HEAVYWEIGHT_TONNES = 44
 
-# Speed kept next to the ZTL ban, like a pedestrian area's walking pace (R-72, decided on
+# Speed kept next to the ZTL ban, like a pedestrian area's walking pace (decided on
 # 2026-10-01 with the DiaLog team, 338 segments).
 ZTL_REPLACES_SPEED = False
 
 # DiaLog refuses an emprise outside the organisation's territory, and one refusal takes the
-# whole regulation down (R-77). Neither the road's name nor `domanialite` predicts it.
+# whole regulation down. Neither the road's name nor `domanialite` predicts it.
 ORGANIZATION_PERIMETER = ("epci", "200046977")  # Métropole de Lyon, SIREN code of the EPCI
 
 # The source files towpaths, park promenades, private lanes and nameless segments as
@@ -83,8 +83,8 @@ PEDESTRIAN_AREA_NOT_A_ROAD = (
     r"|contre.all[ée]e|passerelle|halage)"
 )
 
-# The API times out between 1 500 and 2 000 locations per regulation (probes of 2026-09-04,
-# R-76); 1 000 is the margin agreed with the team until it takes larger batches.
+# The API times out between 1 500 and 2 000 locations per regulation (probes of 2026-09-04);
+# 1 000 is the margin agreed with the team until it takes larger batches.
 MAX_LOCATIONS_PER_REGULATION = 1000
 
 # Latitude bands that keep a split regulation together: 0.01° is about 1.1 km.
@@ -99,7 +99,7 @@ FIRST_COORDINATE = r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)"
 PUBLIC_SERVICE_EXEMPTION = r"(?i)\bsauf\s+services?\s+publics?\b"
 PUBLIC_SERVICE_EXEMPTION_TEXT = "Services publics"
 PUBLIC_SERVICE_EXEMPTION_KEY = "_SAUF_SP"
-# A direction or a part of the segment, which DiaLog cannot say (R-78): 10 segments on
+# A direction or a part of the segment, which DiaLog cannot say: 10 segments on
 # 2026-10-10, all speed limits.
 UNEXPRESSED_QUALIFIER = (
     r"(?i)\bsens\s+(?:NS|SN|EO|OE|nord|sud|est|ouest)\b|\bentre\s+n\s*°|\bdu\s+n\s*°\s*\d"
@@ -168,7 +168,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(self.count_dataset_restrictions)
             # After the counter, so the segments outside count as stated and not retained.
             .pipe(self.discard_outside_perimeter)
-            # Before R-28 judges the orders: a dropped segment must not keep an order from
+            # Before the orders are judged: a dropped segment must not keep an order from
             # carrying a measure present on all the others.
             .pipe(discard_roads_of_other_managers)
             .pipe(discard_unexpressed_qualifiers)
@@ -178,7 +178,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_vehicle_fields)
             .pipe(compute_period_fields)
             .pipe(compute_location_fields)
-            # Before R-28 judges the orders, like the discards above.
+            # Before the orders are judged, like the discards above.
             .pipe(self.apply_rules)
             .pipe(compute_regulation_fields, self.foreign_order_keys)
             .pipe(self.count_retained_restrictions)
@@ -263,7 +263,7 @@ def discard_pedestrian_areas_off_the_road_network(df: pl.DataFrame) -> pl.DataFr
 
 
 def discard_roads_of_other_managers(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop every measure on the roads of a manager the Métropole cannot publish for (R-73).
+    """Drop every measure on the roads of a manager the Métropole cannot publish for.
 
     They stay counted as stated, so the retention rate shows what the rule costs.
     """
@@ -275,14 +275,14 @@ def discard_roads_of_other_managers(df: pl.DataFrame) -> pl.DataFrame:
         )
         logger.info(
             f"Discarding {dropped.height} measures on {dropped['codetroncon'].n_unique()} "
-            f"segments of another road manager, not published without its agreement "
-            f"(R-73): {counts}"
+            f"segments of another road manager, not published without its agreement: "
+            f"{counts}"
         )
     return df.filter(~discarded)
 
 
 def discard_unexpressed_qualifiers(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop the segments whose free text states a direction or a part of the segment (R-78).
+    """Drop the segments whose free text states a direction or a part of the segment.
 
     Published both ways and end to end, they would state more than the source.
     """
@@ -293,7 +293,7 @@ def discard_unexpressed_qualifiers(df: pl.DataFrame) -> pl.DataFrame:
     if dropped.height:
         logger.info(
             f"Discarding {dropped.height} measures on {dropped['codetroncon'].n_unique()} "
-            f"segments whose free text states a direction or a part of the segment (R-78): "
+            f"segments whose free text states a direction or a part of the segment: "
             f"{sorted(dropped['precisionreglementation'].unique().to_list())}"
         )
     return df.filter(~discarded)
@@ -310,7 +310,7 @@ def discard_impossible_tonnages(df: pl.DataFrame) -> pl.DataFrame:
     """Drop the tonnages no vehicle can carry (50 to 230 t): a structure's load capacity.
 
     The API refused 6 regulations over them on 2026-09-07. Only the tonnage goes, so the
-    row keeps its other dimension limits (R-35).
+    row keeps its other dimension limits.
     """
     impossible = pl.col("limitationtonnage") > MAX_HEAVYWEIGHT_TONNES
     n_impossible = df.select(impossible.fill_null(False).sum()).item()
@@ -335,8 +335,8 @@ def explode_into_measures(df: pl.DataFrame) -> pl.DataFrame:
     """Turn one row per road segment into one row per (segment, measure).
 
     Every speed is published, default 50 and 80 km/h included: a satnav needs them as much
-    as decided ones (R-70). A ZTL is a ban of its own, and its speed is how one drives once
-    let in (R-72).
+    as decided ones. A ZTL is a ban of its own, and its speed is how one drives once
+    let in.
     """
     is_ztl = pl.col("ztl").fill_null(False)
 
@@ -366,8 +366,8 @@ def explode_into_measures(df: pl.DataFrame) -> pl.DataFrame:
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Measure type, speed, and the key that collapses identical measures into one.
 
-    Dimension limits are `noEntry` (R-33). Inside a ZTL, 5 km/h is the zone's speed, not a
-    pedestrian area: the ZTL already bans entry (R-71, R-72).
+    Dimension limits are `noEntry`. Inside a ZTL, 5 km/h is the zone's speed, not a
+    pedestrian area: the ZTL already bans entry.
     """
     is_ztl = pl.col("_measure_kind") == "ztl"
     is_pedestrian_area = (
@@ -417,7 +417,7 @@ def dimension_signature() -> pl.Expr:
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Vehicle set of each measure: dimension limits are carried over, never invented (R-35)."""
+    """Vehicle set of each measure: dimension limits are carried over, never invented."""
     is_dimension = pl.col("_measure_kind") == "dimensions"
     has_tonnage = pl.col("limitationtonnage").is_not_null()
     has_size = pl.any_horizontal(
@@ -477,7 +477,7 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Permanent period, left undated.
 
     The date in the free text is the calmed-traffic zone's, not the measure's, and a past
-    date is never presumed (R-39). Not the run day either: the sync compares dates, so every
+    date is never presumed. Not the run day either: the sync compares dates, so every
     order would look modified each morning. `sync/dating.py` fills it when writing.
     """
     return df.with_columns(
@@ -492,7 +492,7 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Location of each measure, as a raw GeoJSON LineString.
 
     `rawGeoJSON` carries no direction: harmless for a speed limit, blocking the day a
-    one-way ban has to be expressed (R-32).
+    one-way ban has to be expressed.
     """
     df = df.filter(pl.col("geometry").is_not_null())
     return df.with_columns(
@@ -511,8 +511,8 @@ def measures_carried_by_each_order(df: pl.DataFrame) -> pl.DataFrame:
     """One row per `(order_key, measure_group_key)` present on **all** the order's segments.
 
     The segments citing a number also carry whatever else applies there, and a majority
-    rule credited acts with measures they never decided (decided 2026-09-22, R-28). A set
-    intersection gives the same answer from one run to the next (R-20).
+    rule credited acts with measures they never decided (decided 2026-09-22). A set
+    intersection gives the same answer from one run to the next.
     """
     numbered = df.filter(pl.col("order_key").is_not_null())
     segments = numbered.group_by("order_key").agg(
@@ -549,7 +549,7 @@ def compute_regulation_fields(
     """Identifier, category, subject and title of each regulation.
 
     `MGL-CT-{order key}` when the order carries the measure and no other channel holds the
-    number, else `MGL-CT-{measure signature}`, one metropolitan-wide regulation (R-23).
+    number, else `MGL-CT-{measure signature}`, one metropolitan-wide regulation.
     No municipality in the key: Lyon's "Ville 30" would split into 13 orders. 61 short
     numbers (`845`) could merge two municipalities' orders; merging was chosen on 2026-09-04.
     """
@@ -564,7 +564,7 @@ def compute_regulation_fields(
             logger.warning(
                 f"{held_back['order_key'].n_unique()} order number(s) already published in "
                 f"the organisation by another channel are not created again; their "
-                f"{held_back.height} emprises join the metropolitan regulations (P-04): "
+                f"{held_back.height} emprises join the metropolitan regulations: "
                 f"{sorted(held_back['order_key'].unique().to_list())}"
             )
         # Also drives the title, or a metropolitan regulation would read "Arrêté n°…".
@@ -614,7 +614,7 @@ def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def regulation_title() -> pl.Expr:
-    """Human-readable title, never blocking, always fabricated (R-24)."""
+    """Human-readable title, never blocking, always fabricated."""
     numbered = pl.format("Arrêté n°{} – Métropole de Lyon", pl.col("order_number"))
     fallback = (
         pl.when(pl.col("measure_type_") == pl.lit(MeasureTypeEnum.SPEEDLIMITATION.value))

@@ -8,7 +8,7 @@ des emprises des voies actuelles" (ODbL, 2026-09-08). DiaLog does not geocode th
 labels of the 2017 migration ("RUE D AUTEUIL"), but does the official name (6 of 6, 2026-09-16).
 `street_districts.json`: per `l_longmin`, the `c_ar` of its addresses in the "Adresses"
 referential (same date), as runs of `n_voie` by parity when several. It fills a missing
-arrondissement (R-06); what it cannot settle is dropped, or goes to the first one cited.
+arrondissement; what it cannot settle is dropped, or goes to the first one cited.
 """
 
 import json
@@ -44,8 +44,8 @@ CITY_CODE_BY_DISTRICT = {
     **{f"{n}ème arrondissement": f"751{n:02d}" for n in range(2, 21)},
 }
 
-# `2711` "Sens": any value but both ways drops the location rather than widen it (R-32 freeze,
-# 2026-10-26).
+# `2711` "Sens": any value but both ways drops the location rather than widen it: no
+# one-direction measure until DiaLog carries the side of the road (2026-10-26).
 BOTH_DIRECTIONS_LABEL = "dans les deux sens"
 # `2712` "côté" values that limit a location to one side of the street, which the DiaLog
 # write API cannot carry (2026-10-23): dropped rather than widened to both sides.
@@ -259,7 +259,7 @@ def resolve_location(row: dict) -> dict:
     if not road_name:
         return {**fields, "_location_rejection": "no road name"}
     if row["l_direction"] not in (None, BOTH_DIRECTIONS_LABEL):
-        return {**fields, "_location_rejection": "one direction only (R-32 freeze)"}
+        return {**fields, "_location_rejection": "one direction only"}
     if row["l_side"] in ONE_SIDE_LABELS:
         return {**fields, "_location_rejection": "one side of the street only"}
 

@@ -1,7 +1,7 @@
 """The organisation's perimeter as DiaLog sees it, and the filter that applies it upstream.
 
 DiaLog refuses an emprise that does not intersect the organisation's geometry, and the
-refusal takes the whole regulation down (R-77). That geometry is reproducible: the
+refusal takes the whole regulation down. That geometry is reproducible: the
 geo.api.gouv.fr contours of the organisation's communes, unioned, simplified with a
 tolerance per code type, then a plain `ST_Intersects` with the geometry as sent. The recipe
 is DiaLog's (`OrganizationAdministrativeBoundariesGeometry`): if it changes, follow it.

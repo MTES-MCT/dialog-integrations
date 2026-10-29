@@ -23,7 +23,7 @@ from .vocabulary import (
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     """`measure_type_`, `measure_max_speed`, and `measure_group_key`: the Eudonet measure, so
-    its locations collapse into one DiaLog measure (R-76)."""
+    its locations collapse into one DiaLog measure."""
     return (
         df.pipe(map_measure_types)
         .pipe(compute_max_speed)
@@ -70,7 +70,7 @@ def map_measure_types(df: pl.DataFrame) -> pl.DataFrame:
 
 def compute_max_speed(df: pl.DataFrame) -> pl.DataFrame:
     """`measure_max_speed`: implied by the label, or read in the speed parameter. A speed
-    limitation whose speed cannot be read is dropped (R-02: no default speed)."""
+    limitation whose speed cannot be read is dropped: there is no default speed."""
     speeds = [
         _max_speed(label, params)
         for label, params in zip(df.get_column("m_type"), df.get_column("m_params").to_list())
@@ -82,7 +82,7 @@ def compute_max_speed(df: pl.DataFrame) -> pl.DataFrame:
     if dropped.height:
         logger.warning(
             f"Dropping {dropped.height} '{LABEL_SPEED_LIMIT}' measures without a readable "
-            f"'{SPEED_PARAMETER}' parameter (R-02: no default speed)"
+            f"'{SPEED_PARAMETER}' parameter: there is no default speed"
         )
     return df.filter(~speedless)
 
@@ -100,7 +100,7 @@ def _max_speed(label: str, params: list[list[str]] | None) -> int | None:
 
 def discard_narrowed_measures(df: pl.DataFrame) -> pl.DataFrame:
     """Drop the measures a filled time slot or lane narrows: DiaLog would publish them on
-    the whole street, every day (R-78)."""
+    the whole street, every day."""
     narrowings = (
         (TIME_SLOT_PARAMETERS, "whose 'Jours et Horaires' text DiaLog cannot express"),
         (
@@ -115,7 +115,7 @@ def discard_narrowed_measures(df: pl.DataFrame) -> pl.DataFrame:
         if dropped.height:
             logger.warning(
                 f"Dropping {dropped.height} rows of {dropped['m_file_id'].n_unique()} measures "
-                f"{motive} (R-78): {count_by(dropped, 'm_type')}"
+                f"{motive}: {count_by(dropped, 'm_type')}"
             )
         df = df.filter(~narrowed)
     return df
@@ -123,7 +123,7 @@ def discard_narrowed_measures(df: pl.DataFrame) -> pl.DataFrame:
 
 def discard_unknown_parameters(df: pl.DataFrame) -> pl.DataFrame:
     """Drop a measure with a filled parameter of an unknown name: it may narrow the measure
-    like a time slot or a lane does (R-81)."""
+    like a time slot or a lane does."""
     names = [
         [
             pair[0].strip()
@@ -138,7 +138,7 @@ def discard_unknown_parameters(df: pl.DataFrame) -> pl.DataFrame:
         counted = Counter(name for found in names for name in found)
         logger.warning(
             f"Dropping {dropped.height} rows of {dropped['m_file_id'].n_unique()} measures "
-            f"carrying a filled parameter of an unknown name, which may narrow them (R-81): "
+            f"carrying a filled parameter of an unknown name, which may narrow them: "
             f"{dict(counted)}. Qualify it in vocabulary.py."
         )
     return df.filter(~unknown)
@@ -170,7 +170,7 @@ def has_filled_parameter(df: pl.DataFrame, names: frozenset[str]) -> pl.Series:
 def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:
     """Give every published pedestrian area its walking-pace limit, in the same regulation.
 
-    R-71 (Code de la route R. 110-2): no exemption on the limit, as the vehicles let in still
+    Code de la route R. 110-2: no exemption on the limit, as the vehicles let in still
     drive at walking pace.
     """
     bans = df.filter(pl.col("m_type") == LABEL_PEDESTRIAN_AREA)

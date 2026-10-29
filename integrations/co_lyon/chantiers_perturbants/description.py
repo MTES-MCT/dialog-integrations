@@ -1,4 +1,4 @@
-"""Reading a work site's free-text description, all or nothing (R-78).
+"""Reading a work site's free-text description, all or nothing.
 
 DiaLog can express its hours and a resident exemption, not a direction, a weekend
 reopening or 15-minute closures: a half-read description would publish a stronger
