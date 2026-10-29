@@ -19,7 +19,7 @@ from api.dia_log_client.models import (
 )
 from canonical.source import BaseDataSourceIntegration
 from integrations.co_lyon.grand_lyon import fetch_layer
-from toolkit.rules.period import DATES_MISSING, EXPIRED
+from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
 from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 from toolkit.transforms.time_slots import to_iso_slots
 
@@ -41,10 +41,6 @@ MEASURE_TYPE_BY_PERTURBATION = {
     # unique" needs a direction the layer lacks.
 }
 
-# Above this, a "temporary" restriction stops looking temporary. It is reported, not
-# filtered: the call belongs to whoever reads the report, case by case.
-LONG_DURATION_WARNING_DAYS = 365
-
 TITLE_MAX_LENGTH = 255
 TITLE_ELLIPSIS = "..."
 
@@ -56,7 +52,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     identifier_prefix = "MGL-CHP-"
     raw_data_schema = LyonChantiersPerturbantsRawDataSchema
     # The producer withdraws a site on its end date: EXPIRED only guards against a stale row.
-    rules = (EXPIRED, DATES_MISSING)
+    rules = (EXPIRED, DATES_MISSING, LONG_DURATION)
 
     def fetch_raw_data(self) -> pl.DataFrame:
         return fetch_layer(WFS_LAYER)
@@ -175,19 +171,13 @@ def compute_time_slot_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Temporary period from `debutchantier` to `finchantier`, with its daily slots.
-
-    Long durations are reported, not dropped: whether a multi-year "temporary" restriction
-    is a defect or real is a case-by-case call.
-    """
+    """Temporary period from `debutchantier` to `finchantier`, with its daily slots."""
     # A missing date is left to the rules, applied to the canonical rows.
     inverted = (pl.col("finchantier") < pl.col("debutchantier")).fill_null(False)
     n_inverted = df.select(inverted.sum()).item()
     if n_inverted:
         logger.warning(f"Dropping {n_inverted} rows ending before they start")
     df = df.filter(~inverted)
-
-    warn_long_durations(df)
 
     df = df.with_columns(
         pl.struct(["debutchantier", "time_slot_clocks"])
@@ -213,32 +203,6 @@ def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
             pl.lit(False).alias("period_is_permanent"),
         ]
     )
-
-
-def warn_long_durations(df: pl.DataFrame) -> None:
-    """Report the work sites that last longer than a restriction plausibly can.
-
-    Multi-year "temporary" restrictions have degraded DiaLog's feed before, but the layer
-    also has genuine ones, and 31 December end dates that look like a default.
-    """
-    duration = (pl.col("finchantier") - pl.col("debutchantier")).dt.total_days()
-    long_running = df.filter(duration > LONG_DURATION_WARNING_DAYS).sort(
-        pl.col("finchantier") - pl.col("debutchantier"), descending=True
-    )
-    if not long_running.height:
-        return
-
-    logger.warning(
-        f"Very long temporary restriction detected: {long_running.height} work site(s) "
-        f"last more than {LONG_DURATION_WARNING_DAYS} days. They are published as they "
-        "come — review them case by case."
-    )
-    for row in long_running.iter_rows(named=True):
-        days = (row["finchantier"] - row["debutchantier"]).days
-        logger.warning(
-            f"  gid {row['gid']}: {days} days, {row['debutchantier']} to "
-            f"{row['finchantier']} — {row['nom']} ({row['typeperturbation']})"
-        )
 
 
 def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:

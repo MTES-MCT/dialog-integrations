@@ -8,7 +8,7 @@ import pytest
 from tests.sync_fixtures import measure_rows
 from toolkit.rules import period
 from toolkit.rules.apply import apply_rules
-from toolkit.rules.period import DATES_MISSING, EXPIRED
+from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
 
 TODAY = date(2026, 1, 2)
 
@@ -74,3 +74,31 @@ def test_today_is_read_at_each_run_not_at_import(monkeypatch):
     assert kept(df) == ["R0"]
     monkeypatch.setattr(period, "today_in_paris", lambda: date(2026, 1, 3))
     assert kept(df) == []
+
+
+def lasting(start: str, end: str, category: str = "temporaryRegulation") -> pl.DataFrame:
+    return measure_rows(["R0"]).with_columns(
+        period_start_date=pl.lit(start),
+        period_end_date=pl.lit(end),
+        regulation_category=pl.lit(category),
+    )
+
+
+@pytest.mark.parametrize(
+    "start,end,flagged",
+    [
+        ("2025-01-01T00:00:00+01:00", "2026-01-01T23:59:59+01:00", False),  # 365 days
+        ("2025-01-01T00:00:00+01:00", "2026-01-02T23:59:59+01:00", True),  # 366 days
+        # 365 days from summer time to winter time: the instants are 366 days apart.
+        ("2025-10-25T00:00:00+02:00", "2026-10-25T23:59:59+01:00", False),
+    ],
+)
+def test_a_temporary_regulation_over_a_year_is_flagged_and_kept(start, end, flagged):
+    result = apply_rules(lasting(start, end), [LONG_DURATION])
+    assert result.frame.height == 1
+    assert result.applied == ({"LONG_DURATION": 1} if flagged else {})
+
+
+def test_a_permanent_regulation_is_never_too_long():
+    df = lasting("2020-01-01T00:00:00+01:00", "2030-01-01T00:00:00+01:00", "permanentRegulation")
+    assert apply_rules(df, [LONG_DURATION]).applied == {}

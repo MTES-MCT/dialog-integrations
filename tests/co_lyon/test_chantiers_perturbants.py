@@ -16,7 +16,7 @@ from integrations.co_lyon.chantiers_perturbants.data_source_integration import (
     compute_vehicle_fields,
 )
 from integrations.co_lyon.chantiers_perturbants.description import read_description
-from toolkit.rules.period import DATES_MISSING, EXPIRED
+from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
 from toolkit.transforms.time_slots import parse_time_slots
 
 GEOMETRY = json.dumps(
@@ -305,15 +305,8 @@ def test_a_work_site_missing_a_date_reaches_the_rules_with_that_date_missing(sta
     assert result.select(missing).to_series().to_list() == [True]
 
 
-def test_multi_year_work_sites_are_reported_but_published(warnings):
-    """Long durations are a judgement call, so they leave through a warning; short ones don't."""
-    long_site = row(gid=415731, debutchantier="2023-01-01", finchantier="2026-06-01")
-    short_site = row(gid=415732, debutchantier="2026-01-01", finchantier="2026-03-01")
-    result = compute_period_fields(timed(long_site, short_site))
-    assert result.height == 2
-    assert any("Very long temporary restriction detected: 1 work site(s)" in m for m in warnings)
-    assert any("gid 415731" in message for message in warnings)
-    assert not any("gid 415732" in message for message in warnings)
+def test_multi_year_work_sites_are_reported_but_published():
+    assert LONG_DURATION in DataSourceIntegration.rules
 
 
 # --- location, regulation, vehicles ---------------------------------------------

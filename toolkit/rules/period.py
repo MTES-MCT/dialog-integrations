@@ -30,3 +30,20 @@ DATES_MISSING = Rule(
     applies=TEMPORARY
     & (pl.col("period_start_date").is_null() | pl.col("period_end_date").is_null()),
 )
+
+# Multi-year "temporary" restrictions have degraded DiaLog's feed before, but some are real,
+# and a 31 December end may be a default: a case-by-case call for whoever reads the log.
+LONG_DURATION = Rule(
+    code="LONG_DURATION",
+    label="arrêté temporaire de plus d'un an",
+    nature=Nature.SUSPICIOUS,
+    outcome=Outcome.FLAG,
+    # In calendar days: instants on either side of a clock change are an hour apart.
+    applies=TEMPORARY
+    & (
+        (
+            pl.col("period_end_date").dt.date() - pl.col("period_start_date").dt.date()
+        ).dt.total_days()
+        > 365
+    ),
+)
