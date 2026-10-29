@@ -43,7 +43,9 @@ NAMES_ONE_WAY_STREET = r"(?i)\bsens\s+(?:unique|interdit)\b"
 
 
 def one_way_street_named(label: pl.Expr) -> Rule:
-    """The measure's label names a one-way street, which it says without its direction."""
+    """The measure's label names a one-way street, whether or not a direction comes with it."""
+    # DiaLog cannot publish a one-way street yet: given a direction or not, it would come
+    # out closed both ways.
     return Rule(
         code="ONE_WAY_STREET",
         label="sens unique ou sens interdit",

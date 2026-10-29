@@ -66,8 +66,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
 
 
 def compute_measure_fields(df: pl.DataFrame):
-    """Only "Interdit dans les 2 sens" is published (noEntry). "Sens unique" is dropped:
-    the layer gives no direction to publish it with."""
+    """Only "Interdit dans les 2 sens" is published (noEntry); "Sens unique" goes to
+    ONE_WAY_STREET."""
 
     df = df.with_columns(
         [

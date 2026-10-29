@@ -52,16 +52,28 @@ def apply_rules(
             if name not in view.columns
         )
     evaluable = [rule for rule in rules if rule.reads <= set(view.columns)]
-    result = RulesResult(df, unevaluated=[r.code for r in rules if r not in evaluable])
+    evaluated = {rule.code for rule in evaluable}
+    result = RulesResult(df, unevaluated=[r.code for r in rules if r.code not in evaluated])
     if not evaluable:
         return result
 
-    verdicts = view.select(rule.expression().alias(rule.code) for rule in evaluable)
-    left_out = pl.Series([False] * df.height)
-    for rule in evaluable:
+    verdicts = view.select(rule.expression().alias(str(i)) for i, rule in enumerate(evaluable))
+    # Rules sharing a code are one rule read from several columns (the common one on the
+    # canonical, a source's own on its columns): a row fails it once.
+    rule_by_code: dict[str, Rule] = {}
+    fails_by_code: dict[str, pl.Series] = {}
+    for i, rule in enumerate(evaluable):
         # A rule validates: what it cannot say is valid, a missing or unreadable value
         # included, fails it. A rule fed the wrong column fails every row, and shows.
-        fails = ~verdicts[rule.code].fill_null(False)
+        fails = ~verdicts[str(i)].fill_null(False)
+        rule_by_code.setdefault(rule.code, rule)
+        if rule.code in fails_by_code:
+            fails = fails | fails_by_code[rule.code]
+        fails_by_code[rule.code] = fails
+
+    left_out = pl.Series([False] * df.height)
+    for code, fails in fails_by_code.items():
+        rule = rule_by_code[code]
         if not (failed := int(fails.sum())):
             continue
         result.applied[rule.code] = failed

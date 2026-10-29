@@ -44,6 +44,22 @@ def test_a_signal_changes_nothing_but_is_counted():
     assert result.applied == {"FAST": 1}
 
 
+def test_rules_sharing_a_code_count_a_row_once_in_one_call():
+    """The common rule on a canonical column and a source's own on its column."""
+    df = rows(["A", "B", "C"], measure_max_speed=[30, 50, 90], limit=[20, 20, 90])
+
+    result = apply_rules(
+        df,
+        [
+            rule("FAST", Outcome.DROP, SPEED_UP_TO_40),
+            rule("FAST", Outcome.DROP, pl.col("limit") <= 40),
+        ],
+    )
+
+    assert result.frame["regulation_identifier"].to_list() == ["A"]
+    assert result.applied == {"FAST": 2}
+
+
 def test_overlapping_rules_each_count_their_rows():
     df = rows(["A", "B"], measure_max_speed=[30, 50])
     rules = [

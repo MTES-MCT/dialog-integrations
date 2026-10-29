@@ -39,8 +39,8 @@ MEASURE_TYPE_BY_PERTURBATION = {
     "Circulation alternée": MeasureTypeEnum.ALTERNATEROAD.value,
     "Circulation alternée de jour": MeasureTypeEnum.ALTERNATEROAD.value,
     "Circulation alternée de nuit": MeasureTypeEnum.ALTERNATEROAD.value,
-    # Dropped: "Circulation réduite*" has no DiaLog type, "Circulation sens
-    # unique" needs a direction the layer lacks.
+    # Dropped: "Circulation réduite*" has no DiaLog type; "Circulation sens unique" goes
+    # to ONE_WAY_STREET.
 }
 ONE_WAY_STREET = one_way_street_named(pl.col("typeperturbation"))
 
