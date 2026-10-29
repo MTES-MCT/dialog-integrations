@@ -67,11 +67,36 @@ valider échoue, valeur manquante ou illisible comprise. Une valeur légitimemen
 dit donc valide dans la règle (une rue nommée n'a pas de géométrie). Ainsi une règle
 nourrie d'une mauvaise colonne écarte tout, et la chute de volume se voit, au lieu de ne
 rien juger en silence. Les **règles
-communes** (`toolkit/rules/common.py`, aujourd'hui l'emprise ponctuelle hors
-stationnement) s'appliquent à toutes les sources sans qu'elles écrivent rien ; une source
-qui en écarte une le déclare, avec sa raison : `disabled_rules = {"POINT_NOT_PARKING":
-"…"}`. Les autres règles de `toolkit/rules/`, une source les déclare dans `rules`, chacune
-à la place de son propre code.
+communes** (`toolkit/rules/common.py`) s'appliquent à toutes les sources sans qu'elles
+écrivent rien :
+
+* sur la période, celles des seuls temporaires : arrêté terminé (jour de fin avant
+  aujourd'hui, au calendrier de Paris), date de début ou de fin manquante, durée de plus
+  d'un an (signalé seulement) ;
+* sur l'emprise : emprise ponctuelle hors stationnement, restriction d'un seul sens ;
+* sur les véhicules : tonnage au-delà de 44 t, gabarit ou poids lourds sans seuil.
+
+Elles s'appliquent par défaut, et une source s'en écarte explicitement, parce que les deux
+oublis ne coûtent pas la même chose : une règle optionnelle oubliée publie une donnée
+fausse vers les GPS, sans que rien ne le montre ; une dérogation oubliée écarte des lignes,
+comptées au rapport, et la baisse de volume se voit. Une règle n'entre dans
+`toolkit/rules/common.py` qu'à trois conditions :
+
+1. elle se lit sur les seules colonnes canoniques ;
+2. elle empêche de publier une donnée fausse ou que DiaLog ne sait pas exprimer, pas une
+   préférence de qualité ;
+3. son effet a été mesuré sur toutes les sources avant l'ajout (lignes écartées, arrêtés
+   touchés).
+
+Le reste de `toolkit/rules/` est une boîte à outils : une source s'en sert là où elle en a
+besoin.
+
+Une source qui en écarte une le déclare, avec sa raison : `disabled_rules =
+{"POINT_NOT_PARKING": "…"}` ; un test refuse une raison vide. Une règle de
+`toolkit/rules/` qui n'est pas commune, une source la déclare dans `rules`, à la place de
+son propre code. Une règle qui lit une colonne de la source (un libellé, un code de
+panneau) est une fonction de la banque, que la source appelle sur sa colonne :
+`self.apply_rules(df, one_way_street_named(pl.col("libelle")))`.
 
 Une source qui ne regroupe pas n'a rien d'autre à écrire : la classe de base applique ses
 règles à ses lignes canoniques. Une source qui regroupe par numéro d'arrêté les applique

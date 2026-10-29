@@ -194,7 +194,11 @@ def test_a_source_declaring_no_rule_is_left_as_it_is():
 def test_a_source_applying_the_rules_early_is_not_counted_twice(errors):
     class Early(_Source):
         rule_inputs = {"measure_max_speed": pl.col("vitesse")}
-        frame = pl.DataFrame({"regulation_identifier": ["A", "B"], "vitesse": [30, 50]})
+        frame = (
+            measure_rows(["A", "B"])
+            .drop("measure_max_speed")
+            .with_columns(vitesse=pl.Series([30, 50]))
+        )
 
         def compute_clean_data(self, raw_data):
             return self.apply_rules(raw_data).rename({"vitesse": "measure_max_speed"})

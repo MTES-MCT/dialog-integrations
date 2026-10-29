@@ -526,6 +526,7 @@ def _undated_rows(identifiers) -> pl.DataFrame:
         pl.lit(None, dtype=pl.String).alias("period_start_date"),
         pl.lit(None, dtype=pl.String).alias("period_end_date"),
         pl.lit(True).alias("period_is_permanent"),
+        pl.lit("permanentRegulation").alias("regulation_category"),
     )
 
 

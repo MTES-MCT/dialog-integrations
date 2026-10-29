@@ -68,12 +68,12 @@ canonique qu'à la fin. Après lui ne restent que les contrôles communs et l'en
 canonique est donc surtout le **contrat de sortie** de chaque source : ce qu'elle doit
 produire, quelle que soit la façon dont elle y arrive.
 
-Conséquence pour qui lit le code : une règle métier se cherche aujourd'hui dans la source
-qui l'applique (`integrations/{org}/{source}/data_source_integration.py`), pas dans un
-module commun. Seuls les contrôles de `checks/rows.py` valent pour toutes les sources.
-Les règles qu'appliquent plusieurs sources vont dans `toolkit/rules/`, au fil de la
-migration des sources : une règle s'écrit une fois sur les noms canoniques, et une source
-l'applique à l'étape de sa transformation qu'elle choisit (voir
+Conséquence pour qui lit le code : une règle métier partagée se cherche dans
+`toolkit/rules/`. Celles de `toolkit/rules/common.py` et les contrôles de
+`checks/rows.py` valent pour toutes les sources, sauf celles qui en désactivent une
+(`disabled_rules`, avec la raison). Un filtre propre à un producteur se cherche dans sa
+source (`integrations/{org}/{source}/data_source_integration.py`). Une règle s'écrit une
+fois, et une source l'applique à l'étape de sa transformation qu'elle choisit (voir
 [Le modèle canonique et les contrôles](modele-canonique.md#les-règles-métier)).
 
 ## Où vit chaque étape

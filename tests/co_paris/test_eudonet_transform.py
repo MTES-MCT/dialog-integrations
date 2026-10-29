@@ -54,7 +54,6 @@ from integrations.co_paris.eudonet.vocabulary import (
 from payloads.measures import build_vehicle_set
 from tests.co_paris.eudonet_fixture import load_fixture
 from toolkit.rules.apply import apply_rules
-from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
 from toolkit.rules.vehicles import THRESHOLD_MISSING
 from toolkit.transforms.titles import ELLIPSIS as TITLE_ELLIPSIS
 from toolkit.transforms.titles import TITLE_MAX_LENGTH
@@ -176,7 +175,7 @@ def test_a_temporary_regulation_still_to_start_is_kept():
     assert pipeline(row).height == 1
 
 
-def test_a_temporary_regulation_that_ended_is_dropped():
+def test_a_temporary_regulation_that_ended_reaches_the_rules_with_its_end():
     row = make_row(
         a_type="Temporaire",
         a_reason="Travaux",
@@ -184,7 +183,6 @@ def test_a_temporary_regulation_that_ended_is_dropped():
         a_end_date=date(2026, 9, 7),
     )
 
-    assert EXPIRED in DataSourceIntegration.rules
     assert pipeline(row).get_column("period_end_date").to_list() == ["2026-09-07T23:59:59+02:00"]
 
 
@@ -197,7 +195,6 @@ def test_a_temporary_regulation_needs_both_its_dates(dates):
     """A temporary period has a start and an end."""
     row = make_row(a_type="Temporaire", a_reason="Travaux", **dates)
 
-    assert DATES_MISSING in DataSourceIntegration.rules
     missing = pl.col("period_start_date").is_null() | pl.col("period_end_date").is_null()
     assert pipeline(row).select(missing).to_series().to_list() == [True]
 
@@ -916,7 +913,6 @@ def test_a_temporary_regulation_longer_than_a_year_is_kept_but_counted():
         a_end_date=date(2028, 1, 1),
     )
     assert pipeline(row).height == 1
-    assert LONG_DURATION in DataSourceIntegration.rules
 
 
 def test_every_produced_column_survives_the_canonical_selection(clean):

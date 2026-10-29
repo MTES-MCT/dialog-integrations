@@ -8,7 +8,6 @@ from loguru import logger
 from canonical.source import BaseDataSourceIntegration
 from dialog.calls import DialogApi
 from sync.snapshot import state_dir
-from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
 from toolkit.transforms.local_time import today_in_paris
 
 from .client import EudonetClient, EudonetError
@@ -64,9 +63,6 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     raw_data_schema = EudonetRawDataSchema
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
-    # The Eudonet query already leaves out the temporaries that ended; a replayed extract
-    # may still hold some.
-    rules = (EXPIRED, DATES_MISSING, LONG_DURATION)
     numbers_published_elsewhere: dict[str, str] | None = None
 
     def fetch_raw_data(self) -> pl.DataFrame:

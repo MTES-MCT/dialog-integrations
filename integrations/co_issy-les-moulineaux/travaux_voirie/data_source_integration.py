@@ -116,11 +116,6 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_period_fields(df: pl.DataFrame) -> pl.DataFrame:
-    no_end = df.select(pl.col("date_fin").is_null().sum()).item()
-    if no_end:
-        logger.warning(f"Dropping {no_end} measures without an end date")
-    df = df.filter(pl.col("date_fin").is_not_null())
-
     return df.with_columns(
         [
             start_of_local_day(df, "date_debut").alias("period_start_date"),

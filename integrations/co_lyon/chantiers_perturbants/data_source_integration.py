@@ -20,7 +20,6 @@ from api.dia_log_client.models import (
 from canonical.source import BaseDataSourceIntegration
 from integrations.co_lyon.grand_lyon import fetch_layer
 from toolkit.rules.location import one_way_street_named
-from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
 from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 from toolkit.transforms.time_slots import to_iso_slots
 from toolkit.transforms.titles import truncate
@@ -51,10 +50,9 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     name = "chantiers_perturbants"
     identifier_prefix = "MGL-CHP-"
     raw_data_schema = LyonChantiersPerturbantsRawDataSchema
-    # The producer withdraws a site on its end date: EXPIRED only guards against a stale row.
-    rules = (EXPIRED, DATES_MISSING, LONG_DURATION)
 
     def fetch_raw_data(self) -> pl.DataFrame:
+        # The producer withdraws a site on its end date: an ended one is a stale row.
         return fetch_layer(WFS_LAYER)
 
     def preprocess_raw_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:

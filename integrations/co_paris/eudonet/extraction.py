@@ -47,6 +47,7 @@ def perimeter_criteria(today: date) -> dict[str, Any]:
         ),
         all_of(
             criterion(field_type, EQUALS, TYPE_CODE_BY_LABEL[TYPE_TEMPORARY_LABEL]),
+            # Ended temporaries left out at the source; the common rule covers a replayed extract.
             criterion(field_end_date, GREATER_OR_EQUAL, today.strftime("%Y/%m/%d")),
             in_accepted_state(TYPE_TEMPORARY_LABEL),
         ),

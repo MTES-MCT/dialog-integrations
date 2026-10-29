@@ -25,9 +25,12 @@ integrations/co_maville
     nombre de lignes annoncé par le portail.
   * ArcGIS : `arcgis.read_layer(URL)` lit toutes les pages d'une couche FeatureServer en
     EPSG:4326 ; une couche plus courte qu'annoncé fait échouer la source, qui est gelée.
-  * Écarter des lignes : les règles communes s'appliquent d'office ; les autres règles de
-    `toolkit/rules/` se déclarent dans `rules`, une règle propre à la source passe par
-    `self.apply_rules(df, règle)`. Toutes sont comptées au rapport (voir
+  * Écarter des lignes : les règles communes (période, emprise, véhicules) s'appliquent
+    d'office, sans rien écrire ; ne pas les recoder dans la source. Une règle commune qui ne
+    vaut pas pour la source se désactive dans `disabled_rules`, avec sa raison. Les
+    fonctions de la banque qui lisent une colonne de la source s'appellent par
+    `self.apply_rules(df, règle)`. Un filtre propre au producteur reste dans la source,
+    journalisé. Toutes les règles sont comptées au rapport (voir
     [les règles métier](modele-canonique.md#les-règles-métier)).
 
 Du code partagé par les sources d'une même organisation reste dans son dossier (exemple :
