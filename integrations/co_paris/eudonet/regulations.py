@@ -16,7 +16,6 @@ from .vocabulary import (
     REGULATION_SUBJECT_BY_REASON,
     SERVICE_POLICE_PREFECTURE,
     TYPE_PERMANENT_LABEL,
-    TYPE_TEMPORARY_LABEL,
     UNKNOWN_REASON_TEXT,
 )
 
@@ -25,7 +24,6 @@ IDENTIFIER_PREFIX = "PARIS-EUDO-"
 SUBJECT_OTHER = PostApiRegulationsAddBodySubject.OTHER.value
 
 IS_PERMANENT = pl.col("a_type") == TYPE_PERMANENT_LABEL
-IS_TEMPORARY = pl.col("a_type") == TYPE_TEMPORARY_LABEL
 
 
 def filter_police_prefecture(df: pl.DataFrame, publish: bool) -> pl.DataFrame:
@@ -48,9 +46,8 @@ def filter_police_prefecture(df: pl.DataFrame, publish: bool) -> pl.DataFrame:
     return df.filter(~is_prefecture)
 
 
-def compute_regulation_fields(df: pl.DataFrame, today: date) -> pl.DataFrame:
-    """The regulation half of the canonical model, and the perimeter filter again, for a
-    frozen extract replayed after some acts ended.
+def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
+    """The regulation half of the canonical model.
 
     `1101` « N° d'arrêté » is unique and stable for the life of the act, in both its
     shapes (`2021T113851`, `1996-10345`): used as is, so two acts can never collide.
@@ -59,7 +56,6 @@ def compute_regulation_fields(df: pl.DataFrame, today: date) -> pl.DataFrame:
         df.pipe(_discard_unnumbered)
         .pipe(_discard_unknown_types)
         .pipe(_discard_out_of_state)
-        .pipe(_discard_unusable_temporaries, today)
         .pipe(_regulation_columns)
     )
 
@@ -99,31 +95,6 @@ def _discard_out_of_state(df: pl.DataFrame) -> pl.DataFrame:
             f"{count_by(dropped, 'a_state')}"
         )
     return df.filter(kept_state)
-
-
-def _discard_unusable_temporaries(df: pl.DataFrame, today: date) -> pl.DataFrame:
-    expired = df.filter(IS_TEMPORARY & (pl.col("a_end_date") < today).fill_null(False))
-    if expired.height:
-        logger.warning(
-            f"Dropping {expired.height} rows of {expired['a_identifier'].n_unique()} temporary "
-            f"regulations that ended before {today}"
-        )
-    undated = df.filter(IS_TEMPORARY & pl.col("a_end_date").is_null())
-    if undated.height:
-        logger.warning(
-            f"Dropping {undated.height} rows of {undated['a_identifier'].n_unique()} temporary "
-            "regulations without an end date: nothing would ever close them"
-        )
-    unstarted = df.filter(IS_TEMPORARY & pl.col("a_start_date").is_null())
-    if unstarted.height:
-        logger.warning(
-            f"Dropping {unstarted.height} rows of {unstarted['a_identifier'].n_unique()} "
-            "temporary regulations without a start date: the write date would stand in"
-        )
-    return df.filter(
-        ~IS_TEMPORARY
-        | ((pl.col("a_end_date") >= today) & pl.col("a_start_date").is_not_null()).fill_null(False)
-    )
 
 
 def _regulation_columns(df: pl.DataFrame) -> pl.DataFrame:
@@ -171,7 +142,9 @@ def _regulation_columns(df: pl.DataFrame) -> pl.DataFrame:
 def compute_period_fields(df: pl.DataFrame, today: date) -> pl.DataFrame:
     """`period_*`, from the dates of the regulation — measures carry none of their own."""
     return (
-        df.pipe(_discard_implausible_dates, today).pipe(_warn_long_or_undated).pipe(_period_columns)
+        df.pipe(_discard_implausible_dates, today)
+        .pipe(_warn_undated_permanents)
+        .pipe(_period_columns)
     )
 
 
@@ -197,16 +170,7 @@ def _discard_implausible_dates(df: pl.DataFrame, today: date) -> pl.DataFrame:
     return df.filter(~pl.col("a_identifier").is_in(rejected))
 
 
-def _warn_long_or_undated(df: pl.DataFrame) -> pl.DataFrame:
-    long_running = df.filter(
-        ~IS_PERMANENT
-        & ((pl.col("a_end_date") - pl.col("a_start_date")).dt.total_days() > 365).fill_null(False)
-    )
-    if long_running.height:
-        logger.warning(
-            f"{long_running['a_identifier'].n_unique()} temporary regulations last more than a "
-            f"year ({long_running.height} rows): kept, but they widen the broadcast window"
-        )
+def _warn_undated_permanents(df: pl.DataFrame) -> pl.DataFrame:
     undated = df.filter(IS_PERMANENT & pl.col("a_start_date").is_null())
     if undated.height:
         logger.warning(

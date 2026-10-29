@@ -12,6 +12,7 @@ from integrations.co_paris.eudonet.data_source_integration import (
 from run.organization import BaseIntegration
 from settings import OrganizationSettings
 from tests.co_paris.eudonet_fixture import read_eudonet_from_the_fixture
+from toolkit.rules import period
 
 
 class OfflineSettings:
@@ -163,6 +164,7 @@ def test_the_fixture_locations_reach_the_api_field_by_field(
     integration, captured_regulations, monkeypatch
 ):
     monkeypatch.setattr(data_source_integration, "today_in_paris", lambda: date(2026, 10, 23))
+    monkeypatch.setattr(period, "today_in_paris", lambda: date(2026, 10, 23))
     integration.integrate_regulations()
     locations = {
         regulation.identifier: [

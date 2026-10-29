@@ -1,8 +1,6 @@
 import json
-from datetime import date, datetime
 from typing import Any
 from urllib.parse import urlparse
-from zoneinfo import ZoneInfo
 
 import polars as pl
 from loguru import logger
@@ -10,7 +8,8 @@ from loguru import logger
 from canonical.source import BaseDataSourceIntegration
 from dialog.calls import DialogApi
 from sync.snapshot import state_dir
-from toolkit.transforms.local_time import PARIS
+from toolkit.rules.period import DATES_MISSING, EXPIRED, LONG_DURATION
+from toolkit.transforms.local_time import today_in_paris
 
 from .client import EudonetClient, EudonetError
 from .extraction import extract_tables
@@ -54,17 +53,15 @@ PRODUCTION_HOST = "dialog.beta.gouv.fr"
 MAX_LOCATIONS_PER_REGULATION = 1000
 
 
-def today_in_paris() -> date:
-    """The current day on the French calendar, which is the one Eudonet dates are on."""
-    return datetime.now(ZoneInfo(PARIS)).date()
-
-
 class DataSourceIntegration(BaseDataSourceIntegration):
     name = "eudonet"
     identifier_prefix = IDENTIFIER_PREFIX
     raw_data_schema = EudonetRawDataSchema
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
+    # The Eudonet query already leaves out the temporaries that ended; a replayed extract
+    # may still hold some.
+    rules = (EXPIRED, DATES_MISSING, LONG_DURATION)
     numbers_published_elsewhere: dict[str, str] | None = None
 
     def fetch_raw_data(self) -> pl.DataFrame:
@@ -92,7 +89,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         today = today_in_paris()
         return (
             raw_data.pipe(filter_police_prefecture, self._publishes_police_prefecture())
-            .pipe(compute_regulation_fields, today)
+            .pipe(compute_regulation_fields)
             .pipe(discard_published_elsewhere, self.numbers_published_elsewhere)
             .pipe(compute_measure_fields)
             .pipe(compute_vehicle_fields)
