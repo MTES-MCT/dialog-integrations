@@ -800,3 +800,23 @@ def test_a_closure_that_cannot_be_rebuilt_does_not_stop_the_others(monkeypatch, 
 
     assert api.put == [f"{PREFIX}gone"]
     assert (outcome.closed, outcome.errors) == (1, 1)
+
+
+def test_a_closure_that_would_lose_a_threshold_deletes_the_regulation(monkeypatch, tmp_path):
+    """The read carries a tonnage without its vehicle type: rather than left in force, or
+    sent back as a ban on every vehicle, the regulation is deleted."""
+    heavy = _read_of(f"{PREFIX}heavy")
+    heavy["measures"][0]["vehicleSet"] = {
+        "restrictedTypes": [],
+        "maxCharacteristics": [{"name": "weight", "value": 3.5}],
+    }
+    api = _ReadingApi({f"{PREFIX}heavy": heavy})
+    integration = _closing_org(
+        monkeypatch, tmp_path, [f"{PREFIX}a"], [f"{PREFIX}a", f"{PREFIX}heavy"], api
+    )
+
+    outcome = integration.integrate_regulations()
+
+    assert api.put == [] and api.deleted == [f"{PREFIX}heavy"]
+    assert (outcome.closed, outcome.deleted, outcome.errors) == (0, 1, 0)
+    assert set(_snapshot(tmp_path)) == {f"{PREFIX}a"}
