@@ -128,6 +128,9 @@ def _vehicle_set_from_read(vehicle_set: Any) -> dict:
 def _type_names(items: Any) -> list[str]:
     names: list[str] = []
     for item in items or []:
+        # Read back as its label with `isOther` ("Services publics"), never as `other`.
+        if isinstance(item, Mapping) and item.get("isOther"):
+            raise ClosureNotRebuildable("an 'other' vehicle type cannot be rebuilt")
         name = item.get("name") if isinstance(item, Mapping) else item
         if name is None:
             raise ClosureNotRebuildable(f"unreadable vehicle type {item!r}")

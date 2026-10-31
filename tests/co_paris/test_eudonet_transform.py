@@ -15,6 +15,7 @@ from canonical.regulation_measure import RegulationMeasure
 from integrations.co_paris.eudonet import location_filters
 from integrations.co_paris.eudonet.data_source_integration import (
     DataSourceIntegration,
+    add_split_order,
 )
 from integrations.co_paris.eudonet.location_filters import (
     discard_location_complements,
@@ -38,11 +39,13 @@ from integrations.co_paris.eudonet.raw_rows import (
 )
 from integrations.co_paris.eudonet.regulations import (
     IDENTIFIER_PREFIX,
+    TITLE_SAYS_REPEALED,
     compute_period_fields,
     compute_regulation_fields,
     filter_police_prefecture,
 )
 from integrations.co_paris.eudonet.vehicles import (
+    EXEMPTION_IN_TITLE_ONLY,
     PEDESTRIAN_OR_CYCLE_VEHICLES,
     compute_vehicle_fields,
 )
@@ -220,6 +223,44 @@ def test_the_title_survives_a_word_paste():
     )
     title = compute_regulation_fields(make_frame(row)).get_column("regulation_title")[0]
     assert title == "Arrêté n° 2024P10001 — Réglementant le stationnement"
+
+
+@pytest.mark.parametrize(
+    "raw_title, cleaned",
+    [
+        (
+            'dans le 1</font><font face="Marianne">4</font><sup>e</sup> arrondissement',
+            "dans le 14e arrondissement",
+        ),
+        ("C<strong>oncernant la fermeture</strong>", "Concernant la fermeture"),
+        ("Paris 16<sup>ème </sup>arrondissement", "Paris 16ème arrondissement"),
+        ("rue Bardinet<br />à Paris</p><p>suite", "rue Bardinet à Paris suite"),
+    ],
+)
+def test_formatting_tags_do_not_cut_words(raw_title, cleaned):
+    row = make_row(a_title_html=raw_title)
+    title = compute_regulation_fields(make_frame(row)).get_column("regulation_title")[0]
+    assert title == f"Arrêté n° 2024P10001 — {cleaned}"
+
+
+@pytest.mark.parametrize(
+    "title, left_out",
+    [
+        ("ABROGE_par_arrêt_conjoint_2026P0050_portant création d'une aire piétonne", True),
+        (
+            "Voiries Souterraines des Halles à PARIS Centre / Abrogé par l'arrêté n° 2025P14099",
+            True,
+        ),
+        ("rue des Ternes, à Paris 17ème arrondissement article 1er abrogé", True),
+        ("abrogeant l'arrêté n° 2014-01031 du 16 décembre 2014", False),
+        ("régularisation de l'arrêté n° 2010-00434 abrogé par l'arrêté n° 2014P0193", False),
+        ("portant abrogation de l'arrêté préfectoral n° 95-11067", False),
+    ],
+)
+def test_a_regulation_whose_title_says_it_is_repealed_is_left_out(title, left_out):
+    regulations = compute_regulation_fields(make_frame(make_row(a_title_html=title)))
+    result = apply_rules(regulations, [TITLE_SAYS_REPEALED])
+    assert result.frame.is_empty() is left_out
 
 
 @pytest.mark.parametrize("raw_title", [None, "", "   ", "<p></p>", "&nbsp;"])
@@ -427,6 +468,14 @@ def test_every_location_of_a_measure_shares_its_group_key():
     df = pipeline(make_row(l_file_id=1), make_row(l_file_id=2), make_row(m_file_id=11))
     assert df.get_column("measure_group_key").to_list() == ["10", "10", "11"]
     assert DataSourceIntegration.group_locations_by_measure
+
+
+def test_slices_follow_the_eudonet_order_whatever_the_order_read():
+    """Cut above the ceiling, a regulation keeps the same rows in each slice every night."""
+    pairs = ((11, 3), (10, 2), (11, 1), (10, 4))
+    rows = [make_row(m_file_id=measure, l_file_id=location) for measure, location in pairs]
+    df = add_split_order(pipeline(*rows)).sort("regulation_split_order")
+    assert df.select("m_file_id", "l_file_id").rows() == [(10, 2), (10, 4), (11, 1), (11, 3)]
 
 
 def test_a_pedestrian_area_is_a_ban_with_local_access_and_a_walking_pace_twin():
@@ -713,6 +762,27 @@ def test_an_unreadable_gauge_reaches_the_rules_naming_no_vehicle(label):
     result = apply_rules(pipeline(row), [THRESHOLD_MISSING], canonical=True)
 
     assert result.frame.is_empty()
+
+
+@pytest.mark.parametrize(
+    "title, params, left_out",
+    [
+        ("portant interdiction d'arrêt sauf aux véhicules de police", [], True),
+        (
+            "portant interdiction d'arrêt sauf aux véhicules de police",
+            [["dérogation pour véhicule", "aux véhicules des services de police"]],
+            False,
+        ),
+        ("portant interdiction d'arrêt rue de Test", [], False),
+    ],
+)
+def test_an_exemption_written_in_the_title_only_leaves_the_measure_out(title, params, left_out):
+    row = make_row(
+        a_title_html=title,
+        m_params=[["véhicule concerné (3)", "à tous les véhicules"], *params],
+    )
+    result = apply_rules(pipeline(row), [EXEMPTION_IN_TITLE_ONLY])
+    assert result.frame.is_empty() is left_out
 
 
 @pytest.mark.parametrize(

@@ -67,8 +67,10 @@ def apply(
     deleted = delete_all(integration, deletions)
     closed_digests: dict[str, Digest] = {}
     if plan.closures is not None:
-        closed_digests = close_all(integration, closures, closed_at)
+        closed_digests, unclosable = close_all(integration, closures, closed_at)
         outcome.closed = len(closed_digests)
+        # Left open, it would stay in force in DiaLog although it left the source.
+        deleted += delete_all(integration, unclosable)
 
     outcome.created = len(created)
     outcome.updated = len(updated)
@@ -77,7 +79,7 @@ def apply(
     failed = (
         (unwritten - set(lost))
         | (set(deletions) - set(deleted))
-        | (set(closures) - set(closed_digests))
+        | (set(closures) - set(closed_digests) - set(deleted))
     )
     outcome.rejections, causes = split_failures(sorted(failed), write_failures)
     outcome.error_causes |= causes
@@ -170,13 +172,15 @@ def update_all(
 
 def close_all(
     integration: BaseIntegration, identifiers: Sequence[str], closed_at: datetime
-) -> dict[str, Digest]:
+) -> tuple[dict[str, Digest], list[str]]:
     """Bring the end date of every identifier back to `closed_at`, keeping it in DiaLog.
 
     The source no longer has it, so it is read back from DiaLog and rebuilt. Returns the
-    digest of every regulation now closed, for the snapshot: tomorrow skips it unread.
+    digest of every regulation now closed, for the snapshot: tomorrow skips it unread; and
+    those the read cannot rebuild faithfully, to delete instead.
     """
     closed: dict[str, Digest] = {}
+    unclosable: list[str] = []
     for index, identifier in enumerate(identifiers):
         logger.info(f"Closing regulation {index + 1}/{len(identifiers)}: {identifier}")
         read = integration.api.get(identifier)
@@ -187,7 +191,8 @@ def close_all(
             regulation = PostApiRegulationsAddBody.from_dict(closed_payload)
             digest = compute_regulation_digest(regulation)
         except ClosureNotRebuildable as e:
-            logger.error(f"Cannot close {identifier}, it would lose a detail: {e}")
+            logger.warning(f"Cannot close {identifier}, it would lose a detail: {e}; deleting it")
+            unclosable.append(identifier)
             continue
         except Exception as e:
             # A read the rebuild does not expect: this one waits, the others go on.
@@ -207,7 +212,7 @@ def close_all(
 
     if identifiers:
         logger.success(f"Finished closing {len(closed)}/{len(identifiers)} regulations")
-    return closed
+    return closed, unclosable
 
 
 def delete_all(integration: BaseIntegration, identifiers: Sequence[str]) -> list[str]:

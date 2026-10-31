@@ -48,7 +48,7 @@ def save_snapshots(
     remaining |= set(plan.frozen)
     if plan.closures is not None:
         remaining |= set(plan.already_ended) | (
-            set(plan.closures.identifiers) - set(written.closed_digests)
+            set(plan.closures.identifiers) - set(written.closed_digests) - set(written.deleted)
         )
     carried.update({i: previous[i] for i in remaining if i in previous and i not in carried})
     write_snapshots(

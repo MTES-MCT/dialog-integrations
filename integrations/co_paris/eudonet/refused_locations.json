@@ -1,5 +1,5 @@
 {
-  "source": "DiaLog staging probe of 2026-10-19: 316 refused regulations probed",
+  "source": "DiaLog staging probes of 2026-10-19 (316 refused regulations) and 2026-10-31 (8)",
   "locations": [
     {"l_file_id": 608606, "regulation": "2012P0021", "road": "Rue Louis Pasteur Vallery-Radot", "from": "4", "to": "Rue Gérard de Nerval", "status": 400, "motive": "La géolocalisation de la voie entre ces points a échoué"},
     {"l_file_id": 608727, "regulation": "2012P0025", "road": "Rue Letort", "from": "77", "to": "Rue Championnet", "status": 400, "motive": "La géolocalisation de la voie entre ces points a échoué"},
@@ -193,6 +193,7 @@
     {"l_file_id": 619430, "regulation": "2013P0862", "road": "Rue Saint-Charles", "from": "Rue Ginoux", "to": "Rue Héricart", "status": 400, "motive": "Les deux rues spécifiées ne sont pas en intersection"},
     {"l_file_id": 619433, "regulation": "2013P0863", "road": "Rue Adolphe Mille", "from": "8", "to": "NON DENOMMEE ED/19", "status": 400, "motive": "Cette adresse n’est pas reconnue"},
     {"l_file_id": 619436, "regulation": "2013P0863", "road": "Rue d'Aubervilliers", "from": "Rue Bellot", "to": "Rue du Département", "status": 400, "motive": "Cette adresse n’est pas reconnue"},
+    {"l_file_id": 619445, "regulation": "2013P0863", "road": "Rue Emile Bollaert", "from": "Rue Jacques Duchesne", "to": "Rue Lounès Matoub", "status": 400, "motive": "Les deux rues spécifiées ne sont pas en intersection"},
     {"l_file_id": 619461, "regulation": "2013P0864", "road": "Rue d'Aumale", "from": "Rue Taitbout", "to": "RUE DE LA ROCHEFOUCAULD", "status": 400, "motive": "Cette adresse n’est pas reconnue"},
     {"l_file_id": 619465, "regulation": "2013P0864", "road": "Rue Duperré", "from": "Passage Collin", "to": "Rue de Douai", "status": 400, "motive": "Cette adresse n’est pas reconnue"},
     {"l_file_id": 619466, "regulation": "2013P0864", "road": "Rue du Faubourg Poissonnière", "from": "Rue d'Abbeville", "to": "Rue de Chabrol", "status": 400, "motive": "Cette adresse n’est pas reconnue"},
@@ -553,6 +554,11 @@
     {"l_file_id": 941182, "regulation": "2026E19301", "road": "Place Jacques Rueff", "from": null, "to": null, "status": 400, "motive": "Cette adresse n’est pas reconnue"},
     {"l_file_id": 941258, "regulation": "2026T19334", "road": "Rue Emile Reynaud", "from": "10", "to": "10", "status": 400, "motive": "La géolocalisation de la voie entre ces points a échoué"},
     {"l_file_id": 941271, "regulation": "2026T19345", "road": "Boulevard de Rochechouart", "from": "Rue de Rochechouart", "to": "Boulevard de Magenta", "status": 400, "motive": "Cette adresse n’est pas reconnue"},
-    {"l_file_id": 941333, "regulation": "2026E19372", "road": "Rue Bargue", "from": "16", "to": "16", "status": 400, "motive": "Cette adresse n’est pas reconnue"}
+    {"l_file_id": 941333, "regulation": "2026E19372", "road": "Rue Bargue", "from": "16", "to": "16", "status": 400, "motive": "Cette adresse n’est pas reconnue"},
+    {"l_file_id": 941650, "regulation": "2026T19491", "road": "Rue du Chevalier de Saint-George", "from": "14", "to": "14", "status": 400, "motive": "La géolocalisation de la voie entre ces points a échoué"},
+    {"l_file_id": 941786, "regulation": "2026T19552", "road": "Boulevard de Rochechouart", "from": "Rue de Rochechouart", "to": "Boulevard de Magenta", "status": 400, "motive": "Cette adresse n’est pas reconnue"},
+    {"l_file_id": 941798, "regulation": "2026T19557", "road": "Boulevard de Rochechouart", "from": "Rue de Rochechouart", "to": "Boulevard de Magenta", "status": 400, "motive": "Cette adresse n’est pas reconnue"},
+    {"l_file_id": 941999, "regulation": "2026T19644", "road": "Rue des Petites Ecuries", "from": "Rue du Faubourg Poissonnière", "to": "Rue d'Hauteville", "status": 400, "motive": "Cette adresse n’est pas reconnue"},
+    {"l_file_id": 942340, "regulation": "2026T19802", "road": "Rue Herschel", "from": null, "to": null, "status": 400, "motive": "Cette adresse n’est pas reconnue"}
   ]
 }

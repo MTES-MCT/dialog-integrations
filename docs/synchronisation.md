@@ -16,7 +16,7 @@ class Integration(BaseIntegration):
 |---|---|
 | Création | `GET /api/organization/identifiers` — identifiant absent de DiaLog |
 | Suppression (`delete_missing`) | même endpoint — identifiant présent, **dans notre préfixe**, absent de la production du jour |
-| Clôture (`close_missing`) | même critère, mais l'arrêté **reste** : sa date de fin est ramenée à la veille de l'exécution (fin de journée, Europe/Paris). L'arrêté est relu dans DiaLog, reconstruit en corps d'écriture et renvoyé par `PUT` (`sync/closure.py`). Un arrêté déjà expiré n'est pas réécrit. Un chantier annulé avant d'avoir commencé se termine à sa date de début |
+| Clôture (`close_missing`) | même critère, mais l'arrêté **reste** : sa date de fin est ramenée à la veille de l'exécution (fin de journée, Europe/Paris). L'arrêté est relu dans DiaLog, reconstruit en corps d'écriture et renvoyé par `PUT` (`sync/closure.py`). Un arrêté déjà expiré n'est pas réécrit. Un chantier annulé avant d'avoir commencé se termine à sa date de début. Un arrêté que la relecture ne rend pas fidèlement (tonnage ou gabarit, type de véhicule « autre », zone sans géométrie calculée) est **supprimé** : clos, il perdrait sa restriction ; laissé, il resterait en vigueur |
 | Mise à jour | l'**instantané** de ce qu'on a envoyé la fois précédente, via `PUT /api/regulations` — sauf pour un arrêté à emprises `zone`, que l'API refuse en PUT (500) : il est supprimé puis recréé par le flux zone |
 
 `delete_missing` et `close_missing` s'excluent. Une source qui est un instantané de chantiers en cours (Lyon) **clôt** : l'équipe veut garder l'historique des chantiers.

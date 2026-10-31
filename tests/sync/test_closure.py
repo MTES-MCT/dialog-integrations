@@ -195,6 +195,11 @@ def test_a_street_without_computed_geometry_is_refused():
     [
         {"restrictedTypes": [], "exemptedTypes": [], "maxCharacteristics": [{"name": "w"}]},
         {"restrictedTypes": [{"name": "other"}], "exemptedTypes": [], "maxCharacteristics": []},
+        {
+            "restrictedTypes": [],
+            "exemptedTypes": [{"name": "Services publics", "isOther": True}],
+            "maxCharacteristics": [],
+        },
         {"restrictedTypes": [{"label": "?"}], "exemptedTypes": [], "maxCharacteristics": []},
     ],
 )
