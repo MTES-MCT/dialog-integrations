@@ -39,12 +39,17 @@ from .raw_rows import (
 )
 from .regulations import (
     IDENTIFIER_PREFIX,
+    TITLE_SAYS_REPEALED,
     compute_period_fields,
     compute_regulation_fields,
     filter_police_prefecture,
 )
 from .schema import EudonetRawDataSchema
-from .vehicles import PEDESTRIAN_OR_CYCLE_VEHICLES, compute_vehicle_fields
+from .vehicles import (
+    EXEMPTION_IN_TITLE_ONLY,
+    PEDESTRIAN_OR_CYCLE_VEHICLES,
+    compute_vehicle_fields,
+)
 
 CREDENTIALS_ENV_VAR = "EUDONET_PARIS_CREDENTIALS"
 
@@ -53,8 +58,9 @@ CREDENTIALS_ENV_VAR = "EUDONET_PARIS_CREDENTIALS"
 PUBLISH_POLICE_PREFECTURE = True
 PRODUCTION_HOST = "dialog.beta.gouv.fr"
 
-# Ceiling on the locations of one POST.
-MAX_LOCATIONS_PER_REGULATION = 1000
+# Every location is a named street geocoded on the BD TOPO by DiaLog: past about a hundred,
+# a POST can outlive the API timeout (a geometry sent as is holds up to 1 000).
+MAX_LOCATIONS_PER_REGULATION = 100
 
 
 class DataSourceIntegration(BaseDataSourceIntegration):
@@ -93,16 +99,24 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_regulation_fields)
             .pipe(discard_published_elsewhere, self.numbers_published_elsewhere)
             # Before the period and vehicle fields: no other rule can be judged yet.
-            .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_MEASURES, ONE_DIRECTION, ONE_WAY_STREET)
+            .pipe(
+                self.apply_rules,
+                TITLE_SAYS_REPEALED,
+                PEDESTRIAN_OR_CYCLE_MEASURES,
+                ONE_DIRECTION,
+                ONE_WAY_STREET,
+            )
             .pipe(compute_measure_fields)
             .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_VEHICLES)
             .pipe(compute_vehicle_fields)
+            .pipe(self.apply_rules, EXEMPTION_IN_TITLE_ONLY)
             .pipe(compute_period_fields, today)
             .pipe(discard_location_complements)
             .pipe(compute_location_fields)
             .pipe(discard_points_beyond_parking)
             .pipe(discard_refused_locations)
             .pipe(add_pedestrian_area_speed)
+            .pipe(add_split_order)
         )
 
     def _publishes_police_prefecture(self) -> bool:
@@ -120,3 +134,17 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         except json.JSONDecodeError:
             # `from None`: the decoding error carries the whole secret as its document.
             raise EudonetError(f"{CREDENTIALS_ENV_VAR} is not valid JSON") from None
+
+
+def add_split_order(df: pl.DataFrame) -> pl.DataFrame:
+    """Above the ceiling, the slices `-01`, `-02`… hold the same rows from one night to the
+    next, in Eudonet order, each measure in as few of them as possible. The rows keep their
+    place: below the ceiling the payload is unchanged."""
+    return (
+        df.with_row_index("_row")
+        .sort("m_file_id", "measure_group_key", "l_file_id", nulls_last=True)
+        .with_row_index("regulation_split_order")
+        .sort("_row")
+        .drop("_row")
+        .with_columns(pl.col("regulation_split_order").cast(pl.Int64))
+    )

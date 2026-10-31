@@ -4,6 +4,7 @@ import polars as pl
 from loguru import logger
 
 from api.dia_log_client.models import PeriodRecurrenceTypeEnum, PostApiRegulationsAddBodySubject
+from toolkit.rules.rule import Nature, Outcome, Rule
 from toolkit.transforms.local_time import end_of_local_day, start_of_local_day
 from toolkit.transforms.titles import OTHER_CATEGORY_TEXT_MAX_LENGTH, truncate, truncate_text
 
@@ -24,6 +25,20 @@ IDENTIFIER_PREFIX = "PARIS-EUDO-"
 SUBJECT_OTHER = PostApiRegulationsAddBodySubject.OTHER.value
 
 IS_PERMANENT = pl.col("a_type") == TYPE_PERMANENT_LABEL
+
+# "ABROGE_par…", "… / Abrogé par l'arrêté …", "article 1er abrogé" : the act itself, still
+# "En vigueur" in Eudonet; not "abrogeant l'arrêté …", nor "l'arrêté n° … abrogé par …".
+# Polars has no look-ahead: the participle ends where letters do ("abrogeant" goes on).
+_REPEALED = r"abrog[ée]e?s?(?:\P{L}|$)"
+_TITLE_SAYS_REPEALED = rf"(?i)(?:^|—|/)\s*{_REPEALED}|\barticle\s+\S+\s+{_REPEALED}"
+
+TITLE_SAYS_REPEALED = Rule(
+    code="TITLE_SAYS_REPEALED",
+    label="arrêté en vigueur dont le titre dit abrogé",
+    nature=Nature.DATA_DEFECT,
+    outcome=Outcome.DROP,
+    valid=~pl.col("regulation_title").str.contains(_TITLE_SAYS_REPEALED).fill_null(False),
+)
 
 
 def filter_police_prefecture(df: pl.DataFrame, publish: bool) -> pl.DataFrame:

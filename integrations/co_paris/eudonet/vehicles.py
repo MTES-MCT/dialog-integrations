@@ -8,6 +8,7 @@ from loguru import logger
 from api.dia_log_client.models import (
     PostApiRegulationsAddBodyMeasuresItemVehicleSetType0ExemptedTypesType0Item as VehicleExemptedTypeEnum,  # noqa: E501
 )
+from toolkit.rules.rule import Nature, Outcome, Rule
 from toolkit.rules.vehicles import pedestrians_or_cycles_named
 from toolkit.transforms.titles import truncate_text
 
@@ -30,6 +31,19 @@ from .vocabulary import (
 # the longest string the API is known to accept (`title`) rather than left unbounded.
 OTHER_TYPE_TEXT_MAX_LENGTH = 255
 FREE_TEXT_SEPARATOR = " ; "
+
+# An exemption written in the title only ("… sauf aux véhicules de police") would go out
+# without it, wider than the act.
+EXEMPTION_IN_TITLE_ONLY = Rule(
+    code="EXEMPTION_IN_TITLE_ONLY",
+    label="dérogation écrite dans le seul titre",
+    nature=Nature.DATA_DEFECT,
+    outcome=Outcome.DROP,
+    valid=~pl.col("regulation_title")
+    .str.contains(r"(?i)\bsauf\s+(?:aux?|pour|les?|la)\b")
+    .fill_null(False)
+    | (pl.col("vehicle_exempted_types").list.len() > 0).fill_null(False),
+)
 
 VEHICLE_COLUMNS: dict[str, Any] = {
     "vehicle_all_vehicles": pl.Boolean,
