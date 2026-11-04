@@ -49,6 +49,17 @@ HEAVYWEIGHT_ABOVE_LIMIT = Rule(
     | (pl.col("vehicle_heavyweight_max_weight") <= 44),
 )
 
+# Below 3.5 t a vehicle is no heavy goods vehicle, yet the measure would read "heavy goods
+# vehicles over 1.5 t": not a weight signs use. Opt-in, source by source.
+HEAVYWEIGHT_BELOW_HEAVY_GOODS = Rule(
+    code="HEAVYWEIGHT_BELOW_HEAVY_GOODS",
+    label="tonnage sous 3,5 t",
+    nature=Nature.SUSPICIOUS,
+    outcome=Outcome.DROP,
+    valid=pl.col("vehicle_heavyweight_max_weight").is_null()
+    | (pl.col("vehicle_heavyweight_max_weight") >= 3.5),
+)
+
 
 _RESTRICTED = pl.col("vehicle_restricted_types")
 _SIZES = ("vehicle_max_height", "vehicle_max_width", "vehicle_max_length")

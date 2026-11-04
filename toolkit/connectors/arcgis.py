@@ -65,3 +65,23 @@ def _page(query_url: str, where: str, offset: int, size: int) -> list[dict]:
     )
     response.raise_for_status()
     return response.json().get("features", [])
+
+
+def coded_values(query_url: str, field: str) -> dict[int | str, str]:
+    """The names the layer's domain gives the codes of `field` (a road code and its street,
+    say); empty when the field has no coded domain.
+
+    Raises on a field gone from the layer, and on an error, which ArcGIS answers with
+    HTTP 200.
+    """
+    layer_url = query_url.removesuffix("/query")
+    response = requests.get(layer_url, params={"f": "json"}, timeout=DOWNLOAD_TIMEOUT)
+    response.raise_for_status()
+    payload = response.json()
+    if "error" in payload:
+        raise RuntimeError(f"{layer_url} answered an error: {payload['error']}")
+    for described in payload.get("fields", []):
+        if described.get("name") == field:
+            domain = described.get("domain") or {}
+            return {value["code"]: value["name"] for value in domain.get("codedValues", [])}
+    raise KeyError(f"{layer_url} has no field {field!r}")

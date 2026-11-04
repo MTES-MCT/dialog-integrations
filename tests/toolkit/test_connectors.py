@@ -118,3 +118,42 @@ def test_an_empty_layer_is_an_empty_frame(monkeypatch):
     _arcgis_server(monkeypatch, announced=0, cap=1000)
 
     assert arcgis.read_layer("https://example/FeatureServer/0/query").is_empty()
+
+
+def test_a_coded_field_reads_its_names_from_the_layer_description(monkeypatch):
+    calls = []
+
+    def get(url, params, timeout):
+        calls.append(url)
+        return _Response(
+            payload={
+                "fields": [
+                    {"name": "tonnage", "domain": None},
+                    {
+                        "name": "id_voie",
+                        "domain": {"codedValues": [{"code": 108, "name": "Rue des Arts"}]},
+                    },
+                ]
+            }
+        )
+
+    monkeypatch.setattr(arcgis.requests, "get", get)
+
+    assert arcgis.coded_values("https://example/FeatureServer/0/query", "id_voie") == {
+        108: "Rue des Arts"
+    }
+    assert arcgis.coded_values("https://example/FeatureServer/0/query", "tonnage") == {}
+    assert calls[0] == "https://example/FeatureServer/0"
+    with pytest.raises(KeyError):
+        arcgis.coded_values("https://example/FeatureServer/0/query", "renamed")
+
+
+def test_an_error_answered_with_http_200_is_no_empty_domain(monkeypatch):
+    monkeypatch.setattr(
+        arcgis.requests,
+        "get",
+        lambda url, params, timeout: _Response(payload={"error": {"code": 500}}),
+    )
+
+    with pytest.raises(RuntimeError):
+        arcgis.coded_values("https://example/FeatureServer/0/query", "id_voie")

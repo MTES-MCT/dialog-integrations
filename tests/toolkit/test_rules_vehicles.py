@@ -4,6 +4,7 @@ import pytest
 from toolkit.rules.apply import apply_rules
 from toolkit.rules.vehicles import (
     HEAVYWEIGHT_ABOVE_LIMIT,
+    HEAVYWEIGHT_BELOW_HEAVY_GOODS,
     THRESHOLD_MISSING,
     pedestrian_or_cycle_sign,
     pedestrians_or_cycles_named,
@@ -56,6 +57,20 @@ def test_a_tonnage_above_the_legal_maximum_is_left_out(weight, left_out):
     )
 
     result = apply_rules(df, [HEAVYWEIGHT_ABOVE_LIMIT], canonical=True)
+
+    assert result.frame.is_empty() is left_out
+
+
+@pytest.mark.parametrize(
+    "weight, left_out", [(1.5, True), (2.5, True), (3.5, False), (10.0, False), (None, False)]
+)
+def test_a_tonnage_below_a_heavy_goods_vehicle_is_left_out(weight, left_out):
+    df = pl.DataFrame(
+        {"vehicle_heavyweight_max_weight": [weight]},
+        schema={"vehicle_heavyweight_max_weight": pl.Float64},
+    )
+
+    result = apply_rules(df, [HEAVYWEIGHT_BELOW_HEAVY_GOODS], canonical=True)
 
     assert result.frame.is_empty() is left_out
 

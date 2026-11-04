@@ -102,3 +102,49 @@ COORDINATES_OUT_OF_BOUNDS = Rule(
         _coordinates_in_bounds, return_dtype=pl.Boolean, skip_nulls=False
     ),
 )
+
+
+def twin_trace(twin: pl.Expr) -> Rule:
+    """Another trace runs alongside (`overlaps.twin_traces`): a twin carriageway, or one
+    trace per direction."""
+    return Rule(
+        code="TWIN_TRACE",
+        label="tracé doublé en parallèle",
+        nature=Nature.SUSPICIOUS,
+        outcome=Outcome.DROP,
+        valid=~twin,
+    )
+
+
+def drawn_twice(twice: pl.Expr) -> Rule:
+    """The same stretch drawn again, shorter (`overlaps.drawn_twice`)."""
+    return Rule(
+        code="DRAWN_TWICE",
+        label="même tronçon tracé deux fois",
+        nature=Nature.SUSPICIOUS,
+        outcome=Outcome.DROP,
+        valid=~twice,
+    )
+
+
+def extends_outside_perimeter(outside: pl.Expr) -> Rule:
+    """The trace runs more than a few metres past the organisation's contour
+    (`perimeter.extends_outside`): that stretch is a neighbour's road."""
+    return Rule(
+        code="EXTENDS_OUTSIDE_PERIMETER",
+        label="tracé qui déborde du périmètre",
+        nature=Nature.OUT_OF_SCOPE,
+        outcome=Outcome.DROP,
+        valid=~outside.fill_null(False),
+    )
+
+
+# DiaLog refuses an emprise outside the organisation's territory, and with it the whole
+# regulation.
+OUTSIDE_PERIMETER = Rule(
+    code="OUTSIDE_PERIMETER",
+    label="hors du périmètre de l'organisation",
+    nature=Nature.OUT_OF_SCOPE,
+    outcome=Outcome.DROP,
+    valid=~pl.col("_outside_perimeter").fill_null(False),
+)

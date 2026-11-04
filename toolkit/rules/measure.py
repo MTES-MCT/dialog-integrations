@@ -12,3 +12,15 @@ SPEED_MISSING = Rule(
     valid=(pl.col("measure_type_") != "speedLimitation").fill_null(True)
     | pl.col("measure_max_speed").is_not_null(),
 )
+
+
+def contradicted_value(contradicted: pl.Expr) -> Rule:
+    """Another stretch of the same road sets another value for the same traffic, over the
+    flagged one (`overlaps.contradicted_geometry`)."""
+    return Rule(
+        code="CONTRADICTED_VALUE",
+        label="valeurs différentes pour un même sens d'un même tronçon",
+        nature=Nature.DATA_DEFECT,
+        outcome=Outcome.DROP,
+        valid=~contradicted,
+    )

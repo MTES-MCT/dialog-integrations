@@ -14,10 +14,14 @@ contours: what only the simplification's slack accepts lies on the neighbour's t
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 
+import geopandas as gpd
+import numpy as np
 import polars as pl
 import requests
+import shapely
 from loguru import logger
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
@@ -85,15 +89,8 @@ class Perimeter:
     def intersects(self, geojson: str | None) -> bool | None:
         """DiaLog's test for one emprise, plus the exact contour; None when the geometry is
         missing or unreadable, which the API would refuse for another reason."""
-        if geojson is None:
-            return None
-        try:
-            geometry = shape(json.loads(geojson))
-        except Exception:  # noqa: BLE001 — anything shapely or json refuses to read
-            return None
-        if not self.geometry.intersects(geometry):
-            return False
-        return self.exact is None or self.exact.intersects(geometry)
+        geometry = _read(geojson)
+        return None if geometry is None else _dialog_accepts(self)(geometry)
 
 
 def discard_outside_perimeter(
@@ -104,21 +101,7 @@ def discard_outside_perimeter(
     Rows without a readable geometry are kept: this filter only reproduces the competence
     check.
     """
-    prepared = prep(perimeter.geometry)
-    exact = prep(perimeter.exact) if perimeter.exact is not None else None
-
-    def keep(geojson: str | None) -> bool:
-        if geojson is None:
-            return True
-        try:
-            geometry = shape(json.loads(geojson))
-        except Exception:  # noqa: BLE001 — anything shapely or json refuses to read
-            return True
-        return prepared.intersects(geometry) and (exact is None or exact.intersects(geometry))
-
-    inside = df.get_column(geometry_column).map_elements(
-        keep, return_dtype=pl.Boolean, skip_nulls=False
-    )
+    inside = ~refused(df.get_column(geometry_column), perimeter)
     n_dropped = df.height - inside.sum()
     if n_dropped:
         logger.info(
@@ -127,3 +110,48 @@ def discard_outside_perimeter(
             "adds along the boundary)"
         )
     return df.filter(inside)
+
+
+def _dialog_accepts(perimeter: Perimeter) -> Callable[[BaseGeometry], bool]:
+    prepared = prep(perimeter.geometry)
+    exact = prep(perimeter.exact) if perimeter.exact is not None else None
+    return lambda geometry: (
+        prepared.intersects(geometry) and (exact is None or exact.intersects(geometry))
+    )
+
+
+def refused(geojson: pl.Series, perimeter: Perimeter) -> pl.Series:
+    """Whether DiaLog would refuse each emprise, what `discard_outside_perimeter` drops; false
+    for a missing or unreadable one, which other rules judge."""
+    accepts = _dialog_accepts(perimeter)
+
+    def is_refused(value: str | None) -> bool:
+        geometry = _read(value)
+        return geometry is not None and not accepts(geometry)
+
+    return geojson.map_elements(is_refused, return_dtype=pl.Boolean, skip_nulls=False)
+
+
+# A trace drawn to the middle of a boundary road, or past it by a few metres, still belongs
+# to the commune; 10 m beyond it is another's road.
+MAX_OUTSIDE_M = 10.0
+
+
+def extends_outside(geojson: pl.Series, perimeter: Perimeter) -> pl.Series:
+    """Whether more than `MAX_OUTSIDE_M` of the trace lies outside the exact contour, in
+    metres (Lambert-93); false for a missing trace."""
+    area = perimeter.exact if perimeter.exact is not None else perimeter.geometry
+    contour = gpd.GeoSeries([area], crs=4326).to_crs(2154).iloc[0]
+    traces = gpd.GeoSeries(shapely.from_geojson(geojson.to_numpy()), crs=4326).to_crs(2154)
+    outside = shapely.length(shapely.difference(traces.to_numpy(), contour))
+    return pl.Series(np.nan_to_num(outside) > MAX_OUTSIDE_M)
+
+
+def _read(geojson: str | None) -> BaseGeometry | None:
+    """None when missing or unreadable."""
+    if geojson is None:
+        return None
+    try:
+        return shape(json.loads(geojson))
+    except Exception:  # noqa: BLE001 — anything shapely or json refuses to read
+        return None

@@ -10,6 +10,8 @@ from toolkit.transforms.perimeter import (
     SIMPLIFICATION_BY_CODE_TYPE,
     Perimeter,
     discard_outside_perimeter,
+    extends_outside,
+    refused,
 )
 
 # A 1° × 1° square: longitude 4 → 5, latitude 45 → 46.
@@ -110,3 +112,24 @@ def test_dialog_s_tolerances_are_the_ones_read_in_its_code():
 def test_unknown_code_type_is_refused():
     with pytest.raises(ValueError):
         Perimeter.fetch("canton", "1")
+
+
+def test_a_flagged_row_is_one_the_filter_would_drop(perimeter):
+    df = pl.DataFrame({"geometry": [INSIDE, CROSSING, OUTSIDE, None]})
+
+    flags = refused(df["geometry"], perimeter)
+
+    assert flags.to_list() == [False, False, True, False]
+    assert df.filter(~flags).height == discard_outside_perimeter(df, perimeter).height
+
+
+def test_a_trace_reaching_more_than_ten_metres_beyond_the_border_extends_outside(perimeter):
+    # Along latitude 45.5, 0.0001° of longitude is about 7.8 m.
+    within = line((4.9, 45.5), (5.0001, 45.5))
+    beyond = line((4.9, 45.5), (5.0003, 45.5))
+
+    assert extends_outside(pl.Series([within, beyond, None]), perimeter).to_list() == [
+        False,
+        True,
+        False,
+    ]
