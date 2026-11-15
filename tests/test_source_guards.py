@@ -8,7 +8,7 @@ from canonical.source import BaseDataSourceIntegration
 from run.organization import BaseIntegration
 from sync.plan import IdentifierOutsidePrefixError, MissingPrefixError
 from sync.snapshot import SnapshotStore
-from sync.totals import Totals, TotalsStore
+from sync.totals import Totals, TotalsStore, volume_drops
 from tests.sync_fixtures import measure_rows
 
 ORG = "OR-"
@@ -157,6 +157,13 @@ def test_a_collapsed_source_is_frozen_until_released(monkeypatch, tmp_path):
     assert sorted(_api(integration).deleted) == sorted(rows[2:])
     assert released.frozen_sources == {}
     assert store.load().sources == {"a": 1, "b": 2}  # type: ignore[union-attr]
+
+
+def test_a_small_source_is_frozen_only_under_a_lower_share():
+    previous = Totals(dialog_in_prefix=0, produced=0, sources={"small": 9, "large": 30})
+
+    assert volume_drops(previous, {"small": 6, "large": 30}) == {}
+    assert volume_drops(previous, {"small": 2, "large": 20}) == {"small": [9, 2], "large": [30, 20]}
 
 
 def test_a_source_unknown_yesterday_is_not_judged_on_its_volume(monkeypatch, tmp_path):

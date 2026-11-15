@@ -20,6 +20,10 @@ SHIFT_SHARE = 0.05
 # Below this share of yesterday's count, a source is not trusted to say what left it
 # until `--force-deletions` (chosen in October 2026).
 VOLUME_DROP_SHARE = 0.7
+# A source of a few regulations loses a third of them when works end: dp_sarthe
+# chantiers_routiers went from 9 to 6 on 2026-11-14 (three expired sites) and froze.
+SMALL_SOURCE = 30
+SMALL_SOURCE_DROP_SHARE = 0.3
 
 
 @dataclass(frozen=True)
@@ -72,7 +76,8 @@ def total_shift(previous: Totals | None, current: Totals) -> dict | None:
 
 
 def volume_drops(previous: Totals | None, produced: dict[str, int]) -> dict[str, list[int]]:
-    """Sources under `VOLUME_DROP_SHARE` of their previous count, as [before, today].
+    """Sources under `VOLUME_DROP_SHARE` of their previous count, as [before, today];
+    under `SMALL_SOURCE_DROP_SHARE` for a source of fewer than `SMALL_SOURCE` regulations.
 
     A source unknown yesterday has no baseline and is not judged.
     """
@@ -81,6 +86,9 @@ def volume_drops(previous: Totals | None, produced: dict[str, int]) -> dict[str,
     drops = {}
     for name, today in produced.items():
         before = previous.sources.get(name)
-        if before and today < VOLUME_DROP_SHARE * before:
+        if not before:
+            continue
+        share = SMALL_SOURCE_DROP_SHARE if before < SMALL_SOURCE else VOLUME_DROP_SHARE
+        if today < share * before:
             drops[name] = [before, today]
     return drops
