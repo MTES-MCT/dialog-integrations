@@ -1,10 +1,10 @@
 import json
 
-import httpx
 import polars as pl
 from loguru import logger
 from shapely.geometry import Point, mapping
 
+import external_query
 from api.dia_log_client.models import (
     MeasureTypeEnum,
     PostApiRegulationsAddBodyCategory,
@@ -41,11 +41,10 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         limit = 100
 
         while True:
-            response = httpx.get(
+            response = external_query.get(
                 TRAVAUX_VOIRIE_ENDPOINT,
                 params={"limit": limit, "offset": offset},
             )
-            response.raise_for_status()
             data = response.json()
             records.extend(data["results"])
 

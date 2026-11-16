@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import polars as pl
 import pytest
 
-from toolkit.connectors import wfs
+import external_query
 from toolkit.connectors.wfs import assert_lon_lat_bbox, features_to_dataframe, fetch_wfs_features
 
 LYON = (4.4, 45.4, 5.3, 46.0)
@@ -56,7 +56,7 @@ def test_fetch_asks_for_geojson_in_lon_lat_and_flattens_the_answer(monkeypatch):
             json=lambda: {"type": "FeatureCollection", "features": [feature({"gid": 7}, POINT)]},
         )
 
-    monkeypatch.setattr(wfs.requests, "get", fake_get)
+    monkeypatch.setattr(external_query.requests, "get", fake_get)
 
     df = fetch_wfs_features("https://example.org/ows", "ns:layer")
 
@@ -73,7 +73,7 @@ def test_an_http_error_propagates(monkeypatch):
         raise RuntimeError("503")
 
     monkeypatch.setattr(
-        wfs.requests, "get", lambda *a, **k: SimpleNamespace(raise_for_status=failing)
+        external_query.requests, "get", lambda *a, **k: SimpleNamespace(raise_for_status=failing)
     )
     with pytest.raises(RuntimeError, match="503"):
         fetch_wfs_features("https://example.org/ows", "ns:layer")

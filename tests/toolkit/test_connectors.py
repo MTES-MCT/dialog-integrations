@@ -5,6 +5,7 @@ import io
 import polars as pl
 import pytest
 
+import external_query
 from toolkit.connectors import arcgis, opendatasoft
 
 
@@ -36,7 +37,7 @@ def test_an_opendatasoft_export_is_read_and_checked_against_the_announced_count(
             return _Response(payload={"total_count": 2})
         return _Response(content=b"a;b\n1;x\n2;y\n")
 
-    monkeypatch.setattr(opendatasoft.requests, "get", get)
+    monkeypatch.setattr(external_query.requests, "get", get)
 
     df = opendatasoft.read_export(EXPORT, separator=";")
 
@@ -51,7 +52,7 @@ def test_a_parquet_export_needs_no_option(monkeypatch):
     buffer = io.BytesIO()
     pl.DataFrame({"a": [1]}).write_parquet(buffer)
     monkeypatch.setattr(
-        opendatasoft.requests,
+        external_query.requests,
         "get",
         lambda url, timeout: _Response(buffer.getvalue(), {"total_count": 1}),
     )
@@ -88,7 +89,7 @@ def _arcgis_server(monkeypatch, announced: int, cap: int):
         features = [_feature(g) for g in range(offset, min(offset + size, announced))]
         return _Response(payload={"type": "FeatureCollection", "features": features})
 
-    monkeypatch.setattr(arcgis.requests, "get", get)
+    monkeypatch.setattr(external_query.requests, "get", get)
     return pages
 
 
@@ -108,7 +109,7 @@ def test_a_layer_shorter_than_announced_fails(monkeypatch):
             return _Response(payload={"count": 3})
         return _Response(payload={"features": [_feature(0)] if params["resultOffset"] == 0 else []})
 
-    monkeypatch.setattr(arcgis.requests, "get", get)
+    monkeypatch.setattr(external_query.requests, "get", get)
 
     with pytest.raises(arcgis.IncompleteLayerError):
         arcgis.read_layer("https://example/FeatureServer/0/query")
@@ -137,7 +138,7 @@ def test_a_coded_field_reads_its_names_from_the_layer_description(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(arcgis.requests, "get", get)
+    monkeypatch.setattr(external_query.requests, "get", get)
 
     assert arcgis.coded_values("https://example/FeatureServer/0/query", "id_voie") == {
         108: "Rue des Arts"
@@ -150,7 +151,7 @@ def test_a_coded_field_reads_its_names_from_the_layer_description(monkeypatch):
 
 def test_an_error_answered_with_http_200_is_no_empty_domain(monkeypatch):
     monkeypatch.setattr(
-        arcgis.requests,
+        external_query.requests,
         "get",
         lambda url, params, timeout: _Response(payload={"error": {"code": 500}}),
     )

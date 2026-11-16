@@ -3,10 +3,10 @@ import json
 
 import geopandas as gpd
 import polars as pl
-import requests
 from loguru import logger
 from shapely.geometry import mapping
 
+import external_query
 from api.dia_log_client.models import (
     MeasureTypeEnum,
     PostApiRegulationsAddBodyCategory,
@@ -14,7 +14,6 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from canonical.source import BaseDataSourceIntegration
-from toolkit.connectors.download import DOWNLOAD_TIMEOUT
 from toolkit.rules.location import one_way_street_named
 from toolkit.transforms.periods import permanent_period
 
@@ -37,8 +36,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     def fetch_raw_data(self):
         logger.info(f"Downloading data from {URL}")
 
-        r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
-        r.raise_for_status()
+        r = external_query.get(URL)
 
         return pl.read_parquet(io.BytesIO(r.content))
 

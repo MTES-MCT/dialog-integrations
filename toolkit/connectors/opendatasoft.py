@@ -11,7 +11,7 @@ import polars as pl
 import requests
 from loguru import logger
 
-from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+import external_query
 
 FORMATS = ("parquet", "csv")
 
@@ -20,8 +20,7 @@ def read_export(url: str, **csv_options) -> pl.DataFrame:
     """Read `…/datasets/{id}/exports/{parquet|csv}?…`; `csv_options` go to `pl.read_csv`."""
     fmt = export_format(url)
     logger.info(f"Downloading data from {url}")
-    response = requests.get(url, timeout=DOWNLOAD_TIMEOUT)
-    response.raise_for_status()
+    response = external_query.get(url)
     content = io.BytesIO(response.content)
     df = pl.read_parquet(content) if fmt == "parquet" else pl.read_csv(content, **csv_options)
     _compare_with_announced_count(url, df.height)
@@ -52,8 +51,7 @@ def _compare_with_announced_count(url: str, rows: int) -> None:
     if count_url is None:
         return
     try:
-        response = requests.get(count_url, timeout=DOWNLOAD_TIMEOUT)
-        response.raise_for_status()
+        response = external_query.get(count_url)
         announced = int(response.json()["total_count"])
     except (requests.RequestException, ValueError, KeyError, TypeError) as error:
         logger.warning(f"Could not read the announced count of {url}: {error!r}")

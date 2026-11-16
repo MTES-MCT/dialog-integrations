@@ -5,6 +5,7 @@ from datetime import date
 
 import pytest
 
+import external_query
 from toolkit.rules import period
 
 
@@ -26,6 +27,13 @@ def no_network(monkeypatch):
     # A name lookup is network too, and fails on its own offline: a test whose code
     # swallows that failure would pass by accident.
     monkeypatch.setattr(socket, "getaddrinfo", refuse)
+
+
+@pytest.fixture(autouse=True)
+def no_wait_between_attempts(monkeypatch):
+    """Retries neither wait nor run out from one test to the next."""
+    monkeypatch.setattr(external_query, "WAIT_SECONDS", 0)
+    monkeypatch.setattr(external_query, "_retries_left", external_query.RETRIES_PER_RUN)
 
 
 @pytest.fixture(autouse=True)

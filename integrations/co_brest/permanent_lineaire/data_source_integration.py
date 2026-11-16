@@ -7,11 +7,11 @@ from typing import NamedTuple
 
 import geopandas as gpd
 import polars as pl
-import requests
 from loguru import logger
 from pyproj import Transformer
 from shapely.geometry import mapping
 
+import external_query
 from api.dia_log_client.models import (
     MeasureTypeEnum as MTE,
 )
@@ -21,7 +21,6 @@ from api.dia_log_client.models import (
     RoadTypeEnum,
 )
 from canonical.source import BaseDataSourceIntegration
-from toolkit.connectors.download import DOWNLOAD_TIMEOUT
 from toolkit.rules.location import one_direction, one_way_street_named
 from toolkit.rules.vehicles import pedestrians_or_cycles_named
 from toolkit.transforms.local_time import start_of_local_day
@@ -131,8 +130,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_path = Path(tmpdir) / "data.zip"
 
-            r = requests.get(URL, timeout=DOWNLOAD_TIMEOUT)
-            r.raise_for_status()
+            r = external_query.get(URL)
             zip_path.write_bytes(r.content)
             logger.info(f"Downloaded zip file to {zip_path}")
 

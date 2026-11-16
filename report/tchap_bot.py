@@ -10,6 +10,8 @@ from uuid import uuid4
 import requests
 from loguru import logger
 
+import external_query
+
 REQUEST_TIMEOUT_SECONDS = 10
 
 ENV_VARS = ("TCHAP_HOMESERVER_URL", "TCHAP_ACCESS_TOKEN", "TCHAP_ROOM_ID")
@@ -54,20 +56,20 @@ class TchapBot:
 
         url = (
             f"{self.homeserver_url}/_matrix/client/v3/rooms/{quote(self.room_id or '', safe='')}"
-            # Matrix requires a transaction id; a fresh one per call, we never retry.
+            # One transaction id per message: Matrix drops a retried PUT it already has.
             f"/send/m.room.message/{uuid4()}"
         )
         payload: dict[str, str] = {"msgtype": "m.text", "body": body}
         if formatted_body is not None:
             payload.update(format="org.matrix.custom.html", formatted_body=formatted_body)
         try:
-            response = requests.put(
+            response = external_query.request(
+                "put",
                 url,
                 headers={"Authorization": f"Bearer {self.access_token}"},
                 json=payload,
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
-            response.raise_for_status()
         except requests.HTTPError as e:
             status = e.response.status_code if e.response is not None else None
             # Matrix puts errcode and error in the body.

@@ -20,7 +20,6 @@ from dataclasses import dataclass
 import geopandas as gpd
 import numpy as np
 import polars as pl
-import requests
 import shapely
 from loguru import logger
 from shapely.geometry import shape
@@ -28,7 +27,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 from shapely.prepared import prep
 
-from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+import external_query
 
 GEO_API_URL = "https://geo.api.gouv.fr"
 
@@ -68,8 +67,7 @@ class Perimeter:
             )
         path, params = QUERY_BY_CODE_TYPE[code_type](code)
         logger.info(f"Downloading commune contours for {code_type} {code} from {url}")
-        response = requests.get(f"{url}/{path}", params=params, timeout=DOWNLOAD_TIMEOUT)
-        response.raise_for_status()
+        response = external_query.get(f"{url}/{path}", params=params)
         payload = response.json()
         communes = payload if isinstance(payload, list) else [payload]
         contours = [shape(c["contour"]) for c in communes if c.get("contour")]

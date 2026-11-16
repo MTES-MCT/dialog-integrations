@@ -38,7 +38,7 @@ dependencies = [
 dialog = "cli:app"
 
 [tool.setuptools]
-py-modules = ["cli", "settings", "registry"]
+py-modules = ["cli", "settings", "registry", "external_query"]
 
 [tool.setuptools.packages.find]
 include = [

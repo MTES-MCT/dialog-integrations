@@ -81,6 +81,10 @@ fois, et une source l'applique à l'étape de sa transformation qu'elle choisit 
 cli.py              la commande `dialog` : integrate, publish, notify
 settings.py         la configuration d'une organisation (.env)
 registry.py         lit integrations.toml : ce qui tourne chaque nuit, et où
+external_query.py   tout appel à un serveur extérieur (producteurs, Tchap, DiaLog) : délai
+                    d'attente, 3 essais à 30 s d'intervalle sur coupure, délai dépassé, 5xx
+                    ou 429, 10 retentatives au plus par exécution ; une écriture DiaLog
+                    n'est renvoyée que si elle n'est jamais partie
 integrations.toml
 
 canonical/          le contrat entre une source et la suite
@@ -115,7 +119,7 @@ report/             ce que lisent les humains
   sync_report.py    le rapport de synchronisation
   notifier.py  summary.py  tchap_bot.py   message Tchap, résumé GitHub
 toolkit/            ce qu'une source peut appeler
-  connectors/       lire une plateforme : Opendatasoft, ArcGIS, WFS, téléchargement
+  connectors/       lire une plateforme : Opendatasoft, ArcGIS, WFS
   transforms/       heures locales, créneaux, périmètre de compétence, troncature des
                     intitulés, période permanente, types de véhicules déduits des
                     seuils, jumeau 5 km/h de l'aire piétonne

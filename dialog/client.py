@@ -2,6 +2,7 @@
 
 import httpx
 
+import external_query
 from api.dia_log_client import Client
 from settings import OrganizationSettings
 
@@ -21,4 +22,5 @@ def build_client(settings: OrganizationSettings) -> Client:
             "X-Client-Secret": settings.client_secret,
             "Accept": "application/json",
         },  # type: ignore
+        httpx_args={"transport": external_query.RetryingTransport()},
     )

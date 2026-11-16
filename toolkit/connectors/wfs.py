@@ -8,10 +8,9 @@ lon/lat order; `assert_lon_lat_bbox` fails loudly when it does not.
 import json
 
 import polars as pl
-import requests
 from loguru import logger
 
-from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+import external_query
 
 BBox = tuple[float, float, float, float]  # min_lon, min_lat, max_lon, max_lat
 
@@ -27,8 +26,7 @@ def fetch_wfs_features(url: str, layer: str, *, srs: str = "EPSG:4326") -> pl.Da
         "SRSNAME": srs,
     }
     logger.info(f"Downloading WFS layer {layer} from {url}")
-    response = requests.get(url, params=params, timeout=DOWNLOAD_TIMEOUT)
-    response.raise_for_status()
+    response = external_query.get(url, params=params)
     payload = response.json()
 
     features = payload.get("features", [])

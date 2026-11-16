@@ -6,10 +6,9 @@ truncates silently on a server whose `maxRecordCount` is below the page size ask
 
 import geopandas as gpd
 import polars as pl
-import requests
 from loguru import logger
 
-from toolkit.connectors.download import DOWNLOAD_TIMEOUT
+import external_query
 
 PAGE_SIZE = 2000
 
@@ -41,17 +40,15 @@ def read_layer(query_url: str, where: str = "1=1", page_size: int = PAGE_SIZE) -
 
 
 def _count(query_url: str, where: str) -> int:
-    response = requests.get(
+    response = external_query.get(
         query_url,
         params={"where": where, "returnCountOnly": "true", "f": "json"},
-        timeout=DOWNLOAD_TIMEOUT,
     )
-    response.raise_for_status()
     return int(response.json()["count"])
 
 
 def _page(query_url: str, where: str, offset: int, size: int) -> list[dict]:
-    response = requests.get(
+    response = external_query.get(
         query_url,
         params={
             "where": where,
@@ -61,9 +58,7 @@ def _page(query_url: str, where: str, offset: int, size: int) -> list[dict]:
             "resultOffset": offset,
             "resultRecordCount": size,
         },
-        timeout=DOWNLOAD_TIMEOUT,
     )
-    response.raise_for_status()
     return response.json().get("features", [])
 
 
@@ -75,8 +70,7 @@ def coded_values(query_url: str, field: str) -> dict[int | str, str]:
     HTTP 200.
     """
     layer_url = query_url.removesuffix("/query")
-    response = requests.get(layer_url, params={"f": "json"}, timeout=DOWNLOAD_TIMEOUT)
-    response.raise_for_status()
+    response = external_query.get(layer_url, params={"f": "json"})
     payload = response.json()
     if "error" in payload:
         raise RuntimeError(f"{layer_url} answered an error: {payload['error']}")
