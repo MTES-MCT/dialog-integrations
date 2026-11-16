@@ -12,14 +12,19 @@ from toolkit.transforms.local_time import today_in_paris
 
 from .client import EudonetClient, EudonetError
 from .extraction import extract_tables
+from .free_text_filters import (
+    discard_unread_location_details,
+    discard_unread_measure_paragraphs,
+    discard_unread_regulation_texts,
+)
 from .location_filters import (
+    discard_bound_qualifiers,
     discard_location_complements,
     discard_points_beyond_parking,
     discard_refused_locations,
 )
-from .locations import ONE_DIRECTION, compute_location_fields
+from .locations import ONE_DIRECTION, compute_location_fields, orient_one_way_streets
 from .measures import (
-    ONE_WAY_STREET,
     PEDESTRIAN_OR_CYCLE_MEASURES,
     add_pedestrian_area_speed,
     compute_measure_fields,
@@ -70,6 +75,12 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
     numbers_published_elsewhere: dict[str, str] | None = None
+    # DiaLog orients a bounded street since 2026-11-04: Paris publishes the one-way streets
+    # whose bounds say which way (decided 2026-11-16). The `Sens` field stays frozen by the
+    # source's own `ONE_DIRECTION`, on `l_direction`.
+    disabled_rules = {
+        "ONE_DIRECTION": "one-way streets oriented from their bounds by orient_one_way_streets"
+    }
 
     def fetch_raw_data(self) -> pl.DataFrame:
         """Read the perimeter from Eudonet, and the numbers other channels already published
@@ -97,6 +108,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         return (
             raw_data.pipe(filter_police_prefecture, self._publishes_police_prefecture())
             .pipe(compute_regulation_fields)
+            .pipe(discard_unread_regulation_texts)
             .pipe(discard_published_elsewhere, self.numbers_published_elsewhere)
             # Before the period and vehicle fields: no other rule can be judged yet.
             .pipe(
@@ -104,15 +116,18 @@ class DataSourceIntegration(BaseDataSourceIntegration):
                 TITLE_SAYS_REPEALED,
                 PEDESTRIAN_OR_CYCLE_MEASURES,
                 ONE_DIRECTION,
-                ONE_WAY_STREET,
             )
             .pipe(compute_measure_fields)
+            .pipe(discard_unread_measure_paragraphs)
             .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_VEHICLES)
             .pipe(compute_vehicle_fields)
             .pipe(self.apply_rules, EXEMPTION_IN_TITLE_ONLY)
             .pipe(compute_period_fields, today)
             .pipe(discard_location_complements)
+            .pipe(discard_bound_qualifiers)
+            .pipe(discard_unread_location_details)
             .pipe(compute_location_fields)
+            .pipe(orient_one_way_streets)
             .pipe(discard_points_beyond_parking)
             .pipe(discard_refused_locations)
             .pipe(add_pedestrian_area_speed)

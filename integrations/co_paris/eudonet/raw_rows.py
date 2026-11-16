@@ -11,6 +11,7 @@ from .vocabulary import MEASURE_TYPE_BY_LABEL
 TABLE_REGULATIONS = 1100
 TABLE_MEASURES = 1200
 TABLE_LOCATIONS = 2700
+TABLE_ARTICLES = 1400
 
 # Link columns as *returned*: their `_fid` is the parent FileId.
 FIELD_REGULATION_LINK = 1101
@@ -60,9 +61,22 @@ REGULATION_FIELDS = {
     "a_end_date": Field(1110, pl.Date, db_date),
     "a_service": Field(1105),
     "a_reason": Field(1114),
+    # Free text and links that change what the act says; read only to drop the act.
+    "a_notes": Field(1194),
+    "a_key_1": Field(1103),
+    "a_key_2": Field(1122),
+    "a_next_version": Field(1139),
+    "a_repealing_act": Field(1140),
+    "a_repealed_by_clone": Field(1153),
+    "a_repealed_by_multiple": Field(1155),
 }
 # `1202` on table 1200 is the measure name (catalog), on table 2700 the link to the measure.
 MEASURE_NAME = Field(1202)
+MEASURE_PARAGRAPH = Field(1254)
+# Articles (`1400`): one row per article of the act, the measures' own articles included.
+ARTICLE_TYPE = 1402
+ARTICLE_CONTENT = 1405
+MEASURE_ARTICLE_TYPE = "Mesure"
 # (parameter name, parameter value): names from catalogs 1218/1221, values from 1219/1222.
 MEASURE_PARAMETER_PAIRS = [
     (1218, 1219),
@@ -93,21 +107,39 @@ LOCATION_FIELDS = {
     "l_from_location_complement": Field(2742),
     "l_to_location_complement": Field(2760),
     "l_point_location_complement": Field(2766),
+    # Closed catalogs on each bound: "au droit du", "en vis à vis du", "vers"…
+    "l_from_number_complement": Field(2721),
+    "l_to_number_complement": Field(2731),
+    "l_point_number_complement": Field(2749),
+    "l_from_side": Field(2724),
+    "l_to_side": Field(2745),
+    "l_from_direction": Field(2722),
+    "l_to_direction": Field(2743),
+    # Free text and reserved places that narrow the location; read only to drop it.
+    "l_notes": Field(2794),
+    "l_reserved_space_type": Field(2733),
+    "l_reserved_places": Field(2726),
+    "l_reserved_length": Field(2734),
+    "l_displayed_length": Field(2718),
 }
 
 REGULATION_QUERY_FIELDS = [field.descid for field in REGULATION_FIELDS.values()]
 MEASURE_QUERY_FIELDS = [
     FIELD_REGULATION_LINK,
     MEASURE_NAME.descid,
+    MEASURE_PARAGRAPH.descid,
     *(descid for pair in MEASURE_PARAMETER_PAIRS for descid in pair),
 ]
 LOCATION_QUERY_FIELDS = [FIELD_MEASURE_LINK, *(f.descid for f in LOCATION_FIELDS.values())]
+ARTICLE_QUERY_FIELDS = [FIELD_REGULATION_LINK, ARTICLE_TYPE, ARTICLE_CONTENT]
 
 RAW_COLUMNS: dict[str, Any] = {
     "a_file_id": pl.Int64,
     **{name: field.dtype for name, field in REGULATION_FIELDS.items()},
+    "a_articles": pl.List(pl.Utf8),
     "m_file_id": pl.Int64,
     "m_type": pl.Utf8,
+    "m_paragraph": pl.Utf8,
     "m_params": pl.List(pl.List(pl.Utf8)),
     "l_file_id": pl.Int64,
     **{name: field.dtype for name, field in LOCATION_FIELDS.items()},
@@ -139,13 +171,23 @@ def _read(row: dict[str, Any], fields: dict[str, Field]) -> dict[str, Any]:
     return {name: field.read(row, field.descid) for name, field in fields.items()}
 
 
-def _regulation_fields(row: dict[str, Any]) -> dict[str, Any]:
-    return {"a_file_id": row["FileId"], **_read(row, REGULATION_FIELDS)}
+def _regulation_fields(row: dict[str, Any], articles: list[str]) -> dict[str, Any]:
+    return {"a_file_id": row["FileId"], **_read(row, REGULATION_FIELDS), "a_articles": articles}
+
+
+def _articles_beyond_measures(rows: list[dict[str, Any]]) -> list[str]:
+    """The contents of the articles that are not a measure's own (`Article complémentaire`)."""
+    contents = (
+        displayed_value(row, ARTICLE_CONTENT)
+        for row in rows
+        if displayed_value(row, ARTICLE_TYPE) != MEASURE_ARTICLE_TYPE
+    )
+    return [content for content in contents if content]
 
 
 def _measure_fields(row: dict[str, Any] | None) -> dict[str, Any]:
     if row is None:
-        return {"m_file_id": None, "m_type": None, "m_params": None}
+        return {"m_file_id": None, "m_type": None, "m_paragraph": None, "m_params": None}
     params = []
     for name_field, value_field in MEASURE_PARAMETER_PAIRS:
         name = displayed_value(row, name_field)
@@ -154,6 +196,7 @@ def _measure_fields(row: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "m_file_id": row["FileId"],
         "m_type": displayed_value(row, MEASURE_NAME.descid),
+        "m_paragraph": displayed_value(row, MEASURE_PARAGRAPH.descid),
         "m_params": params,
     }
 
@@ -189,6 +232,9 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
     regulations = tables.get(str(TABLE_REGULATIONS), [])
     measures = tables.get(str(TABLE_MEASURES), [])
     locations = tables.get(str(TABLE_LOCATIONS), [])
+    articles_by_regulation, _ = _group_by_parent(
+        tables.get(str(TABLE_ARTICLES), []), FIELD_REGULATION_LINK
+    )
 
     measures_by_regulation, _ = _group_by_parent(measures, FIELD_REGULATION_LINK)
     unreadable = count_unreadable_measures(tables)
@@ -206,7 +252,10 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
     regulations_without_measure = 0
     measures_without_location = 0
     for regulation in regulations:
-        regulation_fields = _regulation_fields(regulation)
+        regulation_fields = _regulation_fields(
+            regulation,
+            _articles_beyond_measures(articles_by_regulation.get(regulation["FileId"], [])),
+        )
         own_measures = measures_by_regulation.get(regulation["FileId"], [])
         if not own_measures:
             regulations_without_measure += 1

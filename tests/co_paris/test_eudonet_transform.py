@@ -18,11 +18,13 @@ from integrations.co_paris.eudonet.data_source_integration import (
     add_split_order,
 )
 from integrations.co_paris.eudonet.location_filters import (
+    discard_bound_qualifiers,
     discard_location_complements,
     discard_points_beyond_parking,
     discard_refused_locations,
     load_refused_locations,
 )
+from integrations.co_paris.eudonet.locations import compute_location_fields, orient_one_way_streets
 from integrations.co_paris.eudonet.measures import (
     PEDESTRIAN_OR_CYCLE_MEASURES,
     add_pedestrian_area_speed,
@@ -418,16 +420,64 @@ def test_no_speed_leaks_onto_another_measure_type():
     assert df.get_column("measure_max_speed").to_list() == [None]
 
 
-@pytest.mark.parametrize("label", ["sens interdit (ou sens unique)", "mise en impasse"])
-def test_one_ways_and_dead_ends_are_out_of_the_model(label, captured_logs):
-    """No one-way until DiaLog carries the side; a dead end is not a closure of the street."""
-    row = make_row(m_type=label, l_direction="du début vers la fin du segment")
-    assert pipeline(row).height == 0
-    assert any("without a DiaLog equivalent" in line and label in line for line in captured_logs)
+def test_a_dead_end_is_out_of_the_model(captured_logs):
+    """A dead end closes one end of the street, not the street."""
+    assert pipeline(make_row(m_type="mise en impasse")).height == 0
+    assert any("without a DiaLog equivalent" in line for line in captured_logs)
 
 
-def test_the_one_way_of_the_fixture_is_dropped(clean):
-    assert "05-00133" not in set(clean.get_column("a_identifier"))
+def one_way_section(**overrides: Any) -> dict[str, Any]:
+    defaults = {
+        "m_type": "sens interdit (ou sens unique)",
+        "l_scope": "Une section",
+        "l_road_name": "Rue Blanche",
+        "l_district": "9ème arrondissement",
+        "l_point_house_number": None,
+        "l_from_road_name": "Rue Jean-Baptiste Pigalle",
+        "l_to_road_name": "Rue Saint-Lazare",
+        "l_from_number_complement": "depuis",
+        "l_to_number_complement": "jusqu'à",
+    }
+    return make_row(**{**defaults, **overrides})
+
+
+def located(row: dict[str, Any]) -> pl.DataFrame:
+    return compute_location_fields(discard_bound_qualifiers(pipeline(row)))
+
+
+@pytest.mark.parametrize("to_complement", ["jusqu'à", "vers"])
+def test_a_one_way_street_from_a_to_b_forbids_entry_from_b_to_a(to_complement):
+    """« Un sens unique est institué rue Blanche, depuis rue Pigalle jusqu'à rue Saint-Lazare »."""
+    out = orient_one_way_streets(located(one_way_section(l_to_number_complement=to_complement)))
+    assert out["measure_type_"].to_list() == [MeasureTypeEnum.NOENTRY.value]
+    assert out["location_direction"].to_list() == ["B_TO_A"]
+    assert out["location_from_road_name"].to_list() == ["Rue Jean-Baptiste Pigalle"]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # The form's default: the bounds say where, not which way.
+        {"l_from_number_complement": "au droit du", "l_to_number_complement": "et le"},
+        {
+            "l_from_number_complement": "dans sa partie comprise entre",
+            "l_to_number_complement": "et le",
+        },
+        {"l_scope": "La totalité de la voie"},
+    ],
+)
+def test_a_one_way_street_that_does_not_say_which_way_is_dropped(overrides, captured_logs):
+    assert orient_one_way_streets(located(one_way_section(**overrides))).height == 0
+    assert any("do not say which way" in line for line in captured_logs)
+
+
+def test_orienting_leaves_the_other_measures_both_ways():
+    out = orient_one_way_streets(located(make_row()))
+    assert out["location_direction"].to_list() == ["BOTH"]
+
+
+def test_the_common_one_way_freeze_is_lifted_for_paris_only():
+    assert "ONE_DIRECTION" in DataSourceIntegration.disabled_rules
 
 
 def test_a_filled_time_slot_drops_the_measure(captured_logs):
@@ -604,32 +654,121 @@ def test_a_location_complement_that_narrows_the_measure_drops_the_location(captu
 
 
 @pytest.mark.parametrize(
-    "complement",
+    "complement, point_number",
     [
-        None,
-        "",
-        "Bis,",
-        ", BIS",
-        "et jusqu'à",
-        "sur toute la longueur de la voie.",
-        "Sur toutes les places.",
-        "& n°13",
-        "56-56bis",
-        "n° 34 à 36 ter",
-        "<!--[if gte mso 9]><xml><w:Word>Normal</w:Word></xml><![endif]-->",
+        (None, "12"),
+        ("", "12"),
+        ("Bis,", "12"),
+        (", BIS", "12"),
+        ("et jusqu'à", "12"),
+        ("sur toute la longueur de la voie.", "12"),
+        ("Sur toutes les places.", "12"),
+        ("& n°13", "13"),
+        ("56-56bis", "56"),
+        ("n° 34 à 36 ter", "34 à 36"),
+        ("<!--[if gte mso 9]><xml><w:Word>Normal</w:Word></xml><![endif]-->", "12"),
     ],
 )
-def test_a_location_complement_that_says_nothing_keeps_the_location(complement):
-    df = make_frame(make_row(l_point_location_complement=complement))
+def test_a_location_complement_that_says_nothing_keeps_the_location(complement, point_number):
+    df = make_frame(
+        make_row(l_point_location_complement=complement, l_point_house_number=point_number)
+    )
     assert discard_location_complements(df).height == 1
 
 
 @pytest.mark.parametrize(
-    "complement", ["de 8h à 18h", "8h-18h", "côté pair", "1 place", "du 02/11/2026 au 31/08/2027"]
+    "complement",
+    [
+        "de 8h à 18h",
+        "8h-18h",
+        "côté pair",
+        "1 place",
+        "du 02/11/2026 au 31/08/2027",
+        # Numbers the bounds do not carry: a second place, or a day without its month.
+        "n° 21 et du n° 47",
+        "le 25",
+        "du 1 au 15",
+    ],
 )
 def test_a_short_complement_that_narrows_the_measure_drops_the_location(complement):
-    df = make_frame(make_row(l_point_location_complement=complement))
+    df = make_frame(make_row(l_point_location_complement=complement, l_point_house_number="21"))
     assert discard_location_complements(df).height == 0
+
+
+def test_a_section_complement_may_repeat_the_numbers_of_both_bounds():
+    section = make_row(
+        l_scope="Une section",
+        l_point_house_number=None,
+        l_from_house_number="12",
+        l_to_house_number="20",
+        l_from_location_complement="du n° 12 au n° 20",
+    )
+    assert discard_location_complements(make_frame(section)).height == 1
+
+
+def section_row(**overrides: Any) -> dict[str, Any]:
+    defaults = {
+        "l_scope": "Une section",
+        "l_point_house_number": None,
+        "l_from_house_number": "12",
+        "l_to_house_number": "20",
+        "l_from_number_complement": "au droit du",
+        "l_to_number_complement": "et le",
+    }
+    return make_row(**{**defaults, **overrides})
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {},
+        {"l_from_number_complement": "dans sa partie comprise entre"},
+        {"l_from_number_complement": "depuis", "l_to_number_complement": "jusqu'à"},
+        {"l_from_side": "côté pair et impair", "l_to_direction": "dans les deux sens"},
+        # On a parking ban "vers" is only the end of the range.
+        {"l_from_number_complement": "depuis", "l_to_number_complement": "vers"},
+        {
+            "m_type": "aire piétonne",
+            "l_from_number_complement": "depuis",
+            "l_to_number_complement": "vers",
+        },
+        # A closure takes the whole carriageway: facing number 12 is where it starts.
+        {"m_type": "circulation interdite", "l_from_number_complement": "en vis à vis du"},
+    ],
+)
+def test_a_bound_that_only_says_where_it_is_keeps_the_location(overrides):
+    assert discard_bound_qualifiers(pipeline(section_row(**overrides))).height == 1
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"l_from_number_complement": "en vis à vis du"},
+        {"l_to_number_complement": "en vis à vis du"},
+        {"l_from_number_complement": "à l'intersection avec"},
+        {"l_from_side": "côté pair"},
+        {"l_to_side": "côté impair"},
+        {"l_from_direction": "dans le sens de la circulation générale"},
+        {
+            "m_type": "circulation interdite",
+            "l_from_number_complement": "depuis",
+            "l_to_number_complement": "vers",
+        },
+    ],
+)
+def test_a_bound_that_qualifies_the_measure_drops_the_location(overrides, captured_logs):
+    assert discard_bound_qualifiers(pipeline(section_row(**overrides))).height == 0
+    assert any("bound qualifies the measure" in line for line in captured_logs)
+
+
+def test_a_parking_ban_facing_the_number_is_dropped():
+    """ "en vis à vis du" puts it on the other side of the street, which DiaLog cannot carry."""
+    point = make_row(l_point_number_complement="en vis à vis du")
+    assert discard_bound_qualifiers(pipeline(point)).height == 0
+    assert (
+        discard_bound_qualifiers(pipeline(make_row(l_point_number_complement="au droit du"))).height
+        == 1
+    )
 
 
 def test_the_versioned_blacklist_is_readable():
@@ -1027,12 +1166,12 @@ def test_the_funnel_of_the_fixture_is_the_one_we_expect(raw, clean):
     after_state = compute_regulation_fields(raw)
     assert after_state.height == 76  # 1 Abrogé + 1 Non signé + 1 Périmé
     after_type = compute_measure_fields(after_state)
-    assert after_type.height == 61
-    assert clean.height == 58  # 2025T15489 and 2026T17998, by the date controls
+    assert after_type.height == 64  # the 3 one-way streets are oriented further on
+    assert clean.height == 61  # 2025T15489 and 2026T17998, by the date controls
     assert dict(
         zip(*clean.get_column("measure_type_").value_counts(sort=True).to_dict().values())
     ) == {
         MeasureTypeEnum.PARKINGPROHIBITED.value: 47,
-        MeasureTypeEnum.NOENTRY.value: 10,
+        MeasureTypeEnum.NOENTRY.value: 13,
         MeasureTypeEnum.SPEEDLIMITATION.value: 1,
     }

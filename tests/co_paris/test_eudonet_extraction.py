@@ -11,6 +11,7 @@ from integrations.co_paris.eudonet.data_source_integration import (
 )
 from integrations.co_paris.eudonet.extraction import (
     check_extraction_completeness,
+    extract_tables,
     perimeter_criteria,
 )
 from integrations.co_paris.eudonet.raw_rows import (
@@ -241,3 +242,28 @@ def test_only_the_measures_dialog_can_carry_need_their_locations():
     assert needs_locations({"1202": "aire piétonne"})
     assert not needs_locations({"1202": "stationnement réservé"})
     assert not needs_locations({"1202": "interdiction de klaxonner"})
+
+
+class StubEudonet:
+    """Answers each table from a dict; the articles may be missing."""
+
+    def __init__(self, tables):
+        self.tables = tables
+
+    def search_all(self, table, columns, where, label=""):
+        return self.tables.get(str(table), [])
+
+    def search_by_ids(self, table, columns, id_field, ids, label=""):
+        return self.tables.get(str(table), [])
+
+
+def test_an_extraction_without_any_article_is_refused(tables):
+    without_articles = {key: rows for key, rows in tables.items() if key != "1400"}
+    with pytest.raises(EudonetError, match="no article"):
+        extract_tables(StubEudonet(without_articles), date(2026, 9, 8))  # type: ignore[arg-type]
+
+
+def test_the_articles_are_extracted_with_the_perimeter(tables):
+    article = {"1101_fid": 1, "1402": "Article complémentaire", "1405": "Sont abrogés : …"}
+    extracted = extract_tables(StubEudonet({**tables, "1400": [article]}), date(2026, 9, 8))  # type: ignore[arg-type]
+    assert extracted["1400"] == [article]
