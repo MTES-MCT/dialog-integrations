@@ -62,8 +62,9 @@ MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
     "obligation de mouvement": None,
     "périmètre zone": None,
     "rétablissement double sens": None,
-    # No one-direction measure until DiaLog carries the side of the road.
-    "sens interdit (ou sens unique)": None,
+    # « Un sens unique de circulation est institué … depuis A vers B » : no entry from B to A,
+    # published only where the bounds say which way (`orient_one_way_streets`).
+    "sens interdit (ou sens unique)": MeasureTypeEnum.NOENTRY.value,
     "stationnement réservé": None,
     "stop": None,
     "suppression stationnement réservé": None,
@@ -77,6 +78,11 @@ MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
 }
 
 LABEL_SPEED_LIMIT = "limitation de vitesse"
+LABEL_ONE_WAY = "sens interdit (ou sens unique)"
+# The number complements that make « depuis A vers B » or « depuis A jusqu'à B »: the act's
+# text is these words around the bounds, so traffic goes from the first bound to the second.
+ONE_WAY_FROM_COMPLEMENTS = frozenset({"depuis", "dans sa partie comprise entre"})
+ONE_WAY_TO_COMPLEMENTS = frozenset({"vers", "jusqu'à"})
 LABEL_ZONE_30 = "zone 30"
 LABEL_PEDESTRIAN_AREA = "aire piétonne"
 LABEL_DIMENSION_LIMIT = "limitation dimensionnelle"
@@ -148,6 +154,21 @@ COMPLEMENT_CONNECTORS = frozenset(
     }
 )
 
+# Number complements (`2721`, `2731`, `2749`) that only introduce the bound, as seen on the
+# published locations of 2026-09-08. Any other value drops the location ("à l'intersection
+# avec" and "le" were never seen).
+NEUTRAL_FROM_NUMBER_COMPLEMENTS = frozenset(
+    {"au droit du", "dans sa partie comprise entre", "entre le", "depuis"}
+)
+NEUTRAL_TO_NUMBER_COMPLEMENTS = frozenset({"et le", "jusqu'à", "au droit du"})
+NEUTRAL_POINT_NUMBER_COMPLEMENTS = frozenset({"au droit du"})
+# "en face du n°" puts a parking ban on the other side, which DiaLog cannot carry; a closure
+# takes the whole carriageway, so it only places the bound.
+FACING_NUMBER_COMPLEMENT = "en vis à vis du"
+# "depuis X vers Y" may name a direction: read as the end of a range only where none applies,
+# on a parking ban or a pedestrian area.
+TOWARDS_NUMBER_COMPLEMENT = "vers"
+
 # The only value that means "no restriction at all".
 ALL_VEHICLES_LABELS = frozenset({"à tous les véhicules"})
 
@@ -217,6 +238,13 @@ EXEMPTION_BY_LABEL: dict[str, str] = {
     "aux taxis": EXEMPTED_TAXI,
     "des taxis": EXEMPTED_TAXI,
 }
+
+# Exemptions a measure paragraph may name ("sauf aux véhicules de secours"), published as the
+# parameter "dérogation pour véhicule" would be.
+PARAGRAPH_EXEMPTION_PARAMETER = "dérogation pour véhicule"
+PARAGRAPH_EXEMPTION_LABELS = frozenset(
+    label for label, exempted in EXEMPTION_BY_LABEL.items() if exempted == EXEMPTED_EMERGENCY
+)
 
 # Every parameter name the code reads; a filled one outside drops its measure.
 KNOWN_PARAMETERS = (

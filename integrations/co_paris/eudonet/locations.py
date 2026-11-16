@@ -25,6 +25,8 @@ from loguru import logger
 from api.dia_log_client.models import DirectionEnum, RoadTypeEnum
 from toolkit.rules.location import one_direction
 
+from .vocabulary import LABEL_ONE_WAY, ONE_WAY_FROM_COMPLEMENTS, ONE_WAY_TO_COMPLEMENTS
+
 SCOPE_POINT = "Un point"
 SCOPE_SECTION = "Une section"
 SCOPE_WHOLE_STREET = "La totalité de la voie"
@@ -383,3 +385,35 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
         shapes = dict(df.get_column("l_scope").value_counts(sort=True).iter_rows())
         logger.info(f"Kept {df.height} named-street locations: {shapes}")
     return df
+
+
+def orient_one_way_streets(df: pl.DataFrame) -> pl.DataFrame:
+    """A one-way street « depuis A vers B » carries traffic from A to B: entry is forbidden from
+    B to A, `B_TO_A` on the section DiaLog draws from its first bound (back, 2026-11-04).
+
+    Without both words, or on a location without bounds (a whole street, a point), which way
+    is unknown: dropped rather than closed both ways.
+    """
+    one_way = pl.col("m_type") == LABEL_ONE_WAY
+    readable = (
+        pl.col("l_from_number_complement").is_in(list(ONE_WAY_FROM_COMPLEMENTS))
+        & pl.col("l_to_number_complement").is_in(list(ONE_WAY_TO_COMPLEMENTS))
+        & pl.col("location_from_point_type").is_not_null()
+    ).fill_null(False)
+    unreadable = one_way & ~readable
+    dropped = df.filter(unreadable)
+    if dropped.height:
+        logger.warning(
+            f"Dropping {dropped.height} one-way street locations whose bounds do not say "
+            f"which way (no « depuis … vers »): {dropped['a_identifier'].n_unique()} "
+            "regulations touched"
+        )
+    oriented = df.filter(one_way & readable).height
+    if oriented:
+        logger.info(f"{oriented} one-way street locations published from B to A")
+    return df.filter(~unreadable).with_columns(
+        pl.when(one_way)
+        .then(pl.lit(DirectionEnum.B_TO_A.value))
+        .otherwise(pl.col("location_direction"))
+        .alias("location_direction")
+    )

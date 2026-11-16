@@ -5,12 +5,14 @@ from loguru import logger
 
 from .client import EQUALS, GREATER_OR_EQUAL, EudonetClient, EudonetError, all_of, any_of, criterion
 from .raw_rows import (
+    ARTICLE_QUERY_FIELDS,
     FIELD_MEASURE_LINK,
     FILTER_MEASURE_OF_LOCATION,
     LOCATION_QUERY_FIELDS,
     MEASURE_QUERY_FIELDS,
     REGULATION_FIELDS,
     REGULATION_QUERY_FIELDS,
+    TABLE_ARTICLES,
     TABLE_LOCATIONS,
     TABLE_MEASURES,
     TABLE_REGULATIONS,
@@ -66,6 +68,12 @@ def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[st
         TABLE_REGULATIONS, REGULATION_QUERY_FIELDS, where, "regulations"
     )
     measures = client.search_all(TABLE_MEASURES, MEASURE_QUERY_FIELDS, where, "measures")
+    # The complementary articles may exclude a street or add a time: read to drop the act.
+    articles = client.search_all(TABLE_ARTICLES, ARTICLE_QUERY_FIELDS, where, "articles")
+    if regulations and not articles:
+        raise EudonetError(
+            "Eudonet returned no article for the perimeter: their texts could not be checked"
+        )
     dialog_measures = [row for row in measures if needs_locations(row)]
     logger.info(
         f"Fetching the locations of {len(dialog_measures)} measures out of {len(measures)}: "
@@ -85,6 +93,7 @@ def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[st
         str(TABLE_REGULATIONS): regulations,
         str(TABLE_MEASURES): measures,
         str(TABLE_LOCATIONS): locations,
+        str(TABLE_ARTICLES): articles,
     }
 
 
