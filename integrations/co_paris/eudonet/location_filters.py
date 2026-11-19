@@ -1,18 +1,24 @@
 import json
 import re
 import unicodedata
-from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 
 import polars as pl
-from loguru import logger
 
 from api.dia_log_client.models import MeasureTypeEnum
 
-from .counts import count_by, emptied_regulations
 from .locations import BOTH_DIRECTIONS_LABEL, ONE_SIDE_LABELS, SCOPE_POINT, WITHDRAWN_STATUSES
 from .text import plain_text
+from .verdicts import (
+    BOUND_QUALIFIER,
+    COPIED_LOCATION,
+    POINT_BEYOND_PARKING,
+    REFUSED_LOCATION,
+    among,
+    refusal,
+    refusals,
+)
 from .vocabulary import (
     FACING_NUMBER_COMPLEMENT,
     LABEL_ONE_WAY,
@@ -65,37 +71,28 @@ def _title_names_street(title_html: str | None, road_name: str) -> bool:
     return not distinctive or bool(distinctive & _title_words(title_html or ""))
 
 
-def discard_measures_with_copied_locations(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop a temporary act's measure holding a location copied from an older act and never
+def judge_copied_locations(df: pl.DataFrame, alive: pl.Series) -> pl.DataFrame:
+    """Refuse a temporary act's measure holding a location copied from an older act and never
     replaced: its status is not "Ajoutée" and the title does not name its street.
 
     That street is the older act's, often a kilometre away or more, and the same location
     travels from act to act (one point in 141 acts of a year, 2026-11-19). The title is the
     one text written for the new act that the API reads: a street the signed PDF alone names
-    goes too (1 of the 37 locations it drops out of 2 983, 2026-11-19).
+    goes too (1 of the 37 locations it drops out of 2 983, 2026-11-19). A location already
+    refused no longer speaks against its measure: judged on the rows still alive.
     """
     rows = df.select("a_type", "a_title_html", "l_status", "l_road_name").iter_rows()
-    copied = pl.Series(
-        [
-            a_type == TYPE_TEMPORARY_LABEL
-            and status != ADDED_STATUS
-            and status not in WITHDRAWN_STATUSES
-            and road is not None
-            and not _title_names_street(title, road)
-            for a_type, title, status, road in rows
-        ],
-        dtype=pl.Boolean,
-    )
-    measures = df.filter(copied)["m_file_id"].unique().to_list()
-    in_measure = pl.col("m_file_id").is_in(measures).fill_null(False)
-    if measures:
-        logger.warning(
-            f"Dropping {len(measures)} measures of temporary acts holding a location copied "
-            f"from an older act, its street absent from the title ({int(copied.sum())} such "
-            f"locations, {df.filter(in_measure).height} rows); "
-            f"{emptied_regulations(df, in_measure)} regulations left with no measure"
-        )
-    return df.filter(~in_measure)
+    statuses = [
+        f"status {status or '(empty)'}"
+        if a_type == TYPE_TEMPORARY_LABEL
+        and status != ADDED_STATUS
+        and status not in WITHDRAWN_STATUSES
+        and road is not None
+        and not _title_names_street(title, road)
+        else None
+        for a_type, title, status, road in rows
+    ]
+    return df.with_columns(among(alive, refusals(statuses)).alias(COPIED_LOCATION.column))
 
 
 # DiaLog refuses a whole regulation over one location it cannot geocode, without saying which
@@ -139,8 +136,8 @@ def _bound_qualifier(row: dict) -> str | None:
     return None
 
 
-def discard_bound_qualifiers(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop the locations whose bound says more than where it is: the opposite side of a
+def judge_bound_qualifiers(df: pl.DataFrame) -> pl.DataFrame:
+    """Refuse the locations whose bound says more than where it is: the opposite side of a
     parking ban ("en vis à vis du"), a direction of a closure or a speed limit ("vers"), one
     side, one direction, or a catalog value never read."""
     reasons = [
@@ -149,35 +146,20 @@ def discard_bound_qualifiers(df: pl.DataFrame) -> pl.DataFrame:
             named=True
         )
     ]
-    qualified = pl.Series([reason is not None for reason in reasons], dtype=pl.Boolean)
-    dropped = df.filter(qualified)
-    if dropped.height:
-        counts = Counter(reason for reason in reasons if reason is not None)
-        logger.warning(
-            f"Dropping {dropped.height} locations whose bound qualifies the measure: "
-            f"{dict(counts.most_common())}; {dropped['a_identifier'].n_unique()} regulations "
-            f"published without them, {emptied_regulations(df, pl.lit(qualified))} left with "
-            "no location"
-        )
-    return df.filter(~qualified)
+    return df.with_columns(refusals(reasons).alias(BOUND_QUALIFIER.column))
 
 
-def discard_points_beyond_parking(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop a single-point location that carries anything but a parking ban.
+def judge_points_beyond_parking(df: pl.DataFrame) -> pl.DataFrame:
+    """Refuse a single-point location that carries anything but a parking ban.
 
     On one house number DiaLog draws a point a GPS cannot follow (decided 2026-10-26).
     """
     beyond = (pl.col("l_scope") == SCOPE_POINT) & (
         pl.col("measure_type_") != MeasureTypeEnum.PARKINGPROHIBITED.value
     )
-    dropped = df.filter(beyond)
-    if dropped.height:
-        logger.warning(
-            f"Dropping {dropped.height} single-point locations of measures other than a "
-            f"parking ban: {count_by(dropped, 'measure_type_')}; "
-            f"{emptied_regulations(df, beyond)} regulations left with no location"
-        )
-    return df.filter(~beyond)
+    return df.with_columns(
+        refusal(pl.when(beyond).then(pl.col("measure_type_"))).alias(POINT_BEYOND_PARKING.column)
+    )
 
 
 def load_refused_locations(path: Path = REFUSED_LOCATIONS_PATH) -> dict[int, str]:
@@ -186,23 +168,10 @@ def load_refused_locations(path: Path = REFUSED_LOCATIONS_PATH) -> dict[int, str
     return {entry["l_file_id"]: entry["motive"] for entry in entries}
 
 
-def discard_refused_locations(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop the locations DiaLog refuses to geocode, so that their regulation goes through.
-
-    Counted by motive. A regulation whose every location is listed goes away with them.
+def judge_refused_locations(df: pl.DataFrame) -> pl.DataFrame:
+    """Refuse the locations DiaLog refuses to geocode, so that their regulation goes through,
+    with the motive DiaLog gave. A regulation whose every location is listed goes with them.
     """
-    if not DROP_REFUSED_LOCATIONS:
-        return df
-    refused = load_refused_locations()
-    if not refused:
-        return df
-    listed = pl.col("l_file_id").is_in(list(refused))
-    dropped = df.filter(listed)
-    if dropped.height:
-        motives = Counter(refused[file_id] for file_id in dropped["l_file_id"])
-        logger.warning(
-            f"Dropping {dropped.height} locations DiaLog refuses to geocode (blacklist): "
-            f"{dict(motives.most_common())}; {dropped['a_identifier'].n_unique()} regulations "
-            f"published without them, {emptied_regulations(df, listed)} left with no location"
-        )
-    return df.filter(~listed)
+    refused = load_refused_locations() if DROP_REFUSED_LOCATIONS else {}
+    motive = pl.col("l_file_id").replace_strict(refused, default=None, return_dtype=pl.String)
+    return df.with_columns(refusal(motive).alias(REFUSED_LOCATION.column))

@@ -4,7 +4,6 @@ from typing import Any
 
 import polars as pl
 import pytest
-from loguru import logger
 
 from api.dia_log_client.models import (
     MeasureTypeEnum,
@@ -18,39 +17,37 @@ from integrations.co_paris.eudonet.data_source_integration import (
     add_split_order,
 )
 from integrations.co_paris.eudonet.location_filters import (
-    discard_bound_qualifiers,
-    discard_measures_with_copied_locations,
-    discard_points_beyond_parking,
-    discard_refused_locations,
+    judge_bound_qualifiers,
+    judge_copied_locations,
+    judge_points_beyond_parking,
+    judge_refused_locations,
     load_refused_locations,
 )
-from integrations.co_paris.eudonet.locations import compute_location_fields, orient_one_way_streets
 from integrations.co_paris.eudonet.measures import (
     PEDESTRIAN_OR_CYCLE_MEASURES,
     add_pedestrian_area_speed,
-    compute_measure_fields,
-    discard_measures_out_of_model,
 )
 from integrations.co_paris.eudonet.published_elsewhere import (
-    discard_published_elsewhere,
     index_by_eudonet_number,
     load_frozen_elsewhere,
 )
 from integrations.co_paris.eudonet.raw_rows import (
-    RAW_COLUMNS,
     build_raw_dataframe,
 )
 from integrations.co_paris.eudonet.regulations import (
     IDENTIFIER_PREFIX,
-    TITLE_SAYS_REPEALED,
-    compute_period_fields,
-    compute_regulation_fields,
-    filter_police_prefecture,
+    keep_authority,
+    title_says_repealed,
 )
 from integrations.co_paris.eudonet.vehicles import (
     EXEMPTION_IN_TITLE_ONLY,
     PEDESTRIAN_OR_CYCLE_VEHICLES,
-    compute_vehicle_fields,
+)
+from integrations.co_paris.eudonet.verdicts import (
+    BOUND_QUALIFIER,
+    COPIED_LOCATION,
+    POINT_BEYOND_PARKING,
+    REFUSED_LOCATION,
 )
 from integrations.co_paris.eudonet.vocabulary import (
     MEASURE_TYPE_BY_LABEL,
@@ -58,18 +55,31 @@ from integrations.co_paris.eudonet.vocabulary import (
     UNKNOWN_REASON_TEXT,
 )
 from payloads.measures import build_vehicle_set
+from tests.co_paris.acts import FIXTURE_EXTRACTED_ON, everything, make_frame, make_row, pipeline
 from tests.co_paris.eudonet_fixture import load_fixture
+from tests.co_paris.steps import (
+    compute_location_fields,
+    compute_measure_fields,
+    compute_period_fields,
+    compute_regulation_fields,
+    compute_vehicle_fields,
+    discard_bound_qualifiers,
+    discard_measures_out_of_model,
+    discard_published_elsewhere,
+    drop_refused,
+    everyone,
+    orient_one_way_streets,
+)
 from toolkit.rules.apply import apply_rules
 from toolkit.rules.vehicles import THRESHOLD_MISSING
 from toolkit.transforms.titles import ELLIPSIS as TITLE_ELLIPSIS
 from toolkit.transforms.titles import TITLE_MAX_LENGTH
 
-FIXTURE_EXTRACTED_ON = date(2026, 9, 8)
-
 
 @pytest.fixture
 def raw():
-    return build_raw_dataframe(load_fixture())
+    tables = load_fixture()
+    return build_raw_dataframe(tables, everything(tables))
 
 
 @pytest.fixture
@@ -80,55 +90,6 @@ def clean(raw):
         .pipe(discard_measures_out_of_model)
         .pipe(compute_vehicle_fields)
         .pipe(compute_period_fields, FIXTURE_EXTRACTED_ON)
-    )
-
-
-@pytest.fixture
-def captured_logs():
-    """Loguru does not go through `logging`: collect its records ourselves."""
-    collected: list[str] = []
-    handle = logger.add(collected.append, level="INFO", format="{message}")
-    yield collected
-    logger.remove(handle)
-
-
-def make_row(**overrides: Any) -> dict[str, Any]:
-    row: dict[str, Any] = dict.fromkeys(RAW_COLUMNS)
-    row.update(
-        a_file_id=1,
-        a_identifier="2024P10001",
-        a_title_html="Réglementant le stationnement rue de Test",
-        a_type="Permanent",
-        a_state="En vigueur",
-        a_start_date=date(2020, 1, 1),
-        a_signed_at=date(2019, 12, 20),
-        a_modified_at=datetime(2021, 3, 4, 0, 30, 0),
-        a_service="Mairie de Paris",
-        m_file_id=10,
-        m_type="interdiction de stationnement",
-        m_params=[["véhicule concerné (3)", "à tous les véhicules"]],
-        l_file_id=100,
-        l_scope="Un point",
-        l_road_name="Rue de Test",
-        l_district="11ème arrondissement",
-        l_point_house_number="12",
-    )
-    row.update(overrides)
-    return row
-
-
-def make_frame(*rows: dict[str, Any]) -> pl.DataFrame:
-    return pl.DataFrame(list(rows), schema=RAW_COLUMNS)
-
-
-def pipeline(*rows: dict[str, Any], today: date = FIXTURE_EXTRACTED_ON) -> pl.DataFrame:
-    return (
-        make_frame(*rows)
-        .pipe(compute_regulation_fields)
-        .pipe(compute_measure_fields)
-        .pipe(discard_measures_out_of_model)
-        .pipe(compute_vehicle_fields)
-        .pipe(compute_period_fields, today)
     )
 
 
@@ -263,9 +224,7 @@ def test_formatting_tags_do_not_cut_words(raw_title, cleaned):
     ],
 )
 def test_a_regulation_whose_title_says_it_is_repealed_is_left_out(title, left_out):
-    regulations = compute_regulation_fields(make_frame(make_row(a_title_html=title)))
-    result = apply_rules(regulations, [TITLE_SAYS_REPEALED])
-    assert result.frame.is_empty() is left_out
+    assert title_says_repealed(title) is left_out
 
 
 @pytest.mark.parametrize("raw_title", [None, "", "   ", "<p></p>", "&nbsp;"])
@@ -334,7 +293,9 @@ def test_no_document_url_is_invented(clean):
 
 
 def test_an_unknown_regulation_type_is_dropped_not_the_run(captured_logs):
-    rows = make_frame(make_row(), make_row(a_identifier="2024P10002", a_type="Provisoire"))
+    rows = make_frame(
+        make_row(), make_row(a_file_id=2, a_identifier="2024P10002", a_type="Provisoire")
+    )
     kept = compute_regulation_fields(rows)
     assert kept.get_column("a_identifier").to_list() == ["2024P10001"]
     assert any("unknown to catalog 1108" in line and "Provisoire" in line for line in captured_logs)
@@ -364,9 +325,9 @@ def test_the_catalog_table_is_complete():
     assert len(MEASURE_TYPE_BY_LABEL) == 32
 
 
-def test_an_unknown_measure_label_drops_its_act_with_a_warning(captured_logs):
-    """Paris can enrich the catalog: a new value is never guessed, nor stops the run, and what
-    it does to the act's other measures is not known."""
+def test_an_unknown_measure_label_not_understood_drops_its_act_with_a_warning(captured_logs):
+    """Paris can enrich the catalog: a new value is read as a free text, never guessed, nor
+    stops the run; not understood, what it does to the act's other measures is not known."""
     unknown = make_row(m_file_id=11, m_type="interdiction de klaxonner", l_file_id=None)
     beside = make_row()
     other_act = make_row(a_file_id=2, a_identifier="2024P10002", m_file_id=20, l_file_id=200)
@@ -377,6 +338,15 @@ def test_an_unknown_measure_label_drops_its_act_with_a_warning(captured_logs):
     dropped = [line for line in captured_logs if "unknown to catalog 1202" in line]
     assert len(dropped) == 1
     assert "'interdiction de klaxonner': 1" in dropped[0]
+
+
+def test_an_unknown_measure_label_that_says_nothing_drops_only_its_measure():
+    """Read as a free text and understood as saying nothing to publish ("pose de barrières"),
+    the label leaves the act's other measures as they are: its own is not published."""
+    unknown = make_row(m_file_id=11, m_type="pose de barrières", l_file_id=110)
+    beside = make_row()
+    df = pipeline(unknown, beside)
+    assert df.get_column("m_file_id").to_list() == [10]
 
 
 def test_measures_outside_the_model_are_read_then_dropped_and_counted(raw, captured_logs):
@@ -592,17 +562,21 @@ def test_a_pedestrian_area_keyed_at_15_kmh_gets_a_15_kmh_twin():
 
 
 @pytest.mark.parametrize(
-    "publish, kept",
-    [(True, {"2024P10001", "2024P10002", "2024P10003"}), (False, {"2024P10001", "2024P10003"})],
+    "authority, kept",
+    [
+        (None, {"2024P10001", "2024P10002", "2024P10003"}),
+        ("city", {"2024P10001", "2024P10003"}),
+        ("prefecture", {"2024P10002"}),
+    ],
 )
-def test_the_police_prefecture_is_published_only_behind_its_constant(publish, kept):
+def test_each_authority_keeps_its_acts(authority, kept):
     """A regulation with no service is not the prefecture's."""
     df = make_frame(
         make_row(),
         make_row(a_identifier="2024P10002", a_service="Préfecture de Police"),
         make_row(a_identifier="2024P10003", a_service=None),
     )
-    assert set(filter_police_prefecture(df, publish)["a_identifier"]) == kept
+    assert set(keep_authority(df, authority)["a_identifier"]) == kept
 
 
 def test_the_number_behind_another_channel_identifier_is_read_without_normalising():
@@ -633,8 +607,8 @@ def test_a_number_another_channel_published_is_not_created_again():
     """One act, one entry in DiaLog: the regulation already in place stays."""
     df = make_frame(
         make_row(),
-        make_row(a_identifier="2024T11570"),
-        make_row(a_identifier="2024P12345"),
+        make_row(a_file_id=2, a_identifier="2024T11570"),
+        make_row(a_file_id=3, a_identifier="2024P12345"),
     )
     numbers = index_by_eudonet_number(
         [("Paris_2024P12345", "Paris (préfecture)"), ("2024T11570", "Paris")]
@@ -646,14 +620,17 @@ def test_a_number_another_channel_published_is_not_created_again():
 
 def test_a_single_point_carries_only_a_parking_ban():
     """A ban, a speed or a gauge stands on a stretch of road, not on a house number."""
-    df = pl.DataFrame(
-        {
-            "a_identifier": ["1", "2", "3"],
-            "l_scope": ["Un point", "Un point", "Une section"],
-            "measure_type_": ["parkingProhibited", "noEntry", "noEntry"],
-        }
-    )
-    assert discard_points_beyond_parking(df)["a_identifier"].to_list() == ["1", "3"]
+    df = make_frame(
+        make_row(a_file_id=1, a_identifier="1"),
+        make_row(a_file_id=2, a_identifier="2"),
+        make_row(a_file_id=3, a_identifier="3", l_scope="Une section"),
+    ).with_columns(measure_type_=pl.Series(["parkingProhibited", "noEntry", "noEntry"]))
+    judged = judge_points_beyond_parking(df)
+    assert judged[POINT_BEYOND_PARKING.column].to_list()[1] == {
+        "status": "refused",
+        "detail": "noEntry",
+    }
+    assert drop_refused(judged, POINT_BEYOND_PARKING)["a_identifier"].to_list() == ["1", "3"]
 
 
 def copied_row(**overrides: Any) -> dict[str, Any]:
@@ -672,7 +649,13 @@ def test_a_copied_location_on_a_street_the_title_does_not_name_drops_its_whole_m
         copied_row(l_file_id=101, l_status="Ajoutée", l_road_name="Rue Pillet Will"),
         copied_row(m_file_id=11, l_file_id=110, l_road_name="Rue Pillet Will"),
     )
-    assert discard_measures_with_copied_locations(df)["l_file_id"].to_list() == [110]
+    judged = judge_copied_locations(df, everyone(df))
+    assert [v["detail"] for v in judged[COPIED_LOCATION.column].to_list()] == [
+        "status Maintenue",
+        None,
+        None,
+    ]
+    assert drop_refused(judged, COPIED_LOCATION)["l_file_id"].to_list() == [110]
 
 
 @pytest.mark.parametrize(
@@ -688,7 +671,9 @@ def test_a_copied_location_on_a_street_the_title_does_not_name_drops_its_whole_m
     ids=["entered for the act", "withdrawn", "permanent", "plural", "accent", "common words only"],
 )
 def test_a_location_entered_for_the_act_or_named_by_its_title_is_kept(overrides):
-    assert discard_measures_with_copied_locations(make_frame(copied_row(**overrides))).height == 1
+    frame = make_frame(copied_row(**overrides))
+    judged = judge_copied_locations(frame, everyone(frame))
+    assert drop_refused(judged, COPIED_LOCATION).height == 1
 
 
 def test_a_refused_location_is_dropped_and_its_regulation_goes_with_the_others(monkeypatch):
@@ -699,11 +684,17 @@ def test_a_refused_location_is_dropped_and_its_regulation_goes_with_the_others(m
     )
     refused = {11: "Cette adresse n'est pas reconnue", 20: "Les deux rues ne se croisent pas"}
     monkeypatch.setattr(location_filters, "load_refused_locations", lambda: refused)
-    kept = discard_refused_locations(df)
+    judged = judge_refused_locations(df)
+    assert [v["detail"] for v in judged[REFUSED_LOCATION.column].to_list()] == [
+        None,
+        "Cette adresse n'est pas reconnue",
+        "Les deux rues ne se croisent pas",
+    ]
+    kept = drop_refused(judged, REFUSED_LOCATION)
     assert kept["l_file_id"].to_list() == [10]
     assert set(kept["a_identifier"]) == {"2024P10001"}
     monkeypatch.setattr(location_filters, "load_refused_locations", lambda: {})
-    assert discard_refused_locations(df).height == df.height
+    assert drop_refused(judge_refused_locations(df), REFUSED_LOCATION).height == df.height
 
 
 def section_row(**overrides: Any) -> dict[str, Any]:
@@ -757,8 +748,26 @@ def test_a_bound_that_only_says_where_it_is_keeps_the_location(overrides):
     ],
 )
 def test_a_bound_that_qualifies_the_measure_drops_the_location(overrides, captured_logs):
-    assert discard_bound_qualifiers(pipeline(section_row(**overrides))).height == 0
+    judged = judge_bound_qualifiers(pipeline(section_row(**overrides)))
+    assert judged[BOUND_QUALIFIER.column].to_list()[0]["status"] == "refused"
+    assert drop_refused(judged, BOUND_QUALIFIER).height == 0
     assert any("bound qualifies the measure" in line for line in captured_logs)
+
+
+@pytest.mark.parametrize(
+    "overrides, detail",
+    [
+        ({"l_from_number_complement": "en vis à vis du"}, "number complement 'en vis à vis du'"),
+        ({"l_to_side": "côté impair"}, "one side of the street at a bound"),
+        (
+            {"l_from_direction": "dans le sens de la circulation générale"},
+            "one direction at a bound",
+        ),
+    ],
+)
+def test_a_qualified_bound_says_why_in_its_verdict(overrides, detail):
+    judged = judge_bound_qualifiers(pipeline(section_row(**overrides)))
+    assert judged[BOUND_QUALIFIER.column].to_list() == [{"status": "refused", "detail": detail}]
 
 
 def test_a_parking_ban_facing_the_number_is_dropped():

@@ -12,6 +12,7 @@ from toolkit.rules.rule import Nature, Outcome, Rule
 from toolkit.rules.vehicles import pedestrians_or_cycles_named
 from toolkit.transforms.titles import truncate_text
 
+from .verdicts import PARAMS, VEHICLE_REJECTION, among, refusals
 from .vocabulary import (
     ALL_VEHICLES_LABELS,
     EXEMPTED_OTHER,
@@ -155,19 +156,20 @@ def read_vehicle_set(
     return columns, rejection
 
 
-def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """`vehicleSet`, read from the named parameters of the measure.
-
-    Drops a measure restricting a value outside the closed list.
-    """
-    tally = VehicleTally()
+def judge_vehicle_fields(df: pl.DataFrame, alive: pl.Series) -> pl.DataFrame:
+    """`vehicleSet`, read from the parameters of the measure as its texts and lanes complete
+    them; refuses a measure that restricts a value outside the closed list, or whose
+    exemptions DiaLog cannot hold whole. Judged and counted on the rows still alive."""
+    tally, unseen = VehicleTally(), VehicleTally()
+    params = PARAMS if PARAMS in df.columns else "m_params"
     read = [
-        read_vehicle_set(label, params, tally)
-        for label, params in zip(df.get_column("m_type"), df.get_column("m_params").to_list())
+        read_vehicle_set(label, values, tally if is_alive else unseen)
+        for label, values, is_alive in zip(df["m_type"], df[params].to_list(), alive)
     ]
     vehicles = pl.DataFrame([columns for columns, _ in read], schema=VEHICLE_COLUMNS)
-    rejection = pl.Series("vehicle_rejection", [why for _, why in read], dtype=pl.Utf8)
-    df = df.with_columns(vehicles.get_columns()).with_columns(rejection)
+    df = df.with_columns(vehicles.get_columns()).with_columns(
+        among(alive, refusals([why for _, why in read])).alias(VEHICLE_REJECTION.column)
+    )
 
     if tally.kept_as_other:
         logger.warning(
@@ -179,25 +181,12 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
             f"{sum(tally.unknown_exemptions.values())} exemption values outside the DiaLog "
             f"enumeration, kept as 'other' + free text: {dict(tally.unknown_exemptions)}"
         )
-    motives = {
-        OUTSIDE_THE_CLOSED_LIST: lambda dropped: (
-            "measures restricting a vehicle value outside the closed list: "
+    if tally.outside_restrictions:
+        logger.warning(
+            "Measures restricting a vehicle value outside the closed list: "
             f"{dict(tally.outside_restrictions)}. Qualify it in vocabulary.py."
-        ),
-        EXEMPTIONS_TOO_LONG: lambda dropped: (
-            f"measures whose exemptions outside the DiaLog enumeration exceed the "
-            f"{OTHER_TYPE_TEXT_MAX_LENGTH} characters the API takes: cut, the measure would be "
-            f"wider than the act ({dict(Counter(dropped.unique('m_file_id')['m_type']))})"
-        ),
-    }
-    for why, motive in motives.items():
-        dropped = df.filter(pl.col("vehicle_rejection") == why)
-        if dropped.height:
-            logger.warning(
-                f"Dropping {dropped.height} rows of {dropped['m_file_id'].n_unique()} "
-                f"{motive(dropped)}"
-            )
-    return df.filter(pl.col("vehicle_rejection").is_null()).drop("vehicle_rejection")
+        )
+    return df
 
 
 def _restricted_text(texts: list[str]) -> str:

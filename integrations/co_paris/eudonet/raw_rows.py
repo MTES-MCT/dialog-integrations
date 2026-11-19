@@ -168,6 +168,8 @@ RAW_COLUMNS: dict[str, Any] = {
     "m_opening": pl.Utf8,
     "m_option_formulas": pl.List(pl.Utf8),
     "m_params": pl.List(pl.List(pl.Utf8)),
+    # Whether the measure's locations were read (`Expansion.located`).
+    "m_located": pl.Boolean,
     "l_file_id": pl.Int64,
     **{name: field.dtype for name, field in LOCATION_FIELDS.items()},
 }
@@ -258,12 +260,23 @@ def _group_by_parent(
     return grouped, orphans
 
 
-def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame:
+@dataclass(frozen=True)
+class Expansion:
+    """The measures whose children are read: locations (`2700`), and articles (`3200`)."""
+
+    located: frozenset[int]
+    articled: frozenset[int]
+
+
+def build_raw_dataframe(
+    tables: dict[str, list[dict[str, Any]]], expansion: Expansion, log: bool = True
+) -> pl.DataFrame:
     """One row per location, carrying its measure and its regulation.
 
     Childless parents are kept with null children so that the funnel counts them. The
     measures of `UNREAD_MEASURE_LABELS` get no row at all, with or without locations in the
-    tables, so a frozen dump and the online extraction give the same rows.
+    tables, and only the measures of `expansion` get their locations and articles, so a frozen
+    dump and the online extraction give the same rows.
     """
     regulations = tables.get(str(TABLE_REGULATIONS), [])
     measures = tables.get(str(TABLE_MEASURES), [])
@@ -276,7 +289,7 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
     )
 
     unread = [row for row in measures if not is_read(row)]
-    if unread:
+    if unread and log:
         kinds = Counter(displayed_value(row, MEASURE_NAME.descid) for row in unread)
         logger.info(
             f"Leaving aside {len(unread)} measures that change nothing else in their act: "
@@ -284,15 +297,10 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
         )
     measures = [row for row in measures if is_read(row)]
     measures_by_regulation, _ = _group_by_parent(measures, FIELD_REGULATION_LINK)
-    unreadable = count_unreadable_measures(tables)
-    if unreadable:
-        logger.warning(
-            f"Ignoring {unreadable} measures whose regulation the API account cannot read"
-        )
     locations_by_measure, orphan_locations = _group_by_parent(
         locations, FIELD_MEASURE_LINK, {row["FileId"] for row in measures}
     )
-    if orphan_locations:
+    if orphan_locations and log:
         logger.warning(f"Ignoring {orphan_locations} locations whose measure is out of scope")
 
     rows: list[dict[str, Any]] = []
@@ -309,25 +317,43 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
         if not own_measures:
             regulations_without_measure += 1
             rows.append(
-                {**regulation_fields, **_measure_fields(None, []), **_location_fields(None)}
+                {
+                    **regulation_fields,
+                    **_measure_fields(None, []),
+                    "m_located": False,
+                    **_location_fields(None),
+                }
             )
         for measure in own_measures:
+            file_id = measure["FileId"]
+            articled = file_id in expansion.articled
+            located = file_id in expansion.located
             measure_fields = _measure_fields(
                 measure,
-                _texts(articles_by_measure.get(measure["FileId"], []), MEASURE_ARTICLE_TEXT),
+                _texts(
+                    articles_by_measure.get(file_id, []) if articled else [], MEASURE_ARTICLE_TEXT
+                ),
             )
-            own_locations = locations_by_measure.get(measure["FileId"], [])
-            measures_without_location += not own_locations
+            own_locations = locations_by_measure.get(file_id, []) if located else []
+            measures_without_location += located and not own_locations
             for location in own_locations or [None]:
-                rows.append({**regulation_fields, **measure_fields, **_location_fields(location)})
+                rows.append(
+                    {
+                        **regulation_fields,
+                        **measure_fields,
+                        "m_located": located,
+                        **_location_fields(location),
+                    }
+                )
 
-    logger.info(
-        f"Built {len(rows)} raw rows from {len(regulations)} regulations, "
-        f"{len(measures)} measures and {len(locations)} locations"
-    )
-    if regulations_without_measure:
+    if log:
+        logger.info(
+            f"Built {len(rows)} raw rows from {len(regulations)} regulations, "
+            f"{len(measures)} measures and {len(locations)} locations"
+        )
+    if regulations_without_measure and log:
         logger.warning(f"{regulations_without_measure} regulations have no measure")
-    if measures_without_location:
+    if measures_without_location and log:
         logger.warning(f"{measures_without_location} measures have no location")
 
     # Eudonet pages in no stated order; the snapshot digest keeps measures and locations

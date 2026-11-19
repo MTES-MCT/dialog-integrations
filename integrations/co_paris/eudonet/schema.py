@@ -35,6 +35,7 @@ class EudonetRawDataSchema(pa.DataFrameModel):
     m_opening: str | None = pa.Field(nullable=True)
     m_option_formulas: list[str] | None = pa.Field(nullable=True)
     m_params: list[list[str]] | None = pa.Field(nullable=True)
+    m_located: bool | None = pa.Field(nullable=True)
     l_file_id: int | None = pa.Field(nullable=True)
     l_scope: str | None = pa.Field(nullable=True)
     l_road_name: str | None = pa.Field(nullable=True)

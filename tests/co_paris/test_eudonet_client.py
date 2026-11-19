@@ -186,6 +186,12 @@ def test_a_large_batch_still_empty_after_a_second_read_stops_the_extraction(monk
         client.search_by_ids(2700, [2705], 1200, list(range(1, 21)))
 
 
+def test_an_empty_batch_of_a_sparse_table_is_believed():
+    """Most measures have no article: an empty batch of them is no sign of a lost read."""
+    client = make_client([token_response(), rows_response([], total_rows=0, total_pages=1)])
+    assert client.search_by_ids(3200, [3204], 1200, list(range(1, 21)), sparse=True) == []
+
+
 def test_an_expired_token_is_renewed_and_the_call_replayed():
     client = make_client(
         [

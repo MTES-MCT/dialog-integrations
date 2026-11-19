@@ -10,14 +10,14 @@ users cannot be read, drops the one-way section, since how much of it the lane o
 known. A restored two-way traffic on the street contradicts it and drops it too.
 """
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass
 
 import polars as pl
 from loguru import logger
 
-from .counts import emptied_regulations
 from .locations import SCOPE_WHOLE_STREET, street_key
+from .verdicts import ONE_WAY_LANE, PARAMS, among, refusal
 from .vocabulary import (
     CYCLES_EXEMPTION_LABEL,
     EXEMPTION_BY_LABEL,
@@ -35,16 +35,12 @@ from .vocabulary import (
     LANE_TWO_WAY_VALUE,
     LANE_USERS_BY_LABEL,
     LANE_USERS_PARAMETER,
-    MEASURE_TYPE_BY_LABEL,
     MULTI_VALUE_SEPARATOR,
     ONE_WAY_FROM_COMPLEMENTS,
     ONE_WAY_TO_COMPLEMENTS,
     PARAGRAPH_EXEMPTION_PARAMETER,
 )
 
-_PUBLISHED = pl.col("m_type").is_in(
-    [label for label, kind in MEASURE_TYPE_BY_LABEL.items() if kind is not None]
-)
 RELATED_LABELS = LANE_LABELS | {
     LABEL_NO_CONTRAFLOW_CYCLES,
     LABEL_BOTH_WAYS_RESTORED,
@@ -191,10 +187,21 @@ def _judge(one_way: dict, related: list[dict]) -> tuple[list[str], str | None]:
     return list(dict.fromkeys(added)), None
 
 
-def arbitrate_one_way_streets(df: pl.DataFrame) -> pl.DataFrame:
-    """Give each one-way section the exemptions its act's lanes give it, or drop it; a measure
-    whose sections end up with different exemptions is split, one DiaLog measure each."""
-    rows = df.select(_COLUMNS).iter_rows(named=True)
+# The exemptions a one-way section takes from its act's lanes, "|"-joined: the key on which
+# its measure is split.
+LANE_EXEMPTIONS = "x_lane_exemptions"
+
+
+def judge_one_way_lanes(df: pl.DataFrame, alive: pl.Series) -> pl.DataFrame:
+    """Give each one-way section the exemptions its act's lanes give it (to `x_params`, and
+    `x_lane_exemptions` for `split_one_way_measures`), or refuse it. Reads the act's other
+    measures still alive, with their parameters as their texts complete them."""
+    params = PARAMS if PARAMS in df.columns else "m_params"
+    rows = (
+        df.filter(alive)
+        .select(*(c for c in _COLUMNS if c != "m_params"), pl.col(params).alias("m_params"))
+        .iter_rows(named=True)
+    )
     related_by_act: dict[int, list[dict]] = defaultdict(list)
     one_ways: list[dict] = []
     for row in rows:
@@ -215,50 +222,45 @@ def arbitrate_one_way_streets(df: pl.DataFrame) -> pl.DataFrame:
         elif exemptions:
             added[one_way["l_file_id"]] = exemptions
 
-    is_dropped = pl.col("l_file_id").is_in(list(reasons)) & (pl.col("m_type") == LABEL_ONE_WAY)
-    dropped = df.filter(is_dropped)
-    if dropped.height:
-        logger.warning(
-            f"Dropping {dropped.height} one-way street locations of "
-            f"{dropped['a_file_id'].n_unique()} regulations that another measure of the act "
-            f"may open the other way: {dict(Counter(reasons.values()).most_common())}; "
-            f"{emptied_regulations(df.filter(_PUBLISHED), is_dropped)} regulations left with "
-            "nothing published"
+    one_way_alive = (pl.col("m_type") == LABEL_ONE_WAY) & pl.lit(alive)
+    refused = pl.col("l_file_id").replace_strict(reasons, default=None, return_dtype=pl.String)
+    df = df.with_columns(
+        among(alive, refusal(pl.when(one_way_alive).then(refused))).alias(ONE_WAY_LANE.column)
+    )
+    if added:
+        logger.info(
+            f"{len(added)} one-way street locations of "
+            f"{df.filter(pl.col('l_file_id').is_in(list(added)))['a_file_id'].n_unique()} "
+            "regulations exempt the users of a lane of the act going the other way"
         )
-    df = df.filter(~is_dropped.fill_null(False))
-    if not added:
-        return df
-
-    one_way = pl.col("m_type") == LABEL_ONE_WAY
-    params = [
-        [*(measure_params or []), *([PARAGRAPH_EXEMPTION_PARAMETER, x] for x in added[location])]
+    lane_params = [
+        [*(values or []), *([PARAGRAPH_EXEMPTION_PARAMETER, x] for x in added[location])]
         if is_one_way and location in added
-        else measure_params
-        for location, measure_params, is_one_way in df.select(
-            "l_file_id", "m_params", one_way.alias("_one_way")
+        else values
+        for location, values, is_one_way in df.select(
+            "l_file_id", params, one_way_alive.alias("_one_way")
         ).iter_rows()
     ]
-    exemption_set = pl.Series(
-        [
-            "|".join(added.get(location, [])) if is_one_way else ""
-            for location, is_one_way in df.select("l_file_id", one_way).iter_rows()
-        ]
+    exemption_set = [
+        "|".join(added.get(location, [])) if is_one_way else ""
+        for location, is_one_way in df.select("l_file_id", one_way_alive).iter_rows()
+    ]
+    return df.with_columns(
+        pl.Series(PARAMS, lane_params, dtype=df.schema[params]),
+        pl.Series(LANE_EXEMPTIONS, exemption_set, dtype=pl.String),
     )
-    logger.info(
-        f"{len(added)} one-way street locations of "
-        f"{df.filter(pl.col('l_file_id').is_in(list(added)))['a_file_id'].n_unique()} "
-        "regulations exempt the users of a lane of the act going the other way"
-    )
-    # Keyed by the exemptions themselves: the same from one night to the next.
-    return (
-        df.with_columns(
-            pl.Series("m_params", params, dtype=df.schema["m_params"]), _set=exemption_set
-        )
-        .with_columns(
-            pl.when(pl.col("_set").n_unique().over("m_file_id") > 1)
-            .then(pl.format("{}-{}", pl.col("measure_group_key"), pl.col("_set")))
-            .otherwise(pl.col("measure_group_key"))
-            .alias("measure_group_key")
-        )
-        .drop("_set")
+
+
+def split_one_way_measures(kept: pl.DataFrame) -> pl.DataFrame:
+    """A measure whose published sections take different exemptions from the act's lanes is
+    split, one DiaLog measure each, keyed by the exemptions themselves: the same from one
+    night to the next. Among the sections published only (decided 2026-11-19)."""
+    if LANE_EXEMPTIONS not in kept.columns:
+        return kept
+    exemptions = pl.col(LANE_EXEMPTIONS).fill_null("")
+    return kept.with_columns(
+        pl.when(exemptions.n_unique().over("m_file_id") > 1)
+        .then(pl.format("{}-{}", pl.col("measure_group_key"), exemptions))
+        .otherwise(pl.col("measure_group_key"))
+        .alias("measure_group_key")
     )

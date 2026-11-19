@@ -1,7 +1,6 @@
 from datetime import date
 
 import httpx
-import pytest
 
 from api.dia_log_client.models import PostApiRegulationsAddBodyStatus
 from dialog.calls import DialogApi
@@ -11,34 +10,8 @@ from integrations.co_paris.eudonet.data_source_integration import (
 )
 from run.organization import BaseIntegration
 from settings import OrganizationSettings
-from tests.co_paris.eudonet_fixture import read_eudonet_from_the_fixture
+from tests.co_paris.conftest import OfflineSettings
 from toolkit.rules import period
-
-
-class OfflineSettings:
-    base_url = "http://offline.invalid"
-    client_id = "offline"
-    client_secret = "offline"
-
-
-@pytest.fixture
-def captured_regulations():
-    return []
-
-
-@pytest.fixture
-def integration(monkeypatch, captured_regulations):
-    read_eudonet_from_the_fixture(monkeypatch)
-    settings = OrganizationSettings(OfflineSettings(), "co_paris")  # type: ignore[arg-type]
-    integration = BaseIntegration.from_settings(settings)
-
-    def capture(regulations):
-        captured_regulations.extend(regulations)
-        return [regulation.identifier for regulation in regulations], []
-
-    monkeypatch.setattr(integration, "_integrate_regulations_add", capture)
-    monkeypatch.setattr(integration, "fetch_regulation_ids", lambda: [])
-    return integration
 
 
 def _eudonet_source():

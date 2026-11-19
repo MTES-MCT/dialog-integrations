@@ -1,35 +1,45 @@
 from typing import Any
 
+import polars as pl
 import pytest
-from loguru import logger
 
-from integrations.co_paris.eudonet import free_text
+from integrations.co_paris.eudonet import free_text, free_text_filters
 from integrations.co_paris.eudonet.citations import act_number_key
-from integrations.co_paris.eudonet.free_text import Code, Explained, clauses, read_text
-from integrations.co_paris.eudonet.free_text_filters import (
-    discard_location_details,
-    discard_superseded_regulations,
-    discard_unread_texts,
+from integrations.co_paris.eudonet.free_text import (
+    Code,
+    Explained,
+    clauses,
+    read_text,
 )
-from integrations.co_paris.eudonet.measures import (
-    compute_measure_fields,
-    discard_measures_out_of_model,
+from integrations.co_paris.eudonet.free_text_filters import (
+    judge_location_details,
+    judge_superseded_regulations,
+    judge_unread_texts,
 )
 from integrations.co_paris.eudonet.raw_rows import build_raw_dataframe
-from integrations.co_paris.eudonet.regulations import compute_regulation_fields
-from integrations.co_paris.eudonet.vehicles import compute_vehicle_fields
-from tests.co_paris.test_eudonet_transform import make_frame, make_row, pipeline
+from integrations.co_paris.eudonet.verdicts import (
+    LOCATION_DETAIL,
+    SOME_DAYS_ONLY,
+    SUPERSEDED_BY_LINK,
+    UNREAD_ACT_TEXT,
+    UNREAD_LOCATION_TEXT,
+    UNREAD_MEASURE_TEXT,
+)
+from tests.co_paris.acts import everything, make_frame, make_row, pipeline
+from tests.co_paris.steps import (
+    compute_measure_fields,
+    compute_regulation_fields,
+    compute_vehicle_fields,
+    details,
+    discard_location_details,
+    discard_measures_out_of_model,
+    discard_superseded_regulations,
+    discard_unread_texts,
+    everyone,
+)
 
 ONE_WAY = "sens interdit (ou sens unique)"
 PEDESTRIAN_AREA = "aire piétonne"
-
-
-@pytest.fixture
-def captured_logs():
-    collected: list[str] = []
-    handle = logger.add(collected.append, level="INFO", format="{message}")
-    yield collected
-    logger.remove(handle)
 
 
 def kept_measures(*rows: dict[str, Any]) -> list[int]:
@@ -411,7 +421,9 @@ def test_a_location_an_earlier_rule_dropped_still_explains_the_article():
         make_row(**GENERATED_LOCATION, m_article=GENERATED_ARTICLE + " - Rue de Test, N°12"),
         make_row(l_file_id=101, l_road_name="Rue de Test", l_direction="vers l'est"),
     )
-    assert discard_unread_texts(raw.head(1), all_rows=raw).height == 1
+    alive = pl.Series([True, False])
+    judged = judge_unread_texts(raw, alive)
+    assert details(judged, UNREAD_MEASURE_TEXT)[0] is None
 
 
 # Bicycles against the flow, pedestrian areas.
@@ -665,7 +677,7 @@ def test_a_section_complement_may_repeat_the_numbers_of_both_bounds():
 @pytest.mark.parametrize(
     "column, text", [("l_point_location_complement", "sur 2 places.,"), ("l_article_details", "13")]
 )
-def test_places_written_in_a_text_keep_a_point_but_not_a_section(column, text):
+def test_places_written_in_a_text_keep_a_point_and_a_section(column, text):
     point = make_row(l_file_id=10, **{column: text})
     section = make_row(
         l_file_id=11,
@@ -675,7 +687,7 @@ def test_places_written_in_a_text_keep_a_point_but_not_a_section(column, text):
         l_to_house_number="20",
         **{column: text},
     )
-    assert discard_unread_texts(make_frame(point, section))["l_file_id"].to_list() == [10]
+    assert discard_unread_texts(make_frame(point, section))["l_file_id"].to_list() == [10, 11]
 
 
 @pytest.mark.parametrize(
@@ -687,10 +699,40 @@ def test_places_written_in_a_text_keep_a_point_but_not_a_section(column, text):
         {"l_displayed_length": "sur 10 ml"},
     ],
 )
-def test_a_section_narrowed_by_its_details_is_dropped(overrides: dict[str, Any]):
+def test_a_whole_street_narrowed_by_its_details_is_dropped(overrides: dict[str, Any]):
     section = {"l_scope": "Une section", "l_point_house_number": None}
     df = make_frame(make_row(l_file_id=100), make_row(l_file_id=101, **section, **overrides))
     assert discard_location_details(df)["l_file_id"].to_list() == [100]
+
+
+BOUNDED = {
+    "l_scope": "Une section",
+    "l_point_house_number": None,
+    "l_from_house_number": "12",
+    "l_to_house_number": "20",
+}
+
+
+@pytest.mark.parametrize(
+    "overrides, kept",
+    [
+        ({"l_reserved_places": "4", "l_reserved_space_type": "payant"}, True),
+        ({"l_reserved_length": "10"}, False),
+        ({"l_displayed_length": "sur 10 ml"}, False),
+    ],
+)
+def test_a_bounded_section_keeps_its_places_not_a_length(overrides, kept):
+    df = make_frame(make_row(l_file_id=101, **BOUNDED, **overrides))
+    assert (discard_location_details(df).height == 1) is kept
+
+
+def test_places_written_for_a_whole_street_drop_it():
+    whole = make_row(l_scope="Une section", l_point_house_number=None, l_article_details="4")
+    frame = make_frame(whole)
+    judged = judge_unread_texts(frame, everyone(frame))
+    assert details(judged, UNREAD_LOCATION_TEXT) == [
+        "mail-merge details: places on the whole street"
+    ]
 
 
 def test_reserved_places_and_a_length_on_a_point_keep_it():
@@ -717,7 +759,7 @@ def test_each_article_reaches_its_own_regulation_or_measure():
         # The nightly copy is no longer read.
         "1400": [{"1101_fid": 1, "1402": "Article complémentaire", "1405": "Copie périmée"}],
     }
-    row = build_raw_dataframe(tables).row(0, named=True)
+    row = build_raw_dataframe(tables, everything(tables)).row(0, named=True)
     assert row["a_articles"] == ["Sont abrogés : …"]
     assert row["m_article"] == "Une voie est réservée"
 
@@ -886,3 +928,113 @@ def test_a_citation_naming_the_city_or_the_prefect_reaches_only_its_acts(
     )
     out = discard_superseded_regulations(make_frame(target, citing))
     assert (out.height == 1) is cited
+
+
+def test_each_superseding_reason_is_its_own_verdict():
+    df = make_frame(
+        make_row(a_file_id=1, a_identifier="2024P10001", a_next_version="123"),
+        make_row(a_file_id=2, a_identifier="2024P10002", a_key_1="PARIS RESPIRE"),
+        make_row(a_file_id=3, a_identifier="2024P10003", a_title_html="les dimanches"),
+    )
+    judged = judge_superseded_regulations(df, everyone(df))
+    assert details(judged, SUPERSEDED_BY_LINK) == ["a newer version", None, None]
+    assert details(judged, SOME_DAYS_ONLY) == [
+        None,
+        "operation on some days only",
+        "title names a time",
+    ]
+
+
+def test_an_unread_text_says_where_it_was_read():
+    df = make_frame(
+        make_row(a_file_id=1, a_identifier="2024P10001", m_file_id=10, m_paragraph="du lundi"),
+        make_row(
+            a_file_id=1,
+            a_identifier="2024P10001",
+            m_file_id=11,
+            l_file_id=110,
+            l_notes="SUR LA PISTE CYCLABLE",
+        ),
+    )
+    judged = judge_unread_texts(df, everyone(df))
+    assert details(judged, UNREAD_MEASURE_TEXT) == ["paragraph", None]
+    assert details(judged, UNREAD_LOCATION_TEXT) == [None, "location notes: zone name"]
+    assert details(judged, UNREAD_ACT_TEXT) == [None, None]
+
+
+def test_a_location_detail_names_the_detail():
+    df = make_frame(make_row(l_scope="Une section", l_displayed_length="24"))
+    assert details(judge_location_details(df), LOCATION_DETAIL) == ["displayed length"]
+
+
+def lane_act(**lane: Any) -> list[dict[str, Any]]:
+    published = make_row(a_file_id=1, m_file_id=10, l_file_id=100)
+    other = make_row(a_file_id=1, m_file_id=11, l_file_id=110, m_type="voie réservée", **lane)
+    return [published, other]
+
+
+@pytest.mark.parametrize(
+    "lane",
+    [{"m_paragraph": "une voie unidirectionnelle"}, {"l_to_location_complement": "voie bus"}],
+    ids=["paragraph", "location"],
+)
+def test_a_lane_named_on_a_measure_dialog_does_not_publish_drops_the_act(lane):
+    frame = make_frame(*lane_act(**lane))
+    judged = judge_unread_texts(frame, everyone(frame))
+    assert set(details(judged, UNREAD_ACT_TEXT)) == {
+        f"{'paragraph' if 'm_paragraph' in lane else 'location complement'}: zone name, "
+        "on a measure DiaLog does not publish"
+    }
+
+
+@pytest.mark.parametrize("m_type", ["zone 30", "interdiction double sens pour les cyclistes"])
+def test_a_zone_name_in_its_zone_measures_says_nothing(m_type):
+    published = make_row(a_file_id=1, m_file_id=10, l_file_id=100)
+    zone = make_row(a_file_id=1, m_file_id=11, l_file_id=110, m_type=m_type, m_paragraph="Censier")
+    assert discard_unread_texts(make_frame(published, zone)).height == 2
+
+
+def regulation(file_id: int, number: str, **overrides: Any) -> dict[str, Any]:
+    return {
+        "a_file_id": file_id,
+        "a_identifier": number,
+        "a_title_html": "",
+        "a_service": "Mairie de Paris",
+        **overrides,
+    }
+
+
+def cited(texts: dict[int, list[str]], no_longer: set[int] = set()) -> set[int]:
+    acts = [regulation(1, "2020P10001"), regulation(2, "2021P10002"), regulation(3, "2022P10003")]
+    return free_text_filters._cited_by_another_act(acts, texts, no_longer)
+
+
+def test_an_act_repealed_in_full_by_an_act_in_force_no_longer_cites():
+    texts = {
+        3: ["L'arrêté n° 2021P10002 est abrogé."],
+        2: ["L'arrêté n° 2020P10001 est abrogé."],
+    }
+    assert cited(texts) == {2}
+
+
+def test_an_act_repealed_in_part_or_amended_still_cites():
+    for words in ("est abrogé en ce qui concerne la portion de voie citée", "est modifié"):
+        texts = {3: [f"L'arrêté n° 2021P10002 {words}."], 2: ["L'arrêté n° 2020P10001 est abrogé."]}
+        assert cited(texts) == {1, 2}
+
+
+def test_an_act_its_own_link_says_repealed_no_longer_cites():
+    assert cited({2: ["L'arrêté n° 2020P10001 est abrogé."]}, no_longer={2}) == set()
+
+
+def test_the_act_that_repeals_is_not_repealed():
+    texts = {
+        3: ["Les rues A et B sont abrogées par l'arrêté n° 2021P10002."],
+        2: ["L'arrêté n° 2020P10001 est abrogé."],
+    }
+    assert 1 in cited(texts)
+
+
+def test_a_cycle_of_repeals_keeps_both_citing():
+    texts = {1: ["L'arrêté n° 2021P10002 est abrogé."], 2: ["L'arrêté n° 2020P10001 est abrogé."]}
+    assert cited(texts) == {1, 2}

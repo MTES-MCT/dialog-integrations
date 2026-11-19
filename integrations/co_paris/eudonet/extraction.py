@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
@@ -18,6 +19,7 @@ from .raw_rows import (
     TABLE_MEASURE_ARTICLES,
     TABLE_MEASURES,
     TABLE_REGULATIONS,
+    Expansion,
     is_read,
 )
 from .vocabulary import (
@@ -58,14 +60,24 @@ def perimeter_criteria(today: date) -> dict[str, Any]:
     )
 
 
-def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[str, Any]]]:
-    """The five tables of the perimeter, as flat rows keyed by table number.
+Tables = dict[str, list[dict[str, Any]]]
+
+
+def extract_tables(
+    client: EudonetClient,
+    today: date,
+    articles_of: Callable[[Tables], frozenset[int]],
+    locations_of: Callable[[Tables, frozenset[int]], frozenset[int]],
+) -> tuple[Tables, Expansion]:
+    """The five tables of the perimeter, as flat rows keyed by table number, and the measures
+    whose articles and locations were read.
 
     The API filters on a parent's fields one level up, not two: locations and the measures'
     articles are fetched by batches of measure identifiers, for every measure DiaLog does not
     publish too: a bus lane against the flow changes the one-way street of the same act, and
     their texts are read like the others. Only the measures that can change nothing else
-    (`UNREAD_MEASURE_LABELS`) are left aside.
+    (`UNREAD_MEASURE_LABELS`) are left aside, and those `articles_of` and `locations_of` do not
+    name: the articles first, then the locations of the acts they do not refuse already.
     """
     where = perimeter_criteria(today)
 
@@ -85,39 +97,54 @@ def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[st
             "Eudonet returned no article for the perimeter: their texts could not be checked"
         )
     read = [row for row in measures if is_read(row)]
-    logger.info(
-        f"Fetching the locations and articles of {len(read)} measures out of {len(measures)}"
-    )
-    measure_ids = [row["FileId"] for row in read]
-    locations = client.search_by_ids(
-        TABLE_LOCATIONS,
-        LOCATION_QUERY_FIELDS,
-        FILTER_MEASURE_OF_LOCATION,
-        measure_ids,
-        label="locations",
-    )
-
-    check_extraction_completeness(read, locations)
+    act_tables = {
+        str(TABLE_REGULATIONS): regulations,
+        str(TABLE_MEASURES): measures,
+        str(TABLE_COMPLEMENTARY_ARTICLES): articles,
+    }
+    articles_chosen = articles_of(act_tables)
+    articled = [row for row in read if row["FileId"] in articles_chosen]
     measure_articles = client.search_by_ids(
         TABLE_MEASURE_ARTICLES,
         MEASURE_ARTICLE_QUERY_FIELDS,
         TABLE_MEASURES,
-        measure_ids,
+        [row["FileId"] for row in articled],
         label="measure articles",
+        sparse=True,
     )
-    if read and not measure_articles:
+    if articled and not measure_articles:
         raise EudonetError(
             "Eudonet returned no measure article for the perimeter: their texts could not be "
             "checked"
         )
+    locations_chosen = locations_of(
+        {**act_tables, str(TABLE_MEASURE_ARTICLES): measure_articles}, articles_chosen
+    )
+    located = [row for row in read if row["FileId"] in locations_chosen]
+    logger.info(
+        f"Fetching the locations of {len(located)} measures out of {len(measures)}, their "
+        f"articles read for {len(articled)}: the others' acts are refused already"
+    )
+    locations = client.search_by_ids(
+        TABLE_LOCATIONS,
+        LOCATION_QUERY_FIELDS,
+        FILTER_MEASURE_OF_LOCATION,
+        [row["FileId"] for row in located],
+        label="locations",
+    )
+    check_extraction_completeness(located, locations)
 
-    return {
+    tables = {
         str(TABLE_REGULATIONS): regulations,
         str(TABLE_MEASURES): measures,
         str(TABLE_LOCATIONS): locations,
         str(TABLE_COMPLEMENTARY_ARTICLES): articles,
         str(TABLE_MEASURE_ARTICLES): measure_articles,
     }
+    expansion = Expansion(
+        frozenset(row["FileId"] for row in located), frozenset(row["FileId"] for row in articled)
+    )
+    return tables, expansion
 
 
 def check_extraction_completeness(

@@ -2,27 +2,19 @@ from typing import Any
 
 import polars as pl
 import pytest
-from loguru import logger
 
-from integrations.co_paris.eudonet.measures import (
+from integrations.co_paris.eudonet.one_way_exceptions import lane_users
+from tests.co_paris.acts import make_frame, make_row
+from tests.co_paris.steps import (
+    arbitrate_one_way_streets,
     compute_measure_fields,
+    compute_regulation_fields,
+    compute_vehicle_fields,
     discard_measures_out_of_model,
 )
-from integrations.co_paris.eudonet.one_way_exceptions import arbitrate_one_way_streets, lane_users
-from integrations.co_paris.eudonet.regulations import compute_regulation_fields
-from integrations.co_paris.eudonet.vehicles import compute_vehicle_fields
-from tests.co_paris.test_eudonet_transform import make_frame, make_row
 
 ONE_WAY = "sens interdit (ou sens unique)"
 BUS_USERS = [["véhicule concerné (2)", "des véhicules de transports en commun"]]
-
-
-@pytest.fixture
-def captured_logs():
-    collected: list[str] = []
-    handle = logger.add(collected.append, level="INFO", format="{message}")
-    yield collected
-    logger.remove(handle)
 
 
 def one_way(**overrides: Any) -> dict[str, Any]:
@@ -195,4 +187,27 @@ def test_the_users_of_a_lane_are_its_named_vehicles_and_its_exemptions():
         "véhicules de transports en commun",
         "aux cycles",
         "aux taxis",
+    ]
+
+
+def test_a_one_way_measure_is_split_among_its_published_sections_only():
+    import polars as pl
+
+    from integrations.co_paris.eudonet.one_way_exceptions import (
+        LANE_EXEMPTIONS,
+        split_one_way_measures,
+    )
+
+    kept = pl.DataFrame(
+        {
+            "m_file_id": [10, 10, 11, 11],
+            "measure_group_key": ["10", "10", "11", "11"],
+            LANE_EXEMPTIONS: ["aux cycles", "aux cycles", "aux cycles", ""],
+        }
+    )
+    assert split_one_way_measures(kept)["measure_group_key"].to_list() == [
+        "10",
+        "10",
+        "11-aux cycles",
+        "11-",
     ]

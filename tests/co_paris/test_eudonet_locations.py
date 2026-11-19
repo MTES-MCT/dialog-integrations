@@ -15,12 +15,12 @@ from integrations.co_paris.eudonet.locations import (
     ONE_DIRECTION,
     Bound,
     city_codes,
-    compute_location_fields,
     parse_bound,
     parse_house_number,
     parse_house_number_range,
 )
 from payloads.measures import build_location
+from tests.co_paris.steps import compute_location_fields
 from toolkit.rules.apply import apply_rules
 
 INPUT_COLUMNS = {

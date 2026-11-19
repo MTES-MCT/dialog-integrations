@@ -10,25 +10,24 @@ held: an act narrower than its title, or naming parking for a closure, publishes
 A title that amends another act describes that act: the citation rules deal with it, the rest
 of that clause says nothing of this act.
 
-The days, hours and markets of a title, "abrogé", and an exemption written in the title are
-checked earlier, by their own rules.
+The days, hours, markets and conditions of a title and "abrogé" are checked before it, by
+their own checks; an exemption written in the title alone, after the vehicles are read.
 """
 
 import re
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import StrEnum
 
 import polars as pl
-from loguru import logger
 
 from toolkit.transforms.pedestrian_area import PEDESTRIAN_AREA_SPEED
 
-from . import free_text_filters as texts
-from .counts import emptied_regulations
-from .free_text import Explained, _cut, _says_nothing, clauses, cut_street_names
+from .free_text import Explained, clauses, cut, cut_street_names, says_nothing
 from .locations import street_key
+from .printed import bound_numbers, location_spans, narrower_than_the_street, parameter_spans
 from .text import plain_text
+from .verdicts import UNREAD_TITLE, among, by_key
 from .vocabulary import (
     IMPLIED_MAX_SPEED_BY_LABEL,
     LABEL_PEDESTRIAN_AREA,
@@ -256,11 +255,11 @@ def read_title(title: str | None, explained: Explained) -> TitleReading:
                     bounds.append((match.group("from"), match.group("to")))
             rest = formula.pattern.sub(" ", rest)
         rest = cut_street_names(
-            _cut(rest, explained.spans) if explained.spans else rest,
+            cut(rest, explained.spans) if explained.spans else rest,
             explained.narrower_than_the_street,
         )
         rest = _ROAD_TYPE.sub(" ", rest)
-        if not _says_nothing(rest, explained.numbers):
+        if not says_nothing(rest, explained.numbers):
             unread.append(clause)
     return TitleReading(
         frozenset(families),
@@ -376,18 +375,17 @@ def _acts(rows: pl.DataFrame) -> dict[int, tuple[str | None, Act, Explained]]:
                 act.weights.update(
                     float(n.replace(",", ".")) for n in _WEIGHT_IN_PARAMETER.findall(pair[1])
                 )
-            spans[regulation] += [name, row["m_opening"] or "", *texts._parameter_spans(row)]
+            spans[regulation] += [name, row["m_opening"] or "", *parameter_spans(row)]
         if row["l_file_id"] is not None:
-            narrower[regulation].append(texts.narrower_than_the_street(row))
+            narrower[regulation].append(narrower_than_the_street(row))
             act.bound_keys.update(bound_key(row[c]) for c in _BOUND_COLUMNS if row[c])
-            act.numbers.update(texts._numbers(row))
-            spans[regulation] += [row[c] or "" for c in texts.LOCATION_PRINTED_COLUMNS]
+            act.numbers.update(bound_numbers(row))
+            spans[regulation] += location_spans(row)
             spans[regulation] += [
                 variant
                 for column in ("l_road_name", "l_from_road_name", "l_to_road_name")
                 for variant in street_variants(row[column] or "")
             ]
-            spans[regulation] += texts._district_variants(row)
     for regulation, (_, act, _) in acts.items():
         act.narrower_than_the_street = bool(narrower[regulation]) and all(narrower[regulation])
     return {
@@ -404,24 +402,15 @@ def _acts(rows: pl.DataFrame) -> dict[int, tuple[str | None, Act, Explained]]:
     }
 
 
-def discard_unread_titles(df: pl.DataFrame, all_rows: pl.DataFrame) -> pl.DataFrame:
-    """Drop the acts whose title says more than their fields, or what their fields do not hold.
-
-    `all_rows`: the raw rows, so the title is held against every measure and location of the
-    act, even those an earlier rule dropped (a parking act whose only measure went is still a
-    parking act)."""
-    present = set(df["a_file_id"].unique())
+def judge_unread_titles(rows: pl.DataFrame, alive: pl.Series) -> pl.DataFrame:
+    """Refuse the acts still alive whose title says more than their fields, or what their
+    fields do not hold. The title is held against every measure and location of the act, those
+    refused already included (a parking act whose only measure went is still a parking act)."""
+    present = rows.filter(alive)["a_file_id"].unique().to_list()
     reasons: dict[int, str] = {}
     for regulation, (title, act, explained) in _acts(
-        all_rows.filter(pl.col("a_file_id").is_in(list(present)))
+        rows.filter(pl.col("a_file_id").is_in(present))
     ).items():
         if why := disagreement(read_title(title, explained), act):
             reasons[regulation] = why
-    dropped = pl.col("a_file_id").is_in(list(reasons))
-    if reasons:
-        logger.warning(
-            f"Dropping {len(reasons)} regulations whose title says more than their fields hold: "
-            f"{dict(Counter(reasons.values()).most_common())}; "
-            f"{emptied_regulations(df, dropped)} regulations left with nothing"
-        )
-    return df.filter(~dropped)
+    return rows.with_columns(among(alive, by_key("a_file_id", reasons)).alias(UNREAD_TITLE.column))

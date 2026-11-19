@@ -34,9 +34,10 @@ class Code(StrEnum):
     AGAINST_THE_FLOW = "against the flow"
     # Values: the categories of vehicles that may enter a pedestrian area.
     PEDESTRIAN_ACCESS = "pedestrian access"
-    # The name of a zone 30, said by its own measure only.
+    # A few words without a number: understood only as a zone's name, in the paragraph of
+    # its measure (`free_text_filters.ZONE_NAME_MEASURES`).
     ZONE_NAME = "zone name"
-    # A number of places: the point itself on a single house number, narrower than a section.
+    # A number of places: how many the location holds, neutral on a point or a section.
     RESERVED_PLACES = "reserved places"
     # This act amends another one and quotes the new wording ("… est ainsi modifié : - le
     # trottoir côté impair…"): the other act's business in an article, this measure's own
@@ -353,7 +354,7 @@ def clauses(text: str | None) -> list[str]:
     return [part for part in parts if part]
 
 
-def _cut(clause: str, explained_spans: Iterable[str]) -> str:
+def cut(clause: str, explained_spans: Iterable[str]) -> str:
     """The clause without the spans the fields explain, longest first, on whole words."""
     tokens = _tokens(clause)
     words = [word for word, _, _ in tokens]
@@ -437,7 +438,7 @@ def cut_street_names(clause: str, narrower_than_the_street: bool = False) -> str
     return _without(clause, tokens, cut)
 
 
-def _says_nothing(clause: str, numbers: frozenset[str]) -> bool:
+def says_nothing(clause: str, numbers: frozenset[str]) -> bool:
     for word, _, _ in _tokens(clause):
         if word in LINKING_WORDS:
             continue
@@ -455,7 +456,7 @@ def _match(clause: str, numbers: frozenset[str] = frozenset()) -> Formula | None
         match = formula.pattern.search(clause)
         if match is None:
             continue
-        if formula.whole and not _says_nothing(
+        if formula.whole and not says_nothing(
             clause[: match.start()] + " " + clause[match.end() :], numbers
         ):
             continue
@@ -496,15 +497,15 @@ def read_text(text: str | None, explained: Explained = Explained()) -> Reading:
             blocking.append(clause)
             continue
         if explained.spans or explained.wording:
-            everything = _cut(clause, (*explained.spans, *explained.wording))
+            everything = cut(clause, (*explained.spans, *explained.wording))
             narrower = explained.narrower_than_the_street
-            if _says_nothing(cut_street_names(everything, narrower), explained.numbers):
+            if says_nothing(cut_street_names(everything, narrower), explained.numbers):
                 continue
         rest = cut_street_names(
-            _cut(clause, explained.spans) if explained.spans else clause,
+            cut(clause, explained.spans) if explained.spans else clause,
             explained.narrower_than_the_street,
         )
-        if _says_nothing(rest, explained.numbers):
+        if says_nothing(rest, explained.numbers):
             continue
         formula = _match(rest.strip(" .;:-–,"), explained.numbers)
         if formula is None:
@@ -512,12 +513,3 @@ def read_text(text: str | None, explained: Explained = Explained()) -> Reading:
         elif formula.code != Code.NEUTRAL:
             effects.append(Effect(formula.code, _values(formula, rest.strip(" .;:-–,"))))
     return Reading(tuple(effects), tuple(unread), tuple(blocking))
-
-
-def read_texts(texts: Iterable[str | None], explained: Explained = Explained()) -> Reading:
-    readings = [read_text(text, explained) for text in texts]
-    return Reading(
-        tuple(effect for reading in readings for effect in reading.effects),
-        tuple(clause for reading in readings for clause in reading.unread),
-        tuple(clause for reading in readings for clause in reading.blocking),
-    )

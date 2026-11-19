@@ -193,11 +193,13 @@ class EudonetClient:
         ids: Iterable[int],
         chunk: int = IN_LIST_MAX_VALUES,
         label: str = "",
+        sparse: bool = False,
     ) -> list[dict[str, Any]]:
         """Rows whose `id_field` is one of `ids`, queried in `IN_LIST` chunks.
 
         A location cannot be filtered on its regulation, two levels up (error 204), hence
-        reading it by its measures.
+        reading it by its measures. `sparse`: most identifiers have no row (a measure's
+        article, on 2 747 of 8 822 measures on 2026-11-17), an empty batch is believed.
         """
         name = label or f"table {table}"
         identifiers = list(ids)
@@ -207,7 +209,7 @@ class EudonetClient:
             batch = identifiers[start : start + chunk]
             where = criterion(id_field, IN_LIST, ";".join(str(value) for value in batch))
             batch_rows = self.search_all(table, columns, where, label=f"{name} batch {index}")
-            if not batch_rows:
+            if not batch_rows and not sparse:
                 # On 2026-09-08 a batch of 50 measures answered 0 rows once, then 64 on every
                 # replay: an empty batch is read twice before being believed.
                 logger.warning(

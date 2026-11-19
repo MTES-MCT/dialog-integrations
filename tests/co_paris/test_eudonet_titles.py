@@ -9,9 +9,11 @@ from integrations.co_paris.eudonet.titles import (
     Act,
     bound_key,
     disagreement,
-    discard_unread_titles,
+    judge_unread_titles,
     read_title,
 )
+from integrations.co_paris.eudonet.verdicts import UNREAD_TITLE
+from tests.co_paris.steps import discard_unread_titles, drop_refused
 
 RIVOLI = Explained(("Rue de Rivoli", "1er arrondissement"))
 
@@ -135,8 +137,8 @@ def test_title_bounds_on_a_whole_street_drop_the_act_even_through_a_dropped_loca
         l_to_road_name="RUE DE L ARBRE SEC",
     )
     raw = pl.DataFrame([whole_street, bounded], schema=RAW_COLUMNS)
-    assert discard_unread_titles(raw, raw)["a_identifier"].unique().to_list() == ["2026T10002"]
-    # A whole-street location dropped earlier still counts: the raw rows hold it.
+    assert discard_unread_titles(raw)["a_identifier"].unique().to_list() == ["2026T10002"]
+    # A whole-street location refused earlier still counts: the title reads every row.
     other = _row(
         a_file_id=2,
         a_identifier="2026T10002",
@@ -146,5 +148,24 @@ def test_title_bounds_on_a_whole_street_drop_the_act_even_through_a_dropped_loca
         l_scope="Une section",
         a_title_html=BOUNDED_TITLE,
     )
-    all_rows = pl.concat([raw, pl.DataFrame([other], schema=RAW_COLUMNS)])
-    assert discard_unread_titles(raw, all_rows).is_empty()
+    rows = pl.concat([raw, pl.DataFrame([other], schema=RAW_COLUMNS)])
+    alive = pl.Series([True, True, False])
+    assert drop_refused(judge_unread_titles(rows, alive), UNREAD_TITLE).is_empty()
+
+
+@pytest.mark.parametrize(
+    "title, condition",
+    [
+        ("relatif à la vitesse durant les épisodes de pollution atmosphérique", "épisodes"),
+        ("suspendant l'opération Paris Respire en cas d'épisode neigeux", "en cas d"),
+        (
+            "instituant les limitations d'accès aux berges de Seine lorsque la Seine monte",
+            "lorsque",
+        ),
+        ("réglementant le stationnement rue du Pic de Barrette", None),
+    ],
+)
+def test_a_title_that_sets_a_condition_is_caught_before_its_formulas(title, condition):
+    from integrations.co_paris.eudonet.regulations import title_condition
+
+    assert title_condition(title) == condition

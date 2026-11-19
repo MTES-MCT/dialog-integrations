@@ -1,29 +1,26 @@
-"""Drop the rows whose free text says more than what is published: everything is read, or the
-row goes.
+"""Refuse the rows whose free text says more than what is published: everything is read, or
+the row goes. And the act-level checks that read the other acts or the act's own fields:
+citations, links, keys and title.
 
 Every free text of an act (its notes and complementary articles, its measures' paragraphs,
 notes and articles, its locations' complements, mail-merge details and notes) goes through the
-same reading, `free_text.read_text`. A text not understood drops the record it qualifies: the
+same reading, `free_text.read_text`. A text not understood refuses the record it qualifies: the
 act, the measure or the location (decided 2026-11-18). On a measure DiaLog does not publish, or
-one of its locations, it drops the act: what such a text does to the other measures is not
-known (decided 2026-11-19). A text understood may carry an effect,
-applied here: an exemption, bicycles against the flow of the act's one-way streets, the list
-of vehicles a pedestrian area lets in, places on a single point.
-
-The title is not read in full: a description, it is checked for what changes the act (a day,
-an hour, "abrogé", the acts it repeals).
+one of its locations, it refuses the act: what such a text does to the other measures is not
+known (decided 2026-11-19). A text understood may carry an effect, applied here: an exemption,
+bicycles against the flow of the act's one-way streets, the list of vehicles a pedestrian area
+lets in, the number of places a location holds. The title has its own reader (`titles`).
 """
 
 import re
-from collections import Counter, defaultdict
+from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from enum import StrEnum
 
 import polars as pl
 from loguru import logger
 
-from .citations import Authority, act_number_key, numbers_repealed_or_amended
-from .counts import emptied_regulations
+from .citations import Authority, act_number_key, citations
 from .free_text import (
     TEMPLATE_PREFIX,
     WHOLE_LOCATION_WORDING,
@@ -32,16 +29,48 @@ from .free_text import (
     Reading,
     read_text,
 )
-from .locations import SCOPE_POINT, SCOPE_SECTION
+from .locations import SCOPE_POINT
+from .printed import (
+    BOUND_NUMBER_COLUMNS,
+    LOCATION_PRINTED_COLUMNS,
+    all_narrower,
+    bound_numbers,
+    location_spans,
+    narrower_than_the_street,
+    parameter_spans,
+    place_forms,
+)
 from .recurring_formulas import report_recurring_formulas
-from .regulations import TIME_LIMITED_KEYS, title_names_a_time
+from .regulations import (
+    TIME_LIMITED_KEYS,
+    title_condition,
+    title_names_a_time,
+    title_says_repealed,
+)
+from .verdicts import (
+    CITED_BY_ANOTHER_ACT,
+    LEVEL_KEY,
+    LOCATION_DETAIL,
+    PARAMS,
+    SOME_DAYS_ONLY,
+    SUPERSEDED_BY_LINK,
+    TITLE_CONDITION,
+    TITLE_SAYS_REPEALED,
+    UNREAD_ACT_TEXT,
+    UNREAD_LOCATION_TEXT,
+    UNREAD_MEASURE_TEXT,
+    Level,
+    among,
+    by_key,
+    refusals,
+)
 from .vocabulary import (
     CYCLES_EXEMPTION_LABEL,
+    LABEL_NO_CONTRAFLOW_CYCLES,
     LABEL_ONE_WAY,
     LABEL_PEDESTRIAN_AREA,
     LABEL_ZONE_30,
     MEASURE_TYPE_BY_LABEL,
-    MULTI_VALUE_SEPARATOR,
     PARAGRAPH_EXEMPTION_LABELS,
     PARAGRAPH_EXEMPTION_PARAMETER,
     PEDESTRIAN_ACCESS_PARAMETER,
@@ -61,24 +90,18 @@ SUPERSEDING_LINK_COLUMNS = {
 LOCATION_DETAIL_COLUMNS = {
     "l_reserved_space_type": "reserved places",
     "l_reserved_places": "reserved places",
-    "l_reserved_length": "reserved places",
+    "l_reserved_length": "reserved length",
     "l_displayed_length": "displayed length",
 }
-# On a single house number the reserved places are the point itself ("1 place payante au
-# droit du n° 12"): published as a point, it is no wider than the act (decided 2026-11-16).
-# Same for a displayed length on a point ("sur 24 mètres").
-DETAILS_KEPT_ON_A_POINT = tuple(LOCATION_DETAIL_COLUMNS)
-
-
-class Level(StrEnum):
-    REGULATION = "regulation"
-    MEASURE = "measure"
-    LOCATION = "location"
-
+# A number of places says how many a point or a bounded section holds, the geometry saying
+# where: nothing narrower. On a whole street, it is (decided 2026-11-19). A length on a single
+# house number is the point itself ("sur 24 mètres", decided 2026-11-16); on a section, a
+# portion of it.
+PLACE_COLUMNS = ("l_reserved_space_type", "l_reserved_places")
 
 # The free texts read, by the record they qualify.
 TEXT_COLUMNS: dict[Level, tuple[str, ...]] = {
-    Level.REGULATION: ("a_notes", "a_articles"),
+    Level.ACT: ("a_notes", "a_articles"),
     Level.MEASURE: ("m_paragraph", "m_notes", "m_article"),
     Level.LOCATION: (
         "l_from_location_complement",
@@ -100,38 +123,15 @@ TEXT_LABELS = {
     "l_article_details": "mail-merge details",
     "l_notes": "location notes",
 }
-# Where the numbers of the bounds are written: a number in a text must be one of them.
-BOUND_NUMBER_COLUMNS = (
-    "l_from_house_number",
-    "l_from_road_name",
-    "l_from_address_label",
-    "l_to_house_number",
-    "l_to_road_name",
-    "l_to_address_label",
-    "l_point_house_number",
-    "l_point_address_label",
-)
-# What the mail merge prints of a location into its measure's article.
-LOCATION_PRINTED_COLUMNS = (
-    "l_road_name",
-    "l_district",
-    "l_side",
-    "l_direction",
-    *BOUND_NUMBER_COLUMNS,
-    "l_from_number_complement",
-    "l_to_number_complement",
-    "l_point_number_complement",
-    "l_from_location_complement",
-    "l_to_location_complement",
-    "l_point_location_complement",
-    "l_reserved_space_type",
-    "l_article_details",
-    "l_displayed_length",
-)
-_DIGITS = re.compile(r"\d+")
-# A measure DiaLog does not publish: read like the others, dropped after the arbitration.
-_UNPUBLISHED = pl.col("m_type").is_not_null() & pl.col("m_type").is_in(
-    [label for label, kind in MEASURE_TYPE_BY_LABEL.items() if kind is None]
+# A few words without a number are a zone's name in the paragraph of its zone 30, or of the
+# cycle contraflow ban that goes with it. Anywhere else, a measure DiaLog does not publish
+# included, they are not understood: "une voie", "voie bus" say a lane, not the carriageway
+# (decided 2026-11-19).
+ZONE_NAME_MEASURES = frozenset({LABEL_ZONE_30, LABEL_NO_CONTRAFLOW_CYCLES})
+# A measure DiaLog does not publish, a label unknown to the catalog included: read like the
+# others, refused after the arbitration.
+_UNPUBLISHED = pl.col("m_type").is_not_null() & ~pl.col("m_type").is_in(
+    [label for label, kind in MEASURE_TYPE_BY_LABEL.items() if kind is not None]
 )
 
 
@@ -146,27 +146,54 @@ class FreeText:
     explained: Explained = Explained()
 
 
-def _cited_by_another_act(regulations: list[dict], texts_by_act: dict[int, list[str]]) -> set:
+# A cycle of repeals ("A repeals B", "B repeals A") never settles: past this many rounds, both
+# are taken as in force, so that both their citations count.
+MAX_REPEAL_ROUNDS = 20
+
+
+def _cited_by_another_act(
+    regulations: list[dict], texts_by_act: dict[int, list[str]], no_longer: set[int]
+) -> set:
     """`a_file_id` of the acts another act of the perimeter repeals, amends or suspends in one
     of its texts, while Eudonet still says "En vigueur" (70 of the 922 publishable acts on
-    2026-11-16)."""
-    citing: dict[tuple, set[tuple[int, Authority | None]]] = {}
+    2026-11-16).
+
+    Only an act still in force cites, published or not: not one of `no_longer` (a link or its
+    title says replaced or repealed), nor one another act in force repeals, to a fixed point.
+    An act only amended or suspended holds in part: it cites (decided 2026-11-19)."""
+    acts_by_key: dict[tuple, list[dict]] = defaultdict(list)
     for row in regulations:
-        texts = [row["a_title_html"] or "", *texts_by_act.get(row["a_file_id"], [])]
-        for key, authority in numbers_repealed_or_amended(texts):
-            citing.setdefault(key, set()).add((row["a_file_id"], authority))
-    cited = set()
-    for row in regulations:
-        key = act_number_key(row["a_identifier"] or "")
-        if key is None:
-            continue
-        excluded = _other_authority(row["a_service"])
-        if any(
-            act != row["a_file_id"] and (excluded is None or authority != excluded)
-            for act, authority in citing.get(key, set())
-        ):
-            cited.add(row["a_file_id"])
-    return cited
+        if (key := act_number_key(row["a_identifier"] or "")) is not None:
+            acts_by_key[key].append(row)
+    citations_of = {
+        row["a_file_id"]: citations(
+            [row["a_title_html"] or "", *texts_by_act.get(row["a_file_id"], [])]
+        )
+        for row in regulations
+    }
+
+    def hit(citers: set[int], repeals_only: bool) -> set[int]:
+        found = set()
+        for citer in citers:
+            for key, authority, repeals in citations_of[citer]:
+                if repeals_only and not repeals:
+                    continue
+                for row in acts_by_key.get(key, []):
+                    excluded = _other_authority(row["a_service"])
+                    if row["a_file_id"] != citer and (excluded is None or authority != excluded):
+                        found.add(row["a_file_id"])
+        return found
+
+    acts = set(citations_of)
+    in_force = following = acts - no_longer
+    for _ in range(MAX_REPEAL_ROUNDS):
+        following = acts - no_longer - hit(in_force, repeals_only=True)
+        if following == in_force:
+            break
+        in_force = following
+    else:
+        in_force |= following
+    return hit(in_force, repeals_only=False)
 
 
 def _other_authority(service: str | None) -> Authority | None:
@@ -176,10 +203,17 @@ def _other_authority(service: str | None) -> Authority | None:
     return Authority.CITY if service == SERVICE_POLICE_PREFECTURE else None
 
 
-def _regulation_reason(row: dict) -> str | None:
-    for column, reason in SUPERSEDING_LINK_COLUMNS.items():
-        if row[column]:
-            return reason
+def _superseding_link(row: dict) -> str | None:
+    return next(
+        (reason for column, reason in SUPERSEDING_LINK_COLUMNS.items() if row[column]), None
+    )
+
+
+def _title_repealed(row: dict) -> str | None:
+    return "title says repealed" if title_says_repealed(row["a_title_html"]) else None
+
+
+def _some_days_only(row: dict) -> str | None:
     if row["a_key_1"] in TIME_LIMITED_KEYS or row["a_key_2"] in TIME_LIMITED_KEYS:
         return "operation on some days only"
     if title_names_a_time(row["a_title_html"]):
@@ -187,12 +221,20 @@ def _regulation_reason(row: dict) -> str | None:
     return None
 
 
+def _title_condition(row: dict) -> str | None:
+    return title_condition(row["a_title_html"])
+
+
 def _texts_by_act(df: pl.DataFrame) -> dict[int, list[str]]:
     """Every free text of each act, its measures' included."""
     texts: dict[int, list[str]] = defaultdict(list)
-    for row in df.unique("a_file_id").select("a_file_id", "a_notes", "a_articles").iter_rows():
-        texts[row[0]] += [row[1] or "", *(row[2] or [])]
-    measures = df.filter(pl.col("m_file_id").is_not_null()).unique("m_file_id")
+    for act, notes, articles in (
+        df.unique("a_file_id", maintain_order=True)
+        .select("a_file_id", "a_notes", "a_articles")
+        .iter_rows()
+    ):
+        texts[act] += [notes or "", *(articles or [])]
+    measures = df.filter(pl.col("m_file_id").is_not_null()).unique("m_file_id", maintain_order=True)
     for act, *measure_texts in measures.select(
         "a_file_id", *TEXT_COLUMNS[Level.MEASURE]
     ).iter_rows():
@@ -200,89 +242,48 @@ def _texts_by_act(df: pl.DataFrame) -> dict[int, list[str]]:
     return texts
 
 
-def discard_superseded_regulations(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop a whole act when a link says it was replaced or repealed, when another act in force
-    repeals, amends or suspends it, or when its title or its keys say it holds on some days
-    only."""
-    columns = [
-        "a_file_id",
-        "a_identifier",
-        "a_title_html",
-        "a_key_1",
-        "a_key_2",
-        "a_service",
-        *SUPERSEDING_LINK_COLUMNS,
-    ]
-    regulations = list(df.select(columns).unique("a_file_id").iter_rows(named=True))
-    cited = _cited_by_another_act(regulations, _texts_by_act(df))
-    reasons = {
-        row["a_file_id"]: CITED_REASON if row["a_file_id"] in cited else _regulation_reason(row)
-        for row in regulations
-    }
-    dropped = {regulation for regulation, reason in reasons.items() if reason}
-    if dropped:
-        counts = Counter(reasons[regulation] for regulation in dropped)
-        logger.warning(
-            f"Dropping {len(dropped)} regulations replaced, repealed or limited to some days by "
-            f"a link, another act, their keys or their title: {dict(counts.most_common())}"
+def judge_superseded_regulations(rows: pl.DataFrame, alive: pl.Series) -> pl.DataFrame:
+    """Refuse a whole act when another act in force repeals, amends or suspends it, when a link
+    or its title says it was replaced or repealed, or when its title or its keys say it holds
+    on some days only or under a condition. Reads the other acts still alive."""
+    present = rows.filter(alive)
+    regulations = list(
+        present.unique("a_file_id", maintain_order=True)
+        .select(
+            "a_file_id",
+            "a_identifier",
+            "a_title_html",
+            "a_key_1",
+            "a_key_2",
+            "a_service",
+            *SUPERSEDING_LINK_COLUMNS,
         )
-    return df.filter(~pl.col("a_file_id").is_in(list(dropped)))
-
-
-def _numbers(row: dict) -> frozenset[str]:
-    return frozenset(
-        str(int(digits))
-        for column in BOUND_NUMBER_COLUMNS
-        for digits in _DIGITS.findall(row[column] or "")
+        .iter_rows(named=True)
     )
-
-
-def _parameter_spans(row: dict) -> list[str]:
-    """The parameter values, alone and after each formula the mail merge prints before an
-    optional one."""
-    values = []
-    for pair in row["m_params"] or []:
-        if len(pair) == 2 and pair[1].strip():
-            values.append(pair[1].strip())
-            for part in pair[1].split(MULTI_VALUE_SEPARATOR):
-                # Printed with or without its preposition: "aux véhicules de secours".
-                values += [part.strip(), re.sub(r"^(aux|à|au|des)\s+", "", part.strip())]
-    formulas = [formula for formula in row["m_option_formulas"] or [] if formula]
-    return [*values, *formulas, *(f"{formula} {value}" for formula in formulas for value in values)]
-
-
-# "5ème arrondissement" is also typed "5e arrondissement".
-_DISTRICT_NUMBER = re.compile(r"^(\d+)(?:ème|er|e)\b")
-
-
-def _district_variants(location: dict) -> list[str]:
-    district = location["l_district"] or ""
-    return [
-        _DISTRICT_NUMBER.sub(rf"\g<1>{suffix}", part.strip())
-        for part in district.split(";")
-        for suffix in ("e", "ème", "er")
-    ]
-
-
-def _places(location: dict) -> list[str]:
-    """How the mail merge prints a number of places: "sur 4 places", "4 place.s"."""
-    counts = {
-        value.strip()
-        for value in (location["l_reserved_places"], location["l_article_details"])
-        if value and value.strip().isdigit()
+    reasons: dict[str, Callable[[dict], str | None]] = {
+        SUPERSEDED_BY_LINK.column: _superseding_link,
+        SOME_DAYS_ONLY.column: _some_days_only,
+        TITLE_SAYS_REPEALED.column: _title_repealed,
+        TITLE_CONDITION.column: _title_condition,
     }
-    kind = (location["l_reserved_space_type"] or "").strip()
-    forms = ("sur {} places", "sur {} place", "{} place.s", "{} places", "sur {} emplacements")
-    printed = [form.format(count) for count in counts for form in forms]
-    return [*printed, *(f"{form} {kind}" for form in printed if kind)]
+    found = {
+        column: {row["a_file_id"]: why for row in regulations if (why := reason(row))}
+        for column, reason in reasons.items()
+    }
+    no_longer = set(found[SUPERSEDED_BY_LINK.column]) | set(found[TITLE_SAYS_REPEALED.column])
+    cited = _cited_by_another_act(regulations, _texts_by_act(present), no_longer)
+    found = {CITED_BY_ANOTHER_ACT.column: dict.fromkeys(cited, CITED_REASON), **found}
+    return rows.with_columns(
+        among(alive, by_key("a_file_id", details)).alias(column)
+        for column, details in found.items()
+    )
 
 
 def _measure_explained(measure: dict, locations: list[dict]) -> Explained:
     """What a measure's own fields and its locations print into its article."""
     spans = [
-        *(location[column] or "" for location in locations for column in LOCATION_PRINTED_COLUMNS),
-        *(variant for location in locations for variant in _district_variants(location)),
-        *(form for location in locations for form in _places(location)),
+        *(span for location in locations for span in location_spans(location)),
+        *(form for location in locations for form in place_forms(location)),
     ]
     wording = [
         TEMPLATE_PREFIX,
@@ -290,120 +291,111 @@ def _measure_explained(measure: dict, locations: list[dict]) -> Explained:
         measure["m_opening"] or "",
         measure["m_paragraph"] or "",
         measure["m_notes"] or "",
-        *_parameter_spans(measure),
+        *parameter_spans(measure),
     ]
-    numbers = frozenset(number for location in locations for number in _numbers(location))
+    numbers = frozenset(number for location in locations for number in bound_numbers(location))
     return Explained(
         tuple(span for span in spans if span.strip()),
         numbers,
         tuple(span for span in wording if span.strip()),
-        _all_narrower(locations),
+        all_narrower(locations),
     )
 
 
-def narrower_than_the_street(location: dict) -> bool:
-    """A point, or a section with at least one bound: a section named alone is the whole street."""
-    if location["l_scope"] == SCOPE_POINT:
-        return True
-    return location["l_scope"] == SCOPE_SECTION and any(
-        location[column] for column in BOUND_NUMBER_COLUMNS
-    )
-
-
-def _all_narrower(locations: list[dict]) -> bool:
-    return bool(locations) and all(narrower_than_the_street(location) for location in locations)
-
-
-def free_texts(df: pl.DataFrame, all_rows: pl.DataFrame | None = None) -> list[FreeText]:
-    """The free texts of every act: one array, each text with the record it qualifies.
-
-    `all_rows`: the raw rows, whose locations explain a measure's article even when an earlier
-    rule dropped them (one direction, one side)."""
+def _act_texts(acts: pl.DataFrame, explained_of: Callable[[int], Explained]) -> list[FreeText]:
     texts: list[FreeText] = []
+    for act, notes, articles in (
+        acts.unique("a_file_id", maintain_order=True)
+        .select("a_file_id", "a_notes", "a_articles")
+        .iter_rows()
+    ):
+        explained = explained_of(act)
+        if notes:
+            texts.append(FreeText(Level.ACT, act, "a_notes", notes, explained))
+        texts += [
+            FreeText(Level.ACT, act, "a_articles", text, explained) for text in articles or []
+        ]
+    return texts
+
+
+def free_texts(rows: pl.DataFrame, alive: pl.Series) -> list[FreeText]:
+    """The free texts of the records still alive, each with the record it qualifies. A
+    measure's article is explained by all its locations, those refused already included: it
+    prints them all."""
+    present = rows.filter(alive)
     location_columns = [
         "a_file_id",
+        "m_file_id",
         "l_file_id",
         "l_scope",
         *LOCATION_PRINTED_COLUMNS,
         "l_reserved_places",
         "l_notes",
     ]
-    present = set(df["l_file_id"].drop_nulls().to_list())
     locations_by_measure: dict[int, list[dict]] = defaultdict(list)
-    for row in (
-        (df if all_rows is None else all_rows)
-        .filter(pl.col("l_file_id").is_not_null())
-        .unique("l_file_id")
-        .select("m_file_id", *location_columns)
+    locations_by_act: dict[int, list[dict]] = defaultdict(list)
+    for location in (
+        rows.filter(pl.col("l_file_id").is_not_null())
+        .unique("l_file_id", maintain_order=True)
+        .select(*dict.fromkeys(location_columns))
         .iter_rows(named=True)
     ):
-        locations_by_measure[row["m_file_id"]].append(row)
-    locations_by_act: dict[int, list[dict]] = defaultdict(list)
-    for group in locations_by_measure.values():
-        for location in group:
-            locations_by_act[location["a_file_id"]].append(location)
+        locations_by_measure[location["m_file_id"]].append(location)
+        locations_by_act[location["a_file_id"]].append(location)
 
-    for row in df.unique("a_file_id").select("a_file_id", "a_notes", "a_articles").iter_rows():
-        act, notes, articles = row
-        on_act = Explained(narrower_than_the_street=_all_narrower(locations_by_act[act]))
-        if notes:
-            texts.append(FreeText(Level.REGULATION, act, "a_notes", notes, on_act))
-        texts += [
-            FreeText(Level.REGULATION, act, "a_articles", text, on_act) for text in articles or []
-        ]
-
+    texts = _act_texts(
+        present,
+        lambda act: Explained(narrower_than_the_street=all_narrower(locations_by_act[act])),
+    )
     measure_columns = ["m_file_id", "m_opening", "m_option_formulas", "m_params"]
     for measure in (
-        df.filter(pl.col("m_file_id").is_not_null())
-        .unique("m_file_id")
+        present.filter(pl.col("m_file_id").is_not_null())
+        .unique("m_file_id", maintain_order=True)
         .select(*dict.fromkeys([*measure_columns, *TEXT_COLUMNS[Level.MEASURE]]))
         .iter_rows(named=True)
     ):
-        locations = locations_by_measure[measure["m_file_id"]]
-        on_measure = Explained(narrower_than_the_street=_all_narrower(locations))
+        record = measure["m_file_id"]
+        locations = locations_by_measure[record]
+        on_measure = Explained(narrower_than_the_street=all_narrower(locations))
         for column in ("m_paragraph", "m_notes"):
             if measure[column]:
-                texts.append(
-                    FreeText(
-                        Level.MEASURE, measure["m_file_id"], column, measure[column], on_measure
-                    )
-                )
+                texts.append(FreeText(Level.MEASURE, record, column, measure[column], on_measure))
         if measure["m_article"]:
-            explained = _measure_explained(measure, locations_by_measure[measure["m_file_id"]])
+            explained = _measure_explained(measure, locations)
             texts.append(
-                FreeText(
-                    Level.MEASURE,
-                    measure["m_file_id"],
-                    "m_article",
-                    measure["m_article"],
-                    explained,
-                )
+                FreeText(Level.MEASURE, record, "m_article", measure["m_article"], explained)
             )
 
-    present_locations = (
-        location
-        for group in locations_by_measure.values()
-        for location in group
-        if location["l_file_id"] in present
-    )
-    for location in present_locations:
-        explained = Explained(
-            numbers=_numbers(location),
-            narrower_than_the_street=narrower_than_the_street(location),
-        )
-        for column in TEXT_COLUMNS[Level.LOCATION]:
-            if location[column]:
-                texts.append(
-                    FreeText(
-                        Level.LOCATION, location["l_file_id"], column, location[column], explained
-                    )
-                )
+    present_locations = set(present["l_file_id"].drop_nulls().to_list())
+    for locations in locations_by_measure.values():
+        for location in locations:
+            if location["l_file_id"] not in present_locations:
+                continue
+            explained = Explained(
+                numbers=bound_numbers(location),
+                narrower_than_the_street=narrower_than_the_street(location),
+            )
+            texts += [
+                FreeText(Level.LOCATION, location["l_file_id"], column, location[column], explained)
+                for column in TEXT_COLUMNS[Level.LOCATION]
+                if location[column]
+            ]
     return texts
+
+
+def unread_act_texts(df: pl.DataFrame) -> dict[int, str]:
+    """The acts whose own texts (notes, complementary articles) are not understood even read
+    as leniently as they can be, as if every location were narrower than the street: refused
+    whatever their locations say, before they are read."""
+    lenient = Explained(narrower_than_the_street=True)
+    texts = _act_texts(df, lambda act: lenient)
+    readings = [(text, read_text(text.text, text.explained)) for text in texts]
+    return _apply(df, readings).dropped[Level.ACT]
 
 
 @dataclass
 class Outcome:
-    """What the readings do to the rows: records dropped (with why), parameters added."""
+    """What the readings do to the rows: records refused (with why), parameters added."""
 
     dropped: dict[Level, dict[int, str]]
     added_params: dict[int, list[list[str]]]
@@ -415,10 +407,11 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
     """What the readings do. A text understood on a measure DiaLog does not publish, or on one
     of its locations, qualifies that record only, except for what reaches the act's other
     measures: riders against the flow, the vehicles let into its pedestrian areas. Its
-    exemptions are kept on it, for whoever reads who uses a lane."""
+    exemptions are kept on it, for whoever reads who uses a lane. A problem there refuses the
+    act: what it does to the other measures is not known."""
     measures = (
         df.filter(pl.col("m_file_id").is_not_null())
-        .unique("m_file_id")
+        .unique("m_file_id", maintain_order=True)
         .select("m_file_id", "a_file_id", "m_type")
     )
     measure_type = dict(zip(measures["m_file_id"], measures["m_type"]))
@@ -427,9 +420,16 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
     measures_of_act: dict[int, list[int]] = defaultdict(list)
     for measure, act in act_of_measure.items():
         measures_of_act[act].append(measure)
-    locations = df.filter(pl.col("l_file_id").is_not_null()).unique("l_file_id")
-    scope = dict(zip(locations["l_file_id"], locations["l_scope"]))
+    locations = df.filter(pl.col("l_file_id").is_not_null()).unique(
+        "l_file_id", maintain_order=True
+    )
     measure_of_location = dict(zip(locations["l_file_id"], locations["m_file_id"]))
+    narrower = {
+        row["l_file_id"]: narrower_than_the_street(row)
+        for row in locations.select("l_file_id", "l_scope", *BOUND_NUMBER_COLUMNS).iter_rows(
+            named=True
+        )
+    }
 
     dropped: dict[Level, dict[int, str]] = {level: {} for level in Level}
     added: dict[int, list[list[str]]] = defaultdict(list)
@@ -438,16 +438,25 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
     for text, reading in readings:
         label = TEXT_LABELS[text.column]
         problems = [] if reading.understood else [label]
-        if text.level == Level.LOCATION:
+        measure = {
+            Level.MEASURE: text.record,
+            Level.LOCATION: measure_of_location.get(text.record),
+        }.get(text.level)
+        if text.level is Level.LOCATION:
             for effect in reading.effects:
-                if measure_of_location.get(text.record) in unpublished:
+                if effect.code == Code.ZONE_NAME:
+                    # See `ZONE_NAME_MEASURES`: on a location, never a name.
+                    problems.append(f"{label}: {effect.code}")
+                    continue
+                if measure in unpublished:
                     continue
                 if effect.code != Code.RESERVED_PLACES:
                     problems.append(f"{label}: {effect.code}")
-                elif scope.get(text.record) != SCOPE_POINT:
-                    problems.append(f"{label}: places on a section")
+                elif not narrower.get(text.record, False):
+                    # See `PLACE_COLUMNS`.
+                    problems.append(f"{label}: places on the whole street")
         elif reading.understood:
-            is_act = text.level == Level.REGULATION
+            is_act = text.level is Level.ACT
             act = text.record if is_act else act_of_measure[text.record]
             is_unpublished = not is_act and text.record in unpublished
             own = measures_of_act[act] if is_act or is_unpublished else [text.record]
@@ -464,6 +473,12 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
                             for category in effect.values
                             for label in exemption_labels(category)
                         ]
+                elif effect.code == Code.ZONE_NAME:
+                    if not (
+                        text.column == "m_paragraph"
+                        and measure_type.get(text.record) in ZONE_NAME_MEASURES
+                    ):
+                        problems.append(f"{label}: {effect.code}")
                 elif is_unpublished:
                     if effect.code == Code.EXEMPTION:
                         added[text.record] += [
@@ -484,13 +499,15 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
                         added[text.record] += [[PARAGRAPH_EXEMPTION_PARAMETER, x] for x in labels]
                     else:
                         problems.append(f"{label}: exemption")
-                elif not (
-                    effect.code == Code.ZONE_NAME
-                    and text.column == "m_paragraph"
-                    and measure_type[text.record] == LABEL_ZONE_30
-                ):
+                else:
                     problems.append(f"{label}: {effect.code}")
-        if problems:
+        if not problems:
+            continue
+        if measure in unpublished:
+            dropped[Level.ACT].setdefault(
+                act_of_measure[measure], f"{problems[0]}, on a measure DiaLog does not publish"
+            )
+        else:
             dropped[text.level].setdefault(text.record, problems[0])
     return Outcome(dropped, dict(added), dict(against_the_flow))
 
@@ -501,58 +518,41 @@ def _exemption(value: str) -> str:
 
 def _report(readings: list[tuple[FreeText, Reading]], alerts: list[str] | None) -> None:
     for level, texts, team_label in (
-        (Level.REGULATION, "Regulation texts", "textes des arrêtés"),
+        (Level.ACT, "Regulation texts", "textes des arrêtés"),
         (Level.MEASURE, "Measure texts", "textes des mesures"),
         (Level.LOCATION, "Location texts", "textes des localisations"),
     ):
         by_record: dict[int, list[str]] = defaultdict(list)
         for text, reading in readings:
-            if text.level == level:
+            if text.level is level:
                 blocking = set(reading.blocking)
                 by_record[text.record] += [c for c in reading.unread if c not in blocking]
         report_recurring_formulas(by_record.values(), texts, team_label, alerts)
 
 
-def _drop_acts_of_unpublished_measures(df: pl.DataFrame, outcome: Outcome) -> None:
-    """A text not understood on a measure DiaLog does not publish, or on one of its locations,
-    drops the act instead."""
-    unpublished = df.filter(_UNPUBLISHED)
-    act_of_measure = dict(zip(unpublished["m_file_id"], unpublished["a_file_id"]))
-    located = unpublished.filter(pl.col("l_file_id").is_not_null())
-    act_of_location = dict(zip(located["l_file_id"], located["a_file_id"]))
-    for level, act_of in ((Level.MEASURE, act_of_measure), (Level.LOCATION, act_of_location)):
-        for record in [record for record in outcome.dropped[level] if record in act_of]:
-            reason = outcome.dropped[level].pop(record)
-            outcome.dropped[Level.REGULATION].setdefault(
-                act_of[record], f"{reason}, on a measure DiaLog does not publish"
-            )
-
-
-def discard_unread_texts(
-    df: pl.DataFrame, alerts: list[str] | None = None, all_rows: pl.DataFrame | None = None
+def judge_unread_texts(
+    rows: pl.DataFrame, alive: pl.Series, alerts: list[str] | None = None
 ) -> pl.DataFrame:
-    """Read every free text; drop the act, measure or location a text not understood qualifies,
-    and apply what the texts understood say."""
-    texts = free_texts(df, all_rows)
-    readings = [(text, read_text(text.text, text.explained)) for text in texts]
+    """Read the free texts of the records still alive; refuse the act, measure or location a
+    text not understood qualifies, and add what the texts understood say to `x_params`."""
+    readings = [(text, read_text(text.text, text.explained)) for text in free_texts(rows, alive)]
     _report(readings, alerts)
-    outcome = _apply(df, readings)
-    _drop_acts_of_unpublished_measures(df, outcome)
+    outcome = _apply(rows.filter(alive), readings)
 
     against = (pl.col("m_type") == LABEL_ONE_WAY) & pl.col("a_file_id").is_in(
         list(outcome.against_the_flow)
     )
     params = []
-    for act, measure, measure_params, one_way in df.select(
-        "a_file_id", "m_file_id", "m_params", against.alias("_against")
+    for act, measure, measure_params, one_way, is_alive in rows.select(
+        "a_file_id", "m_file_id", "m_params", against.alias("_against"), pl.lit(alive)
     ).iter_rows():
-        extra = list(outcome.added_params.get(measure, []))
-        if one_way:
+        extra = list(outcome.added_params.get(measure, [])) if is_alive else []
+        if one_way and is_alive:
             riders = dict.fromkeys(outcome.against_the_flow[act])
             extra += [[PARAGRAPH_EXEMPTION_PARAMETER, rider] for rider in riders]
         params.append([*(measure_params or []), *extra] if extra else measure_params)
-    df = df.with_columns(pl.Series("m_params", params, dtype=df.schema["m_params"]))
-    exempted = df.filter(against)
+    rows = rows.with_columns(pl.Series(PARAMS, params, dtype=rows.schema["m_params"]))
+    exempted = rows.filter(against & pl.lit(alive))
     if exempted.height:
         logger.info(
             f"{exempted['m_file_id'].n_unique()} one-way street measures of "
@@ -568,51 +568,34 @@ def discard_unread_texts(
             f"{pedestrian_lists} pedestrian areas published with the closed list of vehicles "
             "their act lets in, instead of the local access exemption"
         )
-
-    for level, column, kind in (
-        (Level.REGULATION, "a_file_id", "regulations"),
-        (Level.MEASURE, "m_file_id", "measures"),
-        (Level.LOCATION, "l_file_id", "locations"),
-    ):
-        reasons = outcome.dropped[level]
-        if not reasons:
-            continue
-        is_dropped = pl.col(column).is_in(list(reasons))
-        dropped = df.filter(is_dropped)
-        if dropped.height:
-            counts = Counter(reasons[record] for record in dropped[column].unique())
-            logger.warning(
-                f"Dropping {dropped[column].n_unique()} {kind} whose free text says more than "
-                f"the published fields: {dict(counts.most_common())}; "
-                f"{emptied_regulations(df, is_dropped)} regulations left with nothing"
-            )
-        df = df.filter(~is_dropped.fill_null(False))
-    return df
+    return rows.with_columns(
+        among(alive, by_key(LEVEL_KEY[level], outcome.dropped[level])).alias(check.column)
+        for level, check in (
+            (Level.ACT, UNREAD_ACT_TEXT),
+            (Level.MEASURE, UNREAD_MEASURE_TEXT),
+            (Level.LOCATION, UNREAD_LOCATION_TEXT),
+        )
+    )
 
 
-def discard_location_details(df: pl.DataFrame) -> pl.DataFrame:
-    """Drop a location narrowed by its reserved places or a displayed length ("sur 10 ml"),
-    which DiaLog would publish on the whole section. On a single point they stay."""
+def judge_location_details(df: pl.DataFrame) -> pl.DataFrame:
+    """Refuse a location narrowed by a length ("sur 10 ml") on a section, or by a number of
+    places on a whole street: DiaLog would publish the restriction on more than the act."""
+    columns = ["l_scope", *BOUND_NUMBER_COLUMNS, *LOCATION_DETAIL_COLUMNS]
     reasons = [
         next(
             (
                 reason
                 for column, reason in LOCATION_DETAIL_COLUMNS.items()
                 if row[column]
-                and not (column in DETAILS_KEPT_ON_A_POINT and row["l_scope"] == SCOPE_POINT)
+                and not (
+                    narrower_than_the_street(row)
+                    if column in PLACE_COLUMNS
+                    else row["l_scope"] == SCOPE_POINT
+                )
             ),
             None,
         )
-        for row in df.select(*LOCATION_DETAIL_COLUMNS, "l_scope").iter_rows(named=True)
+        for row in df.select(*dict.fromkeys(columns)).iter_rows(named=True)
     ]
-    detailed = pl.Series([reason is not None for reason in reasons], dtype=pl.Boolean)
-    dropped = df.filter(detailed)
-    if dropped.height:
-        counts = Counter(reason for reason in reasons if reason)
-        logger.warning(
-            f"Dropping {dropped.height} locations whose details narrow the measure: "
-            f"{dict(counts.most_common())}; {dropped['a_identifier'].n_unique()} regulations "
-            f"published without them, {emptied_regulations(df, pl.lit(detailed))} left with "
-            "no location"
-        )
-    return df.filter(~detailed)
+    return df.with_columns(refusals(reasons).alias(LOCATION_DETAIL.column))
