@@ -2,12 +2,12 @@
 read, and it is not published (decided 2026-11-19).
 
 Other measures of the same act, on the same street, may open the way back: a bus or cycle lane
-against the flow, a meeting zone (the highway code lets cycles ride both ways in one, unless a
-measure says otherwise). DiaLog publishes none of them: they are read here, before being
-dropped. A measure that covers the one-way section adds its users as exemptions; one on another
-section of the street, or whose way or users cannot be read, drops the one-way section, since
-how much of it the measure opens is not known. A restored two-way traffic on the street
-contradicts it and drops it too.
+against the flow. DiaLog publishes none of them: they are read here, before being dropped. A
+meeting zone or a 30 km/h limit changes nothing: the highway code's two-way cycling there is
+published only where the act writes it (decided 2026-11-19). A lane that covers the one-way
+section adds its users as exemptions; one on another section of the street, or whose way or
+users cannot be read, drops the one-way section, since how much of it the lane opens is not
+known. A restored two-way traffic on the street contradicts it and drops it too.
 """
 
 from collections import Counter, defaultdict
@@ -25,7 +25,6 @@ from .vocabulary import (
     LABEL_BOTH_WAYS_RESTORED,
     LABEL_CYCLE_LANE,
     LABEL_GREENWAY,
-    LABEL_MEETING_ZONE,
     LABEL_NO_CONTRAFLOW_CYCLES,
     LABEL_ONE_WAY,
     LANE_BOTH_WAYS,
@@ -47,7 +46,6 @@ _PUBLISHED = pl.col("m_type").is_in(
     [label for label, kind in MEASURE_TYPE_BY_LABEL.items() if kind is not None]
 )
 RELATED_LABELS = LANE_LABELS | {
-    LABEL_MEETING_ZONE,
     LABEL_NO_CONTRAFLOW_CYCLES,
     LABEL_BOTH_WAYS_RESTORED,
 }
@@ -161,7 +159,6 @@ def _judge(one_way: dict, related: list[dict]) -> tuple[list[str], str | None]:
     """The exemptions the act's other measures give the one-way section, or why it is dropped."""
     section = _section(one_way)
     added: list[str] = []
-    meeting_zone = False
     no_contraflow_cycles = False
     for row in related:
         other = _section(row) if row["l_file_id"] is not None else None
@@ -174,15 +171,10 @@ def _judge(one_way: dict, related: list[dict]) -> tuple[list[str], str | None]:
             return [], "two-way traffic restored on the street"
         covers = other.covers(section)
         if label == LABEL_NO_CONTRAFLOW_CYCLES:
-            if not covers:
-                return [], "cycles kept from the contraflow on another section"
-            no_contraflow_cycles = True
+            no_contraflow_cycles = no_contraflow_cycles or covers
             continue
         if not covers:
             return [], f"{label} on another section of the street"
-        if label == LABEL_MEETING_ZONE:
-            meeting_zone = True
-            continue
         way = _lane_way(row, other, section)
         if way is None:
             return [], f"{label} whose way is not known"
@@ -192,18 +184,16 @@ def _judge(one_way: dict, related: list[dict]) -> tuple[list[str], str | None]:
         if users is None:
             return [], f"{label} whose users are not known"
         added += users
-    if no_contraflow_cycles:
-        if _has_cycles(one_way["m_params"]) or CYCLES_EXEMPTION_LABEL in added:
-            return [], "cycles both allowed and kept from the contraflow"
-    elif meeting_zone:
-        added.append(CYCLES_EXEMPTION_LABEL)
+    if no_contraflow_cycles and (
+        _has_cycles(one_way["m_params"]) or CYCLES_EXEMPTION_LABEL in added
+    ):
+        return [], "cycles both allowed and kept from the contraflow"
     return list(dict.fromkeys(added)), None
 
 
 def arbitrate_one_way_streets(df: pl.DataFrame) -> pl.DataFrame:
-    """Give each one-way section the exemptions its act's lanes and meeting zones give it, or
-    drop it; a measure whose sections end up with different exemptions is split, one DiaLog
-    measure each."""
+    """Give each one-way section the exemptions its act's lanes give it, or drop it; a measure
+    whose sections end up with different exemptions is split, one DiaLog measure each."""
     rows = df.select(_COLUMNS).iter_rows(named=True)
     related_by_act: dict[int, list[dict]] = defaultdict(list)
     one_ways: list[dict] = []
@@ -257,7 +247,7 @@ def arbitrate_one_way_streets(df: pl.DataFrame) -> pl.DataFrame:
     logger.info(
         f"{len(added)} one-way street locations of "
         f"{df.filter(pl.col('l_file_id').is_in(list(added)))['a_file_id'].n_unique()} "
-        "regulations exempt the users of a lane or meeting zone of the act going the other way"
+        "regulations exempt the users of a lane of the act going the other way"
     )
     # Keyed by the exemptions themselves: the same from one night to the next.
     return (

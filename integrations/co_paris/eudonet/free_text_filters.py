@@ -32,7 +32,7 @@ from .free_text import (
     Reading,
     read_text,
 )
-from .locations import SCOPE_POINT
+from .locations import SCOPE_POINT, SCOPE_SECTION
 from .recurring_formulas import report_recurring_formulas
 from .regulations import TIME_LIMITED_KEYS, title_names_a_time
 from .vocabulary import (
@@ -46,7 +46,7 @@ from .vocabulary import (
     PARAGRAPH_EXEMPTION_PARAMETER,
     PEDESTRIAN_ACCESS_PARAMETER,
     SERVICE_POLICE_PREFECTURE,
-    exemption_label,
+    exemption_labels,
 )
 
 CITED_REASON = "repealed or amended by another act"
@@ -297,7 +297,21 @@ def _measure_explained(measure: dict, locations: list[dict]) -> Explained:
         tuple(span for span in spans if span.strip()),
         numbers,
         tuple(span for span in wording if span.strip()),
+        _all_narrower(locations),
     )
+
+
+def narrower_than_the_street(location: dict) -> bool:
+    """A point, or a section with at least one bound: a section named alone is the whole street."""
+    if location["l_scope"] == SCOPE_POINT:
+        return True
+    return location["l_scope"] == SCOPE_SECTION and any(
+        location[column] for column in BOUND_NUMBER_COLUMNS
+    )
+
+
+def _all_narrower(locations: list[dict]) -> bool:
+    return bool(locations) and all(narrower_than_the_street(location) for location in locations)
 
 
 def free_texts(df: pl.DataFrame, all_rows: pl.DataFrame | None = None) -> list[FreeText]:
@@ -306,13 +320,8 @@ def free_texts(df: pl.DataFrame, all_rows: pl.DataFrame | None = None) -> list[F
     `all_rows`: the raw rows, whose locations explain a measure's article even when an earlier
     rule dropped them (one direction, one side)."""
     texts: list[FreeText] = []
-    for row in df.unique("a_file_id").select("a_file_id", "a_notes", "a_articles").iter_rows():
-        act, notes, articles = row
-        if notes:
-            texts.append(FreeText(Level.REGULATION, act, "a_notes", notes))
-        texts += [FreeText(Level.REGULATION, act, "a_articles", text) for text in articles or []]
-
     location_columns = [
+        "a_file_id",
         "l_file_id",
         "l_scope",
         *LOCATION_PRINTED_COLUMNS,
@@ -329,6 +338,19 @@ def free_texts(df: pl.DataFrame, all_rows: pl.DataFrame | None = None) -> list[F
         .iter_rows(named=True)
     ):
         locations_by_measure[row["m_file_id"]].append(row)
+    locations_by_act: dict[int, list[dict]] = defaultdict(list)
+    for group in locations_by_measure.values():
+        for location in group:
+            locations_by_act[location["a_file_id"]].append(location)
+
+    for row in df.unique("a_file_id").select("a_file_id", "a_notes", "a_articles").iter_rows():
+        act, notes, articles = row
+        on_act = Explained(narrower_than_the_street=_all_narrower(locations_by_act[act]))
+        if notes:
+            texts.append(FreeText(Level.REGULATION, act, "a_notes", notes, on_act))
+        texts += [
+            FreeText(Level.REGULATION, act, "a_articles", text, on_act) for text in articles or []
+        ]
 
     measure_columns = ["m_file_id", "m_opening", "m_option_formulas", "m_params"]
     for measure in (
@@ -337,9 +359,15 @@ def free_texts(df: pl.DataFrame, all_rows: pl.DataFrame | None = None) -> list[F
         .select(*dict.fromkeys([*measure_columns, *TEXT_COLUMNS[Level.MEASURE]]))
         .iter_rows(named=True)
     ):
+        locations = locations_by_measure[measure["m_file_id"]]
+        on_measure = Explained(narrower_than_the_street=_all_narrower(locations))
         for column in ("m_paragraph", "m_notes"):
             if measure[column]:
-                texts.append(FreeText(Level.MEASURE, measure["m_file_id"], column, measure[column]))
+                texts.append(
+                    FreeText(
+                        Level.MEASURE, measure["m_file_id"], column, measure[column], on_measure
+                    )
+                )
         if measure["m_article"]:
             explained = _measure_explained(measure, locations_by_measure[measure["m_file_id"]])
             texts.append(
@@ -359,7 +387,10 @@ def free_texts(df: pl.DataFrame, all_rows: pl.DataFrame | None = None) -> list[F
         if location["l_file_id"] in present
     )
     for location in present_locations:
-        explained = Explained(numbers=_numbers(location))
+        explained = Explained(
+            numbers=_numbers(location),
+            narrower_than_the_street=narrower_than_the_street(location),
+        )
         for column in TEXT_COLUMNS[Level.LOCATION]:
             if location[column]:
                 texts.append(
@@ -429,8 +460,9 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
                         problems.append(f"{label}: pedestrian access without a pedestrian area")
                     for area in areas:
                         added[area] += [
-                            [PEDESTRIAN_ACCESS_PARAMETER, exemption_label(category)]
+                            [PEDESTRIAN_ACCESS_PARAMETER, label]
                             for category in effect.values
+                            for label in exemption_labels(category)
                         ]
                 elif is_unpublished:
                     if effect.code == Code.EXEMPTION:

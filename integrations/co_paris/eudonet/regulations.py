@@ -70,7 +70,7 @@ def filter_police_prefecture(df: pl.DataFrame, publish: bool) -> pl.DataFrame:
     if publish:
         logger.info(
             f"Keeping {prefecture.height} rows of {regulations} police prefecture regulations "
-            "(PUBLISH_POLICE_PREFECTURE, never on the production host)"
+            "(PUBLISH_POLICE_PREFECTURE)"
         )
         return df
     logger.warning(

@@ -143,13 +143,14 @@ def test_a_lane_whose_extent_way_or_users_cannot_be_read_drops_the_one_way_stree
     assert any("may open the other way" in line for line in captured_logs)
 
 
-def test_a_meeting_zone_on_the_whole_street_lets_the_cycles_ride_both_ways():
+def test_a_meeting_zone_changes_nothing_to_the_one_way_street():
+    """Two-way cycling there is published only where the act writes it."""
     zone = lane(m_type="zone de rencontre", m_params=[], l_scope="La totalité de la voie")
-    assert exemptions(published(one_way(), zone)) == [(["bicycle"], None)]
+    assert exemptions(published(one_way(), zone)) == [(None, None)]
 
 
-def test_a_meeting_zone_where_the_act_keeps_cycles_from_the_contraflow_exempts_no_one():
-    zone = lane(m_type="zone de rencontre", m_params=[], l_scope="La totalité de la voie")
+def test_cycles_both_let_against_the_flow_and_kept_from_it_drop_the_one_way_street():
+    track = lane(m_type="voie cyclable", m_params=[])
     kept_out = lane(
         m_file_id=30,
         l_file_id=300,
@@ -158,7 +159,16 @@ def test_a_meeting_zone_where_the_act_keeps_cycles_from_the_contraflow_exempts_n
         l_from_road_name="Rue Nationale",
         l_to_road_name="Rue de Tolbiac",
     )
-    assert exemptions(published(one_way(), zone, kept_out)) == [(None, None)]
+    assert published(one_way(), track, kept_out).height == 0
+
+
+def test_cycles_kept_from_the_contraflow_on_another_section_change_nothing():
+    kept_out = lane(
+        m_type="interdiction double sens pour les cyclistes",
+        m_params=[],
+        l_from_road_name="Rue Charcot",
+    )
+    assert exemptions(published(one_way(), kept_out)) == [(None, None)]
 
 
 def test_two_way_traffic_restored_on_the_street_drops_the_one_way_street():

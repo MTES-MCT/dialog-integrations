@@ -1,6 +1,5 @@
 import json
 from typing import Any
-from urllib.parse import urlparse
 
 import polars as pl
 from loguru import logger
@@ -52,6 +51,7 @@ from .regulations import (
     filter_police_prefecture,
 )
 from .schema import EudonetRawDataSchema
+from .titles import discard_unread_titles
 from .vehicles import (
     EXEMPTION_IN_TITLE_ONLY,
     PEDESTRIAN_OR_CYCLE_VEHICLES,
@@ -60,10 +60,9 @@ from .vehicles import (
 
 CREDENTIALS_ENV_VAR = "EUDONET_PARIS_CREDENTIALS"
 
-# The police prefecture signs about a third of the acts, under its own authority, like the
-# road of another manager: staging only (2026-09-23), never the production host until Paris agrees.
+# The police prefecture signs about a third of the acts, under its own authority: published
+# everywhere, production included, while a contact with the prefecture is set up (2026-11-19).
 PUBLISH_POLICE_PREFECTURE = True
-PRODUCTION_HOST = "dialog.beta.gouv.fr"
 
 # Every location is a named street geocoded on the BD TOPO by DiaLog: past about a hundred,
 # a POST can outlive the API timeout (a geometry sent as is holds up to 1 000).
@@ -108,7 +107,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     def compute_clean_data(self, raw_data: pl.DataFrame) -> pl.DataFrame:
         today = today_in_paris()
         return (
-            raw_data.pipe(filter_police_prefecture, self._publishes_police_prefecture())
+            raw_data.pipe(filter_police_prefecture, PUBLISH_POLICE_PREFECTURE)
             .pipe(compute_regulation_fields)
             .pipe(discard_superseded_regulations)
             .pipe(discard_published_elsewhere, self.numbers_published_elsewhere)
@@ -119,6 +118,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(compute_measure_fields)
             # The raw rows: an article also prints the locations an earlier rule dropped.
             .pipe(discard_unread_texts, self.alerts, raw_data)
+            .pipe(discard_unread_titles, raw_data)
             .pipe(arbitrate_one_way_streets)
             .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_MEASURES, ONE_DIRECTION)
             .pipe(discard_measures_out_of_model)
@@ -137,10 +137,6 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(add_pedestrian_area_speed)
             .pipe(add_split_order)
         )
-
-    def _publishes_police_prefecture(self) -> bool:
-        host = urlparse(self.organization_settings.base_url or "").hostname or ""
-        return PUBLISH_POLICE_PREFECTURE and not host.endswith(PRODUCTION_HOST)
 
     def _credentials(self) -> dict[str, Any]:
         raw = self.organization_settings.eudonet_paris_credentials

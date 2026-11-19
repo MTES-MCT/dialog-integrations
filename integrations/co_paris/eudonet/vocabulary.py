@@ -4,6 +4,7 @@ Read from `GET /Catalog/{descId}` on 2026-09-08 and cross-checked against the 26
 measures extracted that day.
 """
 
+import re
 from dataclasses import dataclass
 
 from api.dia_log_client.models import (
@@ -32,11 +33,17 @@ ACCEPTED_STATES_BY_TYPE: dict[str, dict[str, str]] = {
     TYPE_TEMPORARY_LABEL: {"En vigueur": "8640", "Publié": "13789", "Signé": "8642"},
 }
 
+# Key `1103` of 22 acts of 2005-2008 (2026-11-17): their pedestrian areas are limited to
+# 15 km/h, not walking pace (decided 2026-11-19).
+PEDESTRIAN_AREA_SPEED_BY_KEY: dict[str, int] = {
+    "STATIONNEMENT GENANT- LIMITATION VITESSE 15km/h": 15,
+}
+
 # All 32 values of catalog `1202`. `None`: outside the five DiaLog types, dropped and
 # counted, never bent into an approaching type.
 MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
     # The producer names the area, so it is published as `noEntry` + `desserteLocale`
-    # plus a 5 km/h twin (`add_pedestrian_area_speed`).
+    # plus a speed twin, 5 km/h unless a key says otherwise (`add_pedestrian_area_speed`).
     "aire piétonne": MeasureTypeEnum.NOENTRY.value,
     "cédez le passage": None,
     "circulation alternée": MeasureTypeEnum.ALTERNATEROAD.value,
@@ -105,6 +112,31 @@ OPENING_BY_LABEL: dict[str, str] = {
     "zone 30": "Les voies constituant la zone 30 sont",
 }
 
+# `1236`, `1204`, `1207`, in that order: the formulas the mail merge prints before the
+# optional parameters 1 to 3, every value of the 10 781 measures of 2026-11-17. Two say the
+# opposite of each other ("ne sont pas applicables" / "sont applicables"): any other drops the
+# measure, like an unexpected opening (decided 2026-11-19).
+_PENALTY = (
+    "Tout stationnement d'un véhicule en infraction avec cette interdiction est considéré comme"
+)
+_NOT_APPLICABLE = "Toutefois ces dispositions ne sont pas applicables"
+_APPLICABLE = "Ces dispositions sont applicables"
+_PARKING_ALLOWED = "Le stationnement y est autorisé de manière"
+KNOWN_OPTION_FORMULAS: tuple[frozenset[str], ...] = (
+    frozenset(
+        {
+            _PENALTY,
+            _NOT_APPLICABLE,
+            _APPLICABLE,
+            _PARKING_ALLOWED,
+            "Le mouvement direct est autorisé",
+            "Le mouvement de tourne à droite est autorisé",
+        }
+    ),
+    frozenset({_PENALTY, _NOT_APPLICABLE, _APPLICABLE, _PARKING_ALLOWED}),
+    frozenset({_NOT_APPLICABLE}),
+)
+
 LABEL_SPEED_LIMIT = "limitation de vitesse"
 LABEL_ONE_WAY = "sens interdit (ou sens unique)"
 # The number complements that make « depuis A vers B » or « depuis A jusqu'à B »: the act's
@@ -115,7 +147,6 @@ ONE_WAY_TO_COMPLEMENTS = frozenset({"vers", "jusqu'à"})
 LANE_LABELS = frozenset({"voie réservée", "voie cyclable", "voie verte"})
 LABEL_CYCLE_LANE = "voie cyclable"
 LABEL_GREENWAY = "voie verte"
-LABEL_MEETING_ZONE = "zone de rencontre"
 LABEL_NO_CONTRAFLOW_CYCLES = "interdiction double sens pour les cyclistes"
 LABEL_BOTH_WAYS_RESTORED = "rétablissement double sens"
 # `2711` on a lane: its way against the act's general traffic.
@@ -280,7 +311,18 @@ EXEMPTION_BY_LABEL: dict[str, str] = {
     "des véhicules approvisionnement des marchés": EXEMPTED_COMMERCIAL,
     "aux taxis": EXEMPTED_TAXI,
     "des taxis": EXEMPTED_TAXI,
+    # Spellings of the pedestrian areas' lists (2026-11-17): learnt when they have a true DiaLog
+    # value and are used more than ten times; the others go as `other` with their words.
+    "aux véhicules d'intervention urgente et de secours": EXEMPTED_EMERGENCY,
+    "aux véhicules d'urgence et de secours": EXEMPTED_EMERGENCY,
+    "aux véhicules de secours et de sécurité": EXEMPTED_EMERGENCY,
 }
+
+# One category standing for two exemptions: cycles, and scooters as `other` with their words.
+_CYCLES_AND_SCOOTERS = re.compile(
+    r"^cycles et engins de d[ée]placements? personnels?( motoris[ée]s)?$", re.IGNORECASE
+)
+SCOOTERS_LABEL = "engins de déplacement personnels"
 
 # Exemptions a free text may name ("sauf aux véhicules de secours"), published as the
 # parameter "dérogation pour véhicule" would be.
@@ -299,6 +341,14 @@ def exemption_label(text: str) -> str:
         if candidate in EXEMPTION_BY_LABEL:
             return candidate
     return plain
+
+
+def exemption_labels(text: str) -> list[str]:
+    """`exemption_label`, split when one category names two kinds of vehicles."""
+    plain = " ".join(text.replace("’", "'").split())
+    if _CYCLES_AND_SCOOTERS.match(plain):
+        return ["aux cycles", SCOOTERS_LABEL]
+    return [exemption_label(plain)]
 
 
 # Every parameter name the code reads; a filled one outside drops its measure.

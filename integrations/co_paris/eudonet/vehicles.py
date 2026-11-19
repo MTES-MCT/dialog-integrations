@@ -28,9 +28,10 @@ from .vocabulary import (
     RESTRICTIONS_KEPT_AS_OTHER,
 )
 
-# `otherRestrictedTypeText` / `otherExemptedTypeText` have no documented limit; capped on
-# the longest string the API is known to accept (`title`) rather than left unbounded.
-OTHER_TYPE_TEXT_MAX_LENGTH = 255
+# `otherRestrictedTypeText` / `otherExemptedTypeText`: 300 characters, 422 beyond (measured on
+# the staging, 2026-11-19). A cut restriction list publishes narrower than the act, which is
+# accepted; a cut exemption list would publish wider, so its measure is dropped instead.
+OTHER_TYPE_TEXT_MAX_LENGTH = 300
 FREE_TEXT_SEPARATOR = " ; "
 
 # An exemption written in the title only ("… sauf aux véhicules de police") would go out
@@ -61,6 +62,7 @@ VEHICLE_COLUMNS: dict[str, Any] = {
 
 # Why a measure is dropped.
 OUTSIDE_THE_CLOSED_LIST = "outside"
+EXEMPTIONS_TOO_LONG = "exemptions too long"
 
 
 @dataclass
@@ -121,6 +123,8 @@ def read_vehicle_set(
     rejection = None
     if outside:
         rejection = OUTSIDE_THE_CLOSED_LIST
+    elif len(FREE_TEXT_SEPARATOR.join(exempted_texts)) > OTHER_TYPE_TEXT_MAX_LENGTH:
+        rejection = EXEMPTIONS_TOO_LONG
     else:
         tally.kept_as_other.update(kept_as_other)
         tally.unknown_exemptions.update(unknown_exemptions)
@@ -141,11 +145,11 @@ def read_vehicle_set(
         "vehicle_max_length": None,
         "vehicle_max_height": None,
         "vehicle_max_width": None,
-        "vehicle_other_restricted_type_text": _free_text(restricted_texts)
+        "vehicle_other_restricted_type_text": _restricted_text(restricted_texts)
         if RESTRICTED_OTHER in restricted
         else None,
-        "vehicle_other_exempted_type_text": _free_text(exempted_texts)
-        if EXEMPTED_OTHER in exempted
+        "vehicle_other_exempted_type_text": FREE_TEXT_SEPARATOR.join(exempted_texts)
+        if EXEMPTED_OTHER in exempted and rejection is None
         else None,
     }
     return columns, rejection
@@ -180,6 +184,11 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
             "measures restricting a vehicle value outside the closed list: "
             f"{dict(tally.outside_restrictions)}. Qualify it in vocabulary.py."
         ),
+        EXEMPTIONS_TOO_LONG: lambda dropped: (
+            f"measures whose exemptions outside the DiaLog enumeration exceed the "
+            f"{OTHER_TYPE_TEXT_MAX_LENGTH} characters the API takes: cut, the measure would be "
+            f"wider than the act ({dict(Counter(dropped.unique('m_file_id')['m_type']))})"
+        ),
     }
     for why, motive in motives.items():
         dropped = df.filter(pl.col("vehicle_rejection") == why)
@@ -191,7 +200,7 @@ def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
     return df.filter(pl.col("vehicle_rejection").is_null()).drop("vehicle_rejection")
 
 
-def _free_text(texts: list[str]) -> str:
+def _restricted_text(texts: list[str]) -> str:
     return truncate_text(FREE_TEXT_SEPARATOR.join(texts), OTHER_TYPE_TEXT_MAX_LENGTH)
 
 

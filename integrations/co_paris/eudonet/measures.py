@@ -11,6 +11,7 @@ from toolkit.transforms.pedestrian_area import PEDESTRIAN_AREA_SPEED
 from .counts import count_by
 from .vocabulary import (
     IMPLIED_MAX_SPEED_BY_LABEL,
+    KNOWN_OPTION_FORMULAS,
     KNOWN_PARAMETERS,
     LABEL_PEDESTRIAN_AREA,
     LABEL_SPEED_LIMIT,
@@ -18,6 +19,7 @@ from .vocabulary import (
     MEASURE_TYPE_BY_LABEL,
     MULTI_VALUE_SEPARATOR,
     OPENING_BY_LABEL,
+    PEDESTRIAN_AREA_SPEED_BY_KEY,
     SPEED_PARAMETER,
     TIME_SLOT_PARAMETERS,
 )
@@ -34,6 +36,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     return (
         df.pipe(map_measure_types)
         .pipe(discard_unexpected_openings)
+        .pipe(discard_unexpected_option_formulas)
         .pipe(compute_max_speed)
         .pipe(discard_narrowed_measures)
         .pipe(discard_unknown_parameters)
@@ -98,6 +101,34 @@ def discard_unexpected_openings(df: pl.DataFrame) -> pl.DataFrame:
             f"Dropping {dropped['m_file_id'].n_unique()} measures whose article opens on a "
             f"formula their name does not: {count_by(dropped.unique('m_file_id'), 'm_opening')}. "
             "Qualify it in vocabulary.OPENING_BY_LABEL."
+        )
+    return df.filter(~unexpected)
+
+
+def discard_unexpected_option_formulas(df: pl.DataFrame) -> pl.DataFrame:
+    """Drop a measure whose mail merge prints an unknown formula before an optional parameter:
+    it may say the opposite of the known ones."""
+    formulas = pl.col("m_option_formulas")
+    unknown = pl.any_horizontal(
+        formulas.list.get(i, null_on_oob=True)
+        .str.strip_chars()
+        .is_in(["", *known])
+        .not_()
+        .fill_null(False)
+        for i, known in enumerate(KNOWN_OPTION_FORMULAS)
+    )
+    unexpected = _PUBLISHED & unknown
+    dropped = df.filter(unexpected)
+    if dropped.height:
+        found = Counter(
+            formula.strip()
+            for row in dropped.unique("m_file_id")["m_option_formulas"].to_list()
+            for formula, known in zip(row or [], KNOWN_OPTION_FORMULAS, strict=False)
+            if formula.strip() not in {"", *known}
+        )
+        logger.warning(
+            f"Dropping {dropped['m_file_id'].n_unique()} measures whose mail merge prints an "
+            f"unknown formula: {dict(found)}. Qualify it in vocabulary.KNOWN_OPTION_FORMULAS."
         )
     return df.filter(~unexpected)
 
@@ -205,8 +236,16 @@ def has_filled_parameter(df: pl.DataFrame, names: frozenset[str]) -> pl.Series:
 
 
 def add_pedestrian_area_speed(df: pl.DataFrame) -> pl.DataFrame:
+    speed = pl.coalesce(
+        *(
+            pl.col(key).replace_strict(PEDESTRIAN_AREA_SPEED_BY_KEY, default=None)
+            for key in ("a_key_1", "a_key_2")
+        ),
+        pl.lit(PEDESTRIAN_AREA_SPEED),
+    )
     return pedestrian_area.add_pedestrian_area_speed(
         df,
         is_ban=pl.col("m_type") == LABEL_PEDESTRIAN_AREA,
-        twin_group_key=pl.col("measure_group_key") + pl.lit(f"-V{PEDESTRIAN_AREA_SPEED}"),
+        twin_group_key=pl.col("measure_group_key") + pl.lit("-V") + speed.cast(pl.String),
+        speed=speed,
     )

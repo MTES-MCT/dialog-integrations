@@ -565,6 +565,33 @@ def test_a_pedestrian_area_is_a_ban_with_local_access_and_a_walking_pace_twin():
 
 
 @pytest.mark.parametrize(
+    "formulas, kept",
+    [
+        (["", "", ""], True),
+        (["Toutefois ces dispositions ne sont pas applicables", "", ""], True),
+        (["", "Ces dispositions sont applicables", ""], True),
+        (["", "Ces dispositions sont suspendues", ""], False),
+        # Known in first place only: the third formula is never anything but the exemption one.
+        (["", "", "Ces dispositions sont applicables"], False),
+    ],
+)
+def test_an_unknown_formula_before_an_optional_parameter_drops_the_measure(formulas, kept):
+    out = make_frame(make_row(m_option_formulas=formulas)).pipe(compute_measure_fields)
+    assert (out.height == 1) is kept
+
+
+def test_a_pedestrian_area_keyed_at_15_kmh_gets_a_15_kmh_twin():
+    row = make_row(
+        m_type="aire piétonne", a_key_1="STATIONNEMENT GENANT- LIMITATION VITESSE 15km/h"
+    )
+    twin = add_pedestrian_area_speed(pipeline(row)).filter(
+        pl.col("measure_type_") == MeasureTypeEnum.SPEEDLIMITATION.value
+    )
+    assert twin.get_column("measure_max_speed").to_list() == [15]
+    assert twin.get_column("measure_group_key").to_list() == ["10-V15"]
+
+
+@pytest.mark.parametrize(
     "publish, kept",
     [(True, {"2024P10001", "2024P10002", "2024P10003"}), (False, {"2024P10001", "2024P10003"})],
 )
@@ -961,6 +988,14 @@ def test_an_unknown_exemption_keeps_its_label_as_free_text():
     assert df.get_column("vehicle_other_exempted_type_text").to_list() == [
         "véhicules des services publics dans le cadre de leurs missions"
     ]
+
+
+@pytest.mark.parametrize("length, kept", [(300, True), (301, False)])
+def test_exemptions_longer_than_the_api_takes_drop_the_measure_rather_than_widen_it(length, kept):
+    text = "v" * length
+    row = make_row(m_type="circulation interdite", m_params=[["Dérogations véhicules", text]])
+    df = pipeline(row)
+    assert df.get_column("vehicle_other_exempted_type_text").to_list() == ([text] if kept else [])
 
 
 def test_the_penal_qualification_is_not_a_vehicle_restriction():

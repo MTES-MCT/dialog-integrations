@@ -202,17 +202,6 @@ def test_the_extracted_tables_become_the_raw_columns(source, monkeypatch):
     assert raw.height > 0
 
 
-@pytest.mark.parametrize(
-    "base_url, published",
-    [("https://dialog.beta.gouv.fr", False), ("https://dialog-staging.osc-fr1.scalingo.io", True)],
-)
-def test_the_police_prefecture_is_never_published_on_the_production_host(base_url, published):
-    settings = StubSettings()
-    settings.base_url = base_url
-    source = DataSourceIntegration(settings, client=None)  # type: ignore[arg-type]
-    assert source._publishes_police_prefecture() is published
-
-
 def test_without_credentials_the_failure_names_the_variable(source):
     with pytest.raises(EudonetError, match="EUDONET_PARIS_CREDENTIALS is not set"):
         source.fetch_raw_data()

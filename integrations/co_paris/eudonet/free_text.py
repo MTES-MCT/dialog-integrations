@@ -11,12 +11,16 @@ The formulas are closed lists, read on the published regulations of 2026-09-08, 
 neutral; a time, a day, a vehicle, an exemption or an excluded street never does.
 """
 
+import json
 import re
 import unicodedata
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from functools import cache
 
+from .locations import STREET_NAMES_FILE
 from .text import plain_text
 
 
@@ -73,6 +77,9 @@ class Explained:
     spans: tuple[str, ...] = ()
     numbers: frozenset[str] = field(default_factory=frozenset)
     wording: tuple[str, ...] = ()
+    # Every location of the record is a point or a bounded section: a street the text sets
+    # it "entre" or "au croisement de" narrows nothing the location does not.
+    narrower_than_the_street: bool = False
 
 
 @dataclass(frozen=True)
@@ -363,6 +370,10 @@ def _cut(clause: str, explained_spans: Iterable[str]) -> str:
         for start in range(len(words) - size + 1):
             if tuple(words[start : start + size]) == span and not any(cut[start : start + size]):
                 cut[start : start + size] = [True] * size
+    return _without(clause, tokens, cut)
+
+
+def _without(clause: str, tokens: list[tuple[str, int, int]], cut: list[bool]) -> str:
     kept, last = [], 0
     for (_, begin, end), removed in zip(tokens, cut):
         if removed:
@@ -370,6 +381,60 @@ def _cut(clause: str, explained_spans: Iterable[str]) -> str:
             last = end
     kept.append(clause[last:])
     return " ".join(kept)
+
+
+# The street is the locations' business (decided 2026-11-19): a street of the Paris referential
+# named in a free text says nothing more. Where it bounds another one ("entre … et …", "au
+# croisement de", "à l'intersection avec", "à l'angle de"), only if the location is narrower than
+# the whole street too: on a whole street, the text would narrow what is published.
+_CROSSING_WORDS = frozenset({"entre", "croisement", "intersection", "angle"})
+_BEFORE_A_NAME = frozenset({"de", "du", "des", "d", "la", "le", "l", "les", "avec", "et"})
+
+
+@cache
+def _street_names_by_head() -> dict[tuple[str, str], list[tuple[str, ...]]]:
+    """The referential's names as words, indexed by their first two, longest first."""
+    index: dict[tuple[str, str], list[tuple[str, ...]]] = defaultdict(list)
+    for name in json.loads(STREET_NAMES_FILE.read_text(encoding="utf-8")):
+        words = tuple(word for word, _, _ in _tokens(name))
+        if len(words) >= 2:
+            index[words[:2]].append(words)
+    for names in index.values():
+        names.sort(key=len, reverse=True)
+    return dict(index)
+
+
+def _crossing_word(words: list[str], named: list[bool], start: int) -> int | None:
+    """Where the "entre", "croisement"… the name at `start` follows is, maybe after another
+    name; None if it follows none."""
+    before = start - 1
+    while before >= 0 and (words[before] in _BEFORE_A_NAME or named[before]):
+        before -= 1
+    return before if before >= 0 and words[before] in _CROSSING_WORDS else None
+
+
+def cut_street_names(clause: str, narrower_than_the_street: bool = False) -> str:
+    """The clause without the streets it names, except a bound of a location that has none."""
+    tokens = _tokens(clause)
+    words = [word for word, _, _ in tokens]
+    cut = [False] * len(words)
+    named = [False] * len(words)
+    index = _street_names_by_head()
+    start = 0
+    while start < len(words) - 1:
+        for name in index.get((words[start], words[start + 1]), ()):
+            end = start + len(name)
+            if tuple(words[start:end]) == name:
+                named[start:end] = [True] * len(name)
+                crossing = _crossing_word(words, named, start)
+                if crossing is None:
+                    cut[start:end] = [True] * len(name)
+                elif narrower_than_the_street:
+                    cut[crossing:end] = [True] * (end - crossing)
+                start = end - 1
+                break
+        start += 1
+    return _without(clause, tokens, cut)
 
 
 def _says_nothing(clause: str, numbers: frozenset[str]) -> bool:
@@ -432,9 +497,13 @@ def read_text(text: str | None, explained: Explained = Explained()) -> Reading:
             continue
         if explained.spans or explained.wording:
             everything = _cut(clause, (*explained.spans, *explained.wording))
-            if _says_nothing(everything, explained.numbers):
+            narrower = explained.narrower_than_the_street
+            if _says_nothing(cut_street_names(everything, narrower), explained.numbers):
                 continue
-        rest = _cut(clause, explained.spans) if explained.spans else clause
+        rest = cut_street_names(
+            _cut(clause, explained.spans) if explained.spans else clause,
+            explained.narrower_than_the_street,
+        )
         if _says_nothing(rest, explained.numbers):
             continue
         formula = _match(rest.strip(" .;:-–,"), explained.numbers)

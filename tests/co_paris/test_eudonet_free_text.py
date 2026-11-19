@@ -5,7 +5,7 @@ from loguru import logger
 
 from integrations.co_paris.eudonet import free_text
 from integrations.co_paris.eudonet.citations import act_number_key
-from integrations.co_paris.eudonet.free_text import Code, clauses, read_text
+from integrations.co_paris.eudonet.free_text import Code, Explained, clauses, read_text
 from integrations.co_paris.eudonet.free_text_filters import (
     discard_location_details,
     discard_superseded_regulations,
@@ -102,6 +102,39 @@ def test_a_text_that_changes_nothing_is_understood_without_effect(article):
 )
 def test_a_text_that_says_more_is_not_understood(text):
     assert not read_text(text).understood
+
+
+@pytest.mark.parametrize(
+    "text, neutral",
+    [
+        ("Les travaux ont lieu rue de Rivoli et boulevard de Sébastopol pendant un mois.", False),
+        ("rue de Rivoli et boulevard de Sébastopol", True),
+        ("RUE DE RIVOLI", True),
+        ("au croisement de la rue de Rivoli", False),
+        ("à l'angle du boulevard de Sébastopol", False),
+        ("à l'intersection avec la rue de Rivoli", False),
+        ("sauf rue de Rivoli", False),
+        ("la rue de Rivoli est exclue", False),
+    ],
+)
+def test_a_street_named_in_a_text_is_the_location_s_business_unless_it_meets_another(text, neutral):
+    reading = read_text(text)
+    assert (reading.understood and not reading.effects) is neutral
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "entre la rue de Rivoli et le boulevard de Sébastopol",
+        "au croisement de la rue de Rivoli",
+        "à l'angle du boulevard de Sébastopol",
+    ],
+)
+def test_a_street_bounding_a_location_is_neutral_only_if_the_location_has_bounds(text):
+    on_whole_street = read_text(text)
+    on_bounded = read_text(text, Explained(narrower_than_the_street=True))
+    assert not (on_whole_street.understood and not on_whole_street.effects)
+    assert on_bounded.understood and not on_bounded.effects
 
 
 def test_the_mail_merge_clauses_are_read_apart_even_without_a_full_stop():
@@ -446,6 +479,43 @@ def test_the_closed_list_of_a_pedestrian_area_takes_the_place_of_the_local_acces
     assert out["vehicle_other_exempted_type_text"].to_list() == [
         "véhicules des services publics utilisés pour l'exercice de leurs missions"
     ]
+
+
+@pytest.mark.parametrize(
+    "category, expected, other",
+    [
+        ("véhicules d'intervention urgente et de secours", ["emergencyServices"], None),
+        ("véhicules d'urgence et de secours", ["emergencyServices"], None),
+        ("véhicules de secours et de sécurité", ["emergencyServices"], None),
+        (
+            "cycles et engins de déplacement personnels motorisés",
+            ["bicycle", "other"],
+            "engins de déplacement personnels",
+        ),
+        (
+            "cycles et engins de déplacement personnel",
+            ["bicycle", "other"],
+            "engins de déplacement personnels",
+        ),
+        # No DiaLog value: its own words.
+        (
+            "véhicules des services publics utilisés dans le cadre de leurs missions",
+            ["other"],
+            "véhicules des services publics utilisés dans le cadre de leurs missions",
+        ),
+    ],
+)
+def test_the_spellings_of_the_pedestrian_lists_with_a_true_dialog_value_are_learnt(
+    category, expected, other
+):
+    text = (
+        "La circulation des véhicules nécessaires à la desserte interne de cette aire piétonne est "
+        f"autorisée et limitée strictement aux catégories de véhicules suivants : - {category}."
+    )
+    row = make_row(m_type=PEDESTRIAN_AREA, l_scope="Une section", a_articles=[text])
+    out = pipeline(row).pipe(discard_unread_texts).pipe(compute_vehicle_fields)
+    assert out["vehicle_exempted_types"].to_list() == [expected]
+    assert out["vehicle_other_exempted_type_text"].to_list() == [other]
 
 
 def test_a_pedestrian_access_list_without_a_pedestrian_area_drops_the_act():
