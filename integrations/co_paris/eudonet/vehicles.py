@@ -21,6 +21,7 @@ from .vocabulary import (
     LABEL_DIMENSION_LIMIT,
     LABEL_PEDESTRIAN_AREA,
     MULTI_VALUE_SEPARATOR,
+    PEDESTRIAN_ACCESS_PARAMETER,
     RESTRICTED_OTHER,
     RESTRICTION_BY_LABEL,
     RESTRICTION_PARAMETERS,
@@ -123,7 +124,10 @@ def read_vehicle_set(
     else:
         tally.kept_as_other.update(kept_as_other)
         tally.unknown_exemptions.update(unknown_exemptions)
-    if label == LABEL_PEDESTRIAN_AREA:
+    has_access_list = any(
+        len(pair) == 2 and pair[0].strip() == PEDESTRIAN_ACCESS_PARAMETER for pair in params or []
+    )
+    if label == LABEL_PEDESTRIAN_AREA and not has_access_list:
         # Only the vehicles serving the area may enter.
         exempted.insert(0, VehicleExemptedTypeEnum.DESSERTELOCALE.value)
 

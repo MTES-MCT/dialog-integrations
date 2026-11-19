@@ -11,7 +11,11 @@ from .vocabulary import MEASURE_TYPE_BY_LABEL
 TABLE_REGULATIONS = 1100
 TABLE_MEASURES = 1200
 TABLE_LOCATIONS = 2700
-TABLE_ARTICLES = 1400
+# The articles of an act as signed: its complementary articles (one row each, under the act)
+# and its measures' articles (mail merge, one row per measure). Table 1400 only holds a nightly
+# copy of both, late or missing on some acts (2026-11-18).
+TABLE_COMPLEMENTARY_ARTICLES = 2200
+TABLE_MEASURE_ARTICLES = 3200
 
 # Link columns as *returned*: their `_fid` is the parent FileId.
 FIELD_REGULATION_LINK = 1101
@@ -26,6 +30,14 @@ DB_DATE_FORMATS = ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d")
 def displayed_value(row: dict[str, Any], field: int) -> str | None:
     """The displayed value of a field. Eudonet's empty string means "not filled in"."""
     value = row.get(str(field))
+    if value is None:
+        return None
+    return str(value) or None
+
+
+def db_value(row: dict[str, Any], field: int) -> str | None:
+    """The database value: a link to a record the API account cannot see displays empty."""
+    value = row.get(f"{field}_db")
     if value is None:
         return None
     return str(value) or None
@@ -65,18 +77,22 @@ REGULATION_FIELDS = {
     "a_notes": Field(1194),
     "a_key_1": Field(1103),
     "a_key_2": Field(1122),
-    "a_next_version": Field(1139),
-    "a_repealing_act": Field(1140),
-    "a_repealed_by_clone": Field(1153),
-    "a_repealed_by_multiple": Field(1155),
+    "a_next_version": Field(1139, read=db_value),
+    "a_repealing_act": Field(1140, read=db_value),
+    "a_repealed_by_clone": Field(1153, read=db_value),
+    "a_repealed_by_multiple": Field(1155, read=db_value),
 }
 # `1202` on table 1200 is the measure name (catalog), on table 2700 the link to the measure.
 MEASURE_NAME = Field(1202)
 MEASURE_PARAGRAPH = Field(1254)
-# Articles (`1400`): one row per article of the act, the measures' own articles included.
-ARTICLE_TYPE = 1402
-ARTICLE_CONTENT = 1405
-MEASURE_ARTICLE_TYPE = "Mesure"
+MEASURE_NOTES = Field(1294)
+# The catalog formula that opens the measure's article ("Le stationnement est interdit").
+MEASURE_OPENING = Field(1203)
+# The formulas the mail merge prints before the optional parameters 1 to 3
+# ("Toutefois ces dispositions ne sont pas applicables" + "aux véhicules de secours").
+MEASURE_OPTION_FORMULAS = (1236, 1204, 1207)
+COMPLEMENTARY_ARTICLE_TEXT = 2205
+MEASURE_ARTICLE_TEXT = 3204
 # (parameter name, parameter value): names from catalogs 1218/1221, values from 1219/1222.
 MEASURE_PARAMETER_PAIRS = [
     (1218, 1219),
@@ -121,6 +137,8 @@ LOCATION_FIELDS = {
     "l_reserved_places": Field(2726),
     "l_reserved_length": Field(2734),
     "l_displayed_length": Field(2718),
+    # What the mail merge prints after the location ("1 place.s ZL permanente").
+    "l_article_details": Field(2715),
 }
 
 REGULATION_QUERY_FIELDS = [field.descid for field in REGULATION_FIELDS.values()]
@@ -128,10 +146,14 @@ MEASURE_QUERY_FIELDS = [
     FIELD_REGULATION_LINK,
     MEASURE_NAME.descid,
     MEASURE_PARAGRAPH.descid,
+    MEASURE_NOTES.descid,
+    MEASURE_OPENING.descid,
+    *MEASURE_OPTION_FORMULAS,
     *(descid for pair in MEASURE_PARAMETER_PAIRS for descid in pair),
 ]
 LOCATION_QUERY_FIELDS = [FIELD_MEASURE_LINK, *(f.descid for f in LOCATION_FIELDS.values())]
-ARTICLE_QUERY_FIELDS = [FIELD_REGULATION_LINK, ARTICLE_TYPE, ARTICLE_CONTENT]
+COMPLEMENTARY_ARTICLE_QUERY_FIELDS = [FIELD_REGULATION_LINK, COMPLEMENTARY_ARTICLE_TEXT]
+MEASURE_ARTICLE_QUERY_FIELDS = [FIELD_MEASURE_LINK, MEASURE_ARTICLE_TEXT]
 
 RAW_COLUMNS: dict[str, Any] = {
     "a_file_id": pl.Int64,
@@ -140,6 +162,10 @@ RAW_COLUMNS: dict[str, Any] = {
     "m_file_id": pl.Int64,
     "m_type": pl.Utf8,
     "m_paragraph": pl.Utf8,
+    "m_notes": pl.Utf8,
+    "m_article": pl.Utf8,
+    "m_opening": pl.Utf8,
+    "m_option_formulas": pl.List(pl.Utf8),
     "m_params": pl.List(pl.List(pl.Utf8)),
     "l_file_id": pl.Int64,
     **{name: field.dtype for name, field in LOCATION_FIELDS.items()},
@@ -175,19 +201,23 @@ def _regulation_fields(row: dict[str, Any], articles: list[str]) -> dict[str, An
     return {"a_file_id": row["FileId"], **_read(row, REGULATION_FIELDS), "a_articles": articles}
 
 
-def _articles_beyond_measures(rows: list[dict[str, Any]]) -> list[str]:
-    """The contents of the articles that are not a measure's own (`Article complémentaire`)."""
-    contents = (
-        displayed_value(row, ARTICLE_CONTENT)
-        for row in rows
-        if displayed_value(row, ARTICLE_TYPE) != MEASURE_ARTICLE_TYPE
-    )
-    return [content for content in contents if content]
+def _texts(rows: list[dict[str, Any]], field: int) -> list[str]:
+    texts = (displayed_value(row, field) for row in rows)
+    return [text for text in texts if text]
 
 
-def _measure_fields(row: dict[str, Any] | None) -> dict[str, Any]:
+def _measure_fields(row: dict[str, Any] | None, articles: list[str]) -> dict[str, Any]:
     if row is None:
-        return {"m_file_id": None, "m_type": None, "m_paragraph": None, "m_params": None}
+        return {
+            "m_file_id": None,
+            "m_type": None,
+            "m_paragraph": None,
+            "m_notes": None,
+            "m_article": None,
+            "m_opening": None,
+            "m_option_formulas": None,
+            "m_params": None,
+        }
     params = []
     for name_field, value_field in MEASURE_PARAMETER_PAIRS:
         name = displayed_value(row, name_field)
@@ -197,6 +227,13 @@ def _measure_fields(row: dict[str, Any] | None) -> dict[str, Any]:
         "m_file_id": row["FileId"],
         "m_type": displayed_value(row, MEASURE_NAME.descid),
         "m_paragraph": displayed_value(row, MEASURE_PARAGRAPH.descid),
+        "m_notes": displayed_value(row, MEASURE_NOTES.descid),
+        # One mail merge per measure on 2026-11-17; two would be read as one text.
+        "m_article": "\n".join(articles) or None,
+        "m_opening": displayed_value(row, MEASURE_OPENING.descid),
+        "m_option_formulas": [
+            displayed_value(row, field) or "" for field in MEASURE_OPTION_FORMULAS
+        ],
         "m_params": params,
     }
 
@@ -233,7 +270,10 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
     measures = tables.get(str(TABLE_MEASURES), [])
     locations = tables.get(str(TABLE_LOCATIONS), [])
     articles_by_regulation, _ = _group_by_parent(
-        tables.get(str(TABLE_ARTICLES), []), FIELD_REGULATION_LINK
+        tables.get(str(TABLE_COMPLEMENTARY_ARTICLES), []), FIELD_REGULATION_LINK
+    )
+    articles_by_measure, _ = _group_by_parent(
+        tables.get(str(TABLE_MEASURE_ARTICLES), []), FIELD_MEASURE_LINK
     )
 
     measures_by_regulation, _ = _group_by_parent(measures, FIELD_REGULATION_LINK)
@@ -254,14 +294,21 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
     for regulation in regulations:
         regulation_fields = _regulation_fields(
             regulation,
-            _articles_beyond_measures(articles_by_regulation.get(regulation["FileId"], [])),
+            _texts(
+                articles_by_regulation.get(regulation["FileId"], []), COMPLEMENTARY_ARTICLE_TEXT
+            ),
         )
         own_measures = measures_by_regulation.get(regulation["FileId"], [])
         if not own_measures:
             regulations_without_measure += 1
-            rows.append({**regulation_fields, **_measure_fields(None), **_location_fields(None)})
+            rows.append(
+                {**regulation_fields, **_measure_fields(None, []), **_location_fields(None)}
+            )
         for measure in own_measures:
-            measure_fields = _measure_fields(measure)
+            measure_fields = _measure_fields(
+                measure,
+                _texts(articles_by_measure.get(measure["FileId"], []), MEASURE_ARTICLE_TEXT),
+            )
             own_locations = []
             if needs_locations(measure):
                 own_locations = locations_by_measure.get(measure["FileId"], [])

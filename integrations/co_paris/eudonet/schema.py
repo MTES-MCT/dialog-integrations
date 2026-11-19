@@ -1,7 +1,7 @@
 """Raw data contract for Paris / Eudonet: one row per location.
 
-`a_` comes from table 1100 (arrêtés), `m_` from 1200 (mesures), `l_` from 2700
-(localisation).
+`a_` comes from table 1100 (arrêtés) and its complementary articles (2200), `m_` from 1200
+(mesures) and their articles (3200), `l_` from 2700 (localisation).
 """
 
 from datetime import date
@@ -30,6 +30,10 @@ class EudonetRawDataSchema(pa.DataFrameModel):
     m_file_id: int | None = pa.Field(nullable=True)
     m_type: str | None = pa.Field(nullable=True)
     m_paragraph: str | None = pa.Field(nullable=True)
+    m_notes: str | None = pa.Field(nullable=True)
+    m_article: str | None = pa.Field(nullable=True)
+    m_opening: str | None = pa.Field(nullable=True)
+    m_option_formulas: list[str] | None = pa.Field(nullable=True)
     m_params: list[list[str]] | None = pa.Field(nullable=True)
     l_file_id: int | None = pa.Field(nullable=True)
     l_scope: str | None = pa.Field(nullable=True)
@@ -61,6 +65,7 @@ class EudonetRawDataSchema(pa.DataFrameModel):
     l_reserved_places: str | None = pa.Field(nullable=True)
     l_reserved_length: str | None = pa.Field(nullable=True)
     l_displayed_length: str | None = pa.Field(nullable=True)
+    l_article_details: str | None = pa.Field(nullable=True)
 
     class Config(pa.DataFrameModel.Config):
         strict = False

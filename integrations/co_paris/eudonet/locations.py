@@ -326,7 +326,9 @@ def _bounds(row: dict, road_name: str) -> tuple[Bound | None, Bound | None] | st
     )
     end = parse_bound(row["l_to_house_number"], row["l_to_road_name"], row["l_to_address_label"])
     if start is None and end is None:
-        return "section without bounds"
+        # Paris's form refuses a section it cannot place: a street named alone is the whole
+        # street (the Ville, 2026-11-18).
+        return None, None
     if start is None or end is None:
         return "section with a single bound"
     bound_labels = (

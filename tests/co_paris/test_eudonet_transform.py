@@ -19,7 +19,7 @@ from integrations.co_paris.eudonet.data_source_integration import (
 )
 from integrations.co_paris.eudonet.location_filters import (
     discard_bound_qualifiers,
-    discard_location_complements,
+    discard_measures_with_copied_locations,
     discard_points_beyond_parking,
     discard_refused_locations,
     load_refused_locations,
@@ -620,6 +620,41 @@ def test_a_single_point_carries_only_a_parking_ban():
     assert discard_points_beyond_parking(df)["a_identifier"].to_list() == ["1", "3"]
 
 
+def copied_row(**overrides: Any) -> dict[str, Any]:
+    defaults = {
+        "a_type": "Temporaire",
+        "a_title_html": "modifiant, à titre provisoire, la règle du stationnement rue Pillet-Will",
+        "l_status": "Maintenue",
+        "l_road_name": "Rue René Binet",
+    }
+    return make_row(**{**defaults, **overrides})
+
+
+def test_a_copied_location_on_a_street_the_title_does_not_name_drops_its_whole_measure():
+    df = make_frame(
+        copied_row(l_file_id=100),
+        copied_row(l_file_id=101, l_status="Ajoutée", l_road_name="Rue Pillet Will"),
+        copied_row(m_file_id=11, l_file_id=110, l_road_name="Rue Pillet Will"),
+    )
+    assert discard_measures_with_copied_locations(df)["l_file_id"].to_list() == [110]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"l_status": "Ajoutée"},
+        {"l_status": "Retiré"},
+        {"a_type": "Permanent"},
+        {"l_road_name": "Rues Pillet Will"},
+        {"l_road_name": "Rue de Staël", "a_title_html": "… rue de Stael"},
+        {"l_road_name": "Rue Saint-Charles"},
+    ],
+    ids=["entered for the act", "withdrawn", "permanent", "plural", "accent", "common words only"],
+)
+def test_a_location_entered_for_the_act_or_named_by_its_title_is_kept(overrides):
+    assert discard_measures_with_copied_locations(make_frame(copied_row(**overrides))).height == 1
+
+
 def test_a_refused_location_is_dropped_and_its_regulation_goes_with_the_others(monkeypatch):
     df = make_frame(
         make_row(l_file_id=10),
@@ -633,77 +668,6 @@ def test_a_refused_location_is_dropped_and_its_regulation_goes_with_the_others(m
     assert set(kept["a_identifier"]) == {"2024P10001"}
     monkeypatch.setattr(location_filters, "load_refused_locations", lambda: {})
     assert discard_refused_locations(df).height == df.height
-
-
-def test_a_location_complement_that_narrows_the_measure_drops_the_location(captured_logs):
-    """A complement like "sur 2 places", or a day and an hour, is not read, so the location goes."""
-    df = make_frame(
-        make_row(l_file_id=10),
-        make_row(l_file_id=11, l_point_location_complement="sur 2 places.,"),
-        make_row(l_file_id=12, l_from_location_complement="<p>les mardis de 14h30 à 16h30</p>"),
-        make_row(
-            a_identifier="2024P10002", l_file_id=20, l_to_location_complement="dans la contre-allée"
-        ),
-    )
-    kept = discard_location_complements(df)
-    assert kept["l_file_id"].to_list() == [10]
-    assert set(kept["a_identifier"]) == {"2024P10001"}
-    assert any(
-        "complement narrows" in line and "1 left with no location" in line for line in captured_logs
-    )
-
-
-@pytest.mark.parametrize(
-    "complement, point_number",
-    [
-        (None, "12"),
-        ("", "12"),
-        ("Bis,", "12"),
-        (", BIS", "12"),
-        ("et jusqu'à", "12"),
-        ("sur toute la longueur de la voie.", "12"),
-        ("Sur toutes les places.", "12"),
-        ("& n°13", "13"),
-        ("56-56bis", "56"),
-        ("n° 34 à 36 ter", "34 à 36"),
-        ("<!--[if gte mso 9]><xml><w:Word>Normal</w:Word></xml><![endif]-->", "12"),
-    ],
-)
-def test_a_location_complement_that_says_nothing_keeps_the_location(complement, point_number):
-    df = make_frame(
-        make_row(l_point_location_complement=complement, l_point_house_number=point_number)
-    )
-    assert discard_location_complements(df).height == 1
-
-
-@pytest.mark.parametrize(
-    "complement",
-    [
-        "de 8h à 18h",
-        "8h-18h",
-        "côté pair",
-        "1 place",
-        "du 02/11/2026 au 31/08/2027",
-        # Numbers the bounds do not carry: a second place, or a day without its month.
-        "n° 21 et du n° 47",
-        "le 25",
-        "du 1 au 15",
-    ],
-)
-def test_a_short_complement_that_narrows_the_measure_drops_the_location(complement):
-    df = make_frame(make_row(l_point_location_complement=complement, l_point_house_number="21"))
-    assert discard_location_complements(df).height == 0
-
-
-def test_a_section_complement_may_repeat_the_numbers_of_both_bounds():
-    section = make_row(
-        l_scope="Une section",
-        l_point_house_number=None,
-        l_from_house_number="12",
-        l_to_house_number="20",
-        l_from_location_complement="du n° 12 au n° 20",
-    )
-    assert discard_location_complements(make_frame(section)).height == 1
 
 
 def section_row(**overrides: Any) -> dict[str, Any]:
@@ -1175,3 +1139,18 @@ def test_the_funnel_of_the_fixture_is_the_one_we_expect(raw, clean):
         MeasureTypeEnum.NOENTRY.value: 13,
         MeasureTypeEnum.SPEEDLIMITATION.value: 1,
     }
+
+
+@pytest.mark.parametrize(
+    "opening, kept",
+    [
+        (None, True),
+        ("", True),
+        ("Le stationnement est interdit", True),
+        ("Le stationnement est interdit tous les jours, sauf dérogation", False),
+        ("La circulation est interdite", False),
+    ],
+)
+def test_a_measure_opening_on_another_formula_than_its_name_is_dropped(opening, kept):
+    out = make_frame(make_row(m_opening=opening)).pipe(compute_measure_fields)
+    assert (out.height == 1) is kept

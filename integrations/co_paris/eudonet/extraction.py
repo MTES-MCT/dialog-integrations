@@ -5,15 +5,17 @@ from loguru import logger
 
 from .client import EQUALS, GREATER_OR_EQUAL, EudonetClient, EudonetError, all_of, any_of, criterion
 from .raw_rows import (
-    ARTICLE_QUERY_FIELDS,
+    COMPLEMENTARY_ARTICLE_QUERY_FIELDS,
     FIELD_MEASURE_LINK,
     FILTER_MEASURE_OF_LOCATION,
     LOCATION_QUERY_FIELDS,
+    MEASURE_ARTICLE_QUERY_FIELDS,
     MEASURE_QUERY_FIELDS,
     REGULATION_FIELDS,
     REGULATION_QUERY_FIELDS,
-    TABLE_ARTICLES,
+    TABLE_COMPLEMENTARY_ARTICLES,
     TABLE_LOCATIONS,
+    TABLE_MEASURE_ARTICLES,
     TABLE_MEASURES,
     TABLE_REGULATIONS,
     needs_locations,
@@ -57,10 +59,10 @@ def perimeter_criteria(today: date) -> dict[str, Any]:
 
 
 def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[str, Any]]]:
-    """The three tables of the perimeter, as flat rows keyed by table number.
+    """The five tables of the perimeter, as flat rows keyed by table number.
 
-    The API filters on a parent's fields one level up, not two: locations are fetched by
-    batches of identifiers of the measures DiaLog can carry.
+    The API filters on a parent's fields one level up, not two: locations and the measures'
+    articles are fetched by batches of identifiers of the measures DiaLog can carry.
     """
     where = perimeter_criteria(today)
 
@@ -69,7 +71,12 @@ def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[st
     )
     measures = client.search_all(TABLE_MEASURES, MEASURE_QUERY_FIELDS, where, "measures")
     # The complementary articles may exclude a street or add a time: read to drop the act.
-    articles = client.search_all(TABLE_ARTICLES, ARTICLE_QUERY_FIELDS, where, "articles")
+    articles = client.search_all(
+        TABLE_COMPLEMENTARY_ARTICLES,
+        COMPLEMENTARY_ARTICLE_QUERY_FIELDS,
+        where,
+        "complementary articles",
+    )
     if regulations and not articles:
         raise EudonetError(
             "Eudonet returned no article for the perimeter: their texts could not be checked"
@@ -88,12 +95,25 @@ def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[st
     )
 
     check_extraction_completeness(dialog_measures, locations)
+    measure_articles = client.search_by_ids(
+        TABLE_MEASURE_ARTICLES,
+        MEASURE_ARTICLE_QUERY_FIELDS,
+        TABLE_MEASURES,
+        [row["FileId"] for row in dialog_measures],
+        label="measure articles",
+    )
+    if dialog_measures and not measure_articles:
+        raise EudonetError(
+            "Eudonet returned no measure article for the perimeter: their texts could not be "
+            "checked"
+        )
 
     return {
         str(TABLE_REGULATIONS): regulations,
         str(TABLE_MEASURES): measures,
         str(TABLE_LOCATIONS): locations,
-        str(TABLE_ARTICLES): articles,
+        str(TABLE_COMPLEMENTARY_ARTICLES): articles,
+        str(TABLE_MEASURE_ARTICLES): measure_articles,
     }
 
 

@@ -50,6 +50,8 @@ class BaseDataSourceIntegration:
         # By "label (nature)": rows each rule applied to, for the report.
         self.rule_counts: dict[str, int] = {}
         self._applied_codes: set[str] = set()
+        # Lines for the team, in French, each shown as a warning in the Tchap message.
+        self.alerts: list[str] = []
 
     @property
     def organization(self) -> str:

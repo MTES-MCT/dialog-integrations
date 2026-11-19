@@ -97,6 +97,15 @@ def test_source_volumes_are_reported_when_given(notifier):
     assert "Volumétries source : arrêtés du périmètre : 5297, mesures : 11230" in body
 
 
+def test_an_alert_raised_by_a_source_is_flagged(notifier):
+    alert = "texte libre présent à de très nombreuses reprises ; à prendre en compte dans le code"
+    body, _ = notifier.format_message(
+        {"result_co_paris": '{"success":true,"source_alerts":["' + alert + '"]}'}
+    )
+
+    assert f"⚠️ {alert}" in body
+
+
 def test_an_outage_is_flagged_from_the_first_error_with_its_causes(notifier):
     body, formatted_body = notifier.format_message(
         {

@@ -77,6 +77,21 @@ MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
     "zone de rencontre": None,
 }
 
+# `1203`, the formula that opens the measure's article: one per measure name on the 10 781
+# measures of 2026-11-17. The catalog holds richer ones, never used ("… interdit tous les
+# jours, sauf dérogation…"): any other drops the measure (decided 2026-11-18).
+OPENING_BY_LABEL: dict[str, str] = {
+    "aire piétonne": "Il est institué une aire piétonne constituée par",
+    "circulation interdite": "La circulation est interdite",
+    "interdiction d'arrêt": "L'arrêt et le stationnement sont interdits",
+    "interdiction de stationnement": "Le stationnement est interdit",
+    "limitation catégorielle": "La circulation est interdite",
+    "limitation de vitesse": "La vitesse maximale autorisée est fixée",
+    "limitation dimensionnelle": "La circulation est interdite",
+    "sens interdit (ou sens unique)": "Un sens unique de circulation est institué",
+    "zone 30": "Les voies constituant la zone 30 sont",
+}
+
 LABEL_SPEED_LIMIT = "limitation de vitesse"
 LABEL_ONE_WAY = "sens interdit (ou sens unique)"
 # The number complements that make « depuis A vers B » or « depuis A jusqu'à B »: the act's
@@ -116,11 +131,16 @@ RESTRICTION_PARAMETERS = frozenset(
     }
 )
 
+# Not a parameter of Eudonet: the closed list of vehicles a pedestrian area lets in, read in a
+# text. It takes the place of the local access exemption (decided 2026-11-18).
+PEDESTRIAN_ACCESS_PARAMETER = "desserte de l'aire piétonne"
+
 EXEMPTION_PARAMETERS = frozenset(
     {
         "dérogation pour véhicule",
         "dérogation pour usager",
         "Dérogations véhicules",
+        PEDESTRIAN_ACCESS_PARAMETER,
     }
 )
 
@@ -137,22 +157,6 @@ TIME_SLOT_PARAMETERS = frozenset({"Jours et Horaires"})
 # A filled lane drops the measure: DiaLog would close the whole street, not the one
 # lane named (19 values on 2026-09-08, all a single lane).
 LANE_PARAMETERS = frozenset({"voie concernée"})
-
-WHOLE_LOCATION_COMPLEMENTS = frozenset(
-    {
-        "sur toute la longueur",
-        "sur toute la longueur de la voie",
-        "sur toutes les places",
-        "sur tout le stationnement",
-        "sur l'intégralité de la voie",
-    }
-)
-COMPLEMENT_CONNECTORS = frozenset(
-    {
-        *("et", "à", "a", "au", "aux", "du", "des", "le", "la", "les", "jusqu'à", "jusqu'au"),
-        *("n", "n°", "no", "bis", "ter", "quater"),
-    }
-)
 
 # Number complements (`2721`, `2731`, `2749`) that only introduce the bound, as seen on the
 # published locations of 2026-09-08. Any other value drops the location ("à l'intersection
@@ -239,12 +243,24 @@ EXEMPTION_BY_LABEL: dict[str, str] = {
     "des taxis": EXEMPTED_TAXI,
 }
 
-# Exemptions a measure paragraph may name ("sauf aux véhicules de secours"), published as the
+# Exemptions a free text may name ("sauf aux véhicules de secours"), published as the
 # parameter "dérogation pour véhicule" would be.
 PARAGRAPH_EXEMPTION_PARAMETER = "dérogation pour véhicule"
+CYCLES_EXEMPTION_LABEL = "aux cycles"
 PARAGRAPH_EXEMPTION_LABELS = frozenset(
     label for label, exempted in EXEMPTION_BY_LABEL.items() if exempted == EXEMPTED_EMERGENCY
 )
+
+
+def exemption_label(text: str) -> str:
+    """The catalog label a free text names ("véhicules des riverains" → "aux véhicules des
+    riverains"), or the text itself, which goes out as `other` with its wording."""
+    plain = " ".join(text.replace("’", "'").split())
+    for candidate in (plain, plain.lower(), f"aux {plain.lower()}"):
+        if candidate in EXEMPTION_BY_LABEL:
+            return candidate
+    return plain
+
 
 # Every parameter name the code reads; a filled one outside drops its measure.
 KNOWN_PARAMETERS = (

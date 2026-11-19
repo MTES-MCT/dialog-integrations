@@ -17,6 +17,7 @@ from .vocabulary import (
     LANE_PARAMETERS,
     MEASURE_TYPE_BY_LABEL,
     MULTI_VALUE_SEPARATOR,
+    OPENING_BY_LABEL,
     SPEED_PARAMETER,
     TIME_SLOT_PARAMETERS,
 )
@@ -29,6 +30,7 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     its locations collapse into one DiaLog measure."""
     return (
         df.pipe(map_measure_types)
+        .pipe(discard_unexpected_openings)
         .pipe(compute_max_speed)
         .pipe(discard_narrowed_measures)
         .pipe(discard_unknown_parameters)
@@ -69,6 +71,23 @@ def map_measure_types(df: pl.DataFrame) -> pl.DataFrame:
             f"{count_by(out_of_model, 'm_type')}"
         )
     return df.filter(pl.col("measure_type_").is_not_null())
+
+
+def discard_unexpected_openings(df: pl.DataFrame) -> pl.DataFrame:
+    """Drop a measure whose article opens on another formula than its name's: the catalog's
+    other formulas say more ("sauf dérogation", "pendant la journée du…"). An empty one prints
+    nothing."""
+    expected = pl.col("m_type").replace_strict(OPENING_BY_LABEL, default=None, return_dtype=pl.Utf8)
+    opening = pl.col("m_opening").str.strip_chars()
+    unexpected = opening.is_not_null() & (opening != "") & (opening != expected).fill_null(True)
+    dropped = df.filter(unexpected)
+    if dropped.height:
+        logger.warning(
+            f"Dropping {dropped['m_file_id'].n_unique()} measures whose article opens on a "
+            f"formula their name does not: {count_by(dropped.unique('m_file_id'), 'm_opening')}. "
+            "Qualify it in vocabulary.OPENING_BY_LABEL."
+        )
+    return df.filter(~unexpected)
 
 
 def compute_max_speed(df: pl.DataFrame) -> pl.DataFrame:

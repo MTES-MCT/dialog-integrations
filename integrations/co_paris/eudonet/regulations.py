@@ -1,3 +1,4 @@
+import re
 from datetime import date
 
 import polars as pl
@@ -31,6 +32,24 @@ IS_PERMANENT = pl.col("a_type") == TYPE_PERMANENT_LABEL
 # Polars has no look-ahead: the participle ends where letters do ("abrogeant" goes on).
 _REPEALED = r"abrog[ée]e?s?(?:\P{L}|$)"
 _TITLE_SAYS_REPEALED = rf"(?i)(?:^|—|/)\s*{_REPEALED}|\barticle\s+\S+\s+{_REPEALED}"
+
+# A title that names a day, an hour or a market: the act holds at those times only, which no
+# field carries ("une aire piétonne les dimanches", "à certaines heures"). Not "km/heure",
+# nor a street ("rue du Marché Saint-Honoré").
+TITLE_NAMES_A_TIME = re.compile(
+    r"\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)s?\b|jours? fériés?"
+    r"|certaines heures|(?<!km/)\bheures?\b|\bnuits?\b"
+    r"|marchés? (alimentaires?|découverts?|aux puces)|tenue (de|des) marchés?"
+    r"|abords (immédiats )?(du|des) marchés?",
+    re.IGNORECASE,
+)
+# Catalog keys (`1103`, `1122`) of operations that hold on some days only.
+TIME_LIMITED_KEYS = frozenset({"PARIS RESPIRE", "MARCHES"})
+
+
+def title_names_a_time(title: str | None) -> bool:
+    return bool(TITLE_NAMES_A_TIME.search(plain_text(title)))
+
 
 TITLE_SAYS_REPEALED = Rule(
     code="TITLE_SAYS_REPEALED",

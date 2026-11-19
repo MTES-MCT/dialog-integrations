@@ -13,13 +13,13 @@ from toolkit.transforms.local_time import today_in_paris
 from .client import EudonetClient, EudonetError
 from .extraction import extract_tables
 from .free_text_filters import (
-    discard_unread_location_details,
-    discard_unread_measure_paragraphs,
-    discard_unread_regulation_texts,
+    discard_location_details,
+    discard_superseded_regulations,
+    discard_unread_texts,
 )
 from .location_filters import (
     discard_bound_qualifiers,
-    discard_location_complements,
+    discard_measures_with_copied_locations,
     discard_points_beyond_parking,
     discard_refused_locations,
 )
@@ -108,7 +108,7 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         return (
             raw_data.pipe(filter_police_prefecture, self._publishes_police_prefecture())
             .pipe(compute_regulation_fields)
-            .pipe(discard_unread_regulation_texts)
+            .pipe(discard_superseded_regulations)
             .pipe(discard_published_elsewhere, self.numbers_published_elsewhere)
             # Before the period and vehicle fields: no other rule can be judged yet.
             .pipe(
@@ -118,18 +118,20 @@ class DataSourceIntegration(BaseDataSourceIntegration):
                 ONE_DIRECTION,
             )
             .pipe(compute_measure_fields)
-            .pipe(discard_unread_measure_paragraphs)
+            # The raw rows: an article also prints the locations an earlier rule dropped.
+            .pipe(discard_unread_texts, self.alerts, raw_data)
             .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_VEHICLES)
             .pipe(compute_vehicle_fields)
             .pipe(self.apply_rules, EXEMPTION_IN_TITLE_ONLY)
             .pipe(compute_period_fields, today)
-            .pipe(discard_location_complements)
             .pipe(discard_bound_qualifiers)
-            .pipe(discard_unread_location_details)
+            .pipe(discard_location_details)
             .pipe(compute_location_fields)
             .pipe(orient_one_way_streets)
             .pipe(discard_points_beyond_parking)
             .pipe(discard_refused_locations)
+            # Last: a location another rule drops no longer speaks against its measure.
+            .pipe(discard_measures_with_copied_locations)
             .pipe(add_pedestrian_area_speed)
             .pipe(add_split_order)
         )

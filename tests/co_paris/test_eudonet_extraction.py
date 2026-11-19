@@ -257,13 +257,42 @@ class StubEudonet:
         return self.tables.get(str(table), [])
 
 
-def test_an_extraction_without_any_article_is_refused(tables):
-    without_articles = {key: rows for key, rows in tables.items() if key != "1400"}
+COMPLEMENTARY_ARTICLE = {"1101_fid": 1, "2205": "Sont abrogés : …"}
+MEASURE_ARTICLE = {"1202_fid": 1, "3204": "Le stationnement est interdit"}
+
+
+def test_an_extraction_without_any_complementary_article_is_refused(tables):
     with pytest.raises(EudonetError, match="no article"):
-        extract_tables(StubEudonet(without_articles), date(2026, 9, 8))  # type: ignore[arg-type]
+        extract_tables(StubEudonet({**tables, "3200": [MEASURE_ARTICLE]}), date(2026, 9, 8))  # type: ignore[arg-type]
 
 
-def test_the_articles_are_extracted_with_the_perimeter(tables):
-    article = {"1101_fid": 1, "1402": "Article complémentaire", "1405": "Sont abrogés : …"}
-    extracted = extract_tables(StubEudonet({**tables, "1400": [article]}), date(2026, 9, 8))  # type: ignore[arg-type]
-    assert extracted["1400"] == [article]
+def test_an_extraction_without_any_measure_article_is_refused(tables):
+    stub = StubEudonet({**tables, "2200": [COMPLEMENTARY_ARTICLE]})
+    with pytest.raises(EudonetError, match="no measure article"):
+        extract_tables(stub, date(2026, 9, 8))  # type: ignore[arg-type]
+
+
+def test_both_kinds_of_articles_are_extracted_with_the_perimeter(tables):
+    stub = StubEudonet({**tables, "2200": [COMPLEMENTARY_ARTICLE], "3200": [MEASURE_ARTICLE]})
+    extracted = extract_tables(stub, date(2026, 9, 8))  # type: ignore[arg-type]
+    assert extracted["2200"] == [COMPLEMENTARY_ARTICLE]
+    assert extracted["3200"] == [MEASURE_ARTICLE]
+    assert "1400" not in extracted
+
+
+def test_a_link_to_an_act_the_account_cannot_see_is_read_from_its_database_value():
+    tables = {
+        "1100": [
+            {
+                "FileId": 1,
+                "1101": "2024P10001",
+                "1108": "Permanent",
+                "1107": "En vigueur",
+                "1139": "",
+                "1139_db": "30252",
+            }
+        ],
+        "1200": [],
+        "2700": [],
+    }
+    assert build_raw_dataframe(tables)["a_next_version"].to_list() == ["30252"]

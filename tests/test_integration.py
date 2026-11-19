@@ -820,3 +820,19 @@ def test_a_closure_that_would_lose_a_threshold_deletes_the_regulation(monkeypatc
     assert api.put == [] and api.deleted == [f"{PREFIX}heavy"]
     assert (outcome.closed, outcome.deleted, outcome.errors) == (0, 1, 0)
     assert set(_snapshot(tmp_path)) == {f"{PREFIX}a"}
+
+
+def test_an_alert_raised_by_a_source_reaches_the_result(monkeypatch, tmp_path):
+    integration = _build_integration(
+        monkeypatch, tmp_path, measure_rows([f"{PREFIX}a"]), [], identifier_prefix=PREFIX
+    )
+
+    def compute_clean_data(self, raw_data):
+        self.alerts.append("texte libre présent à de très nombreuses reprises")
+        return raw_data
+
+    monkeypatch.setattr(integration.data_sources[0], "compute_clean_data", compute_clean_data)
+
+    result = integration.integrate_regulations().to_result()
+
+    assert result["source_alerts"] == ["texte libre présent à de très nombreuses reprises"]
