@@ -11,7 +11,12 @@ from integrations.co_paris.eudonet.free_text_filters import (
     discard_superseded_regulations,
     discard_unread_texts,
 )
+from integrations.co_paris.eudonet.measures import (
+    compute_measure_fields,
+    discard_measures_out_of_model,
+)
 from integrations.co_paris.eudonet.raw_rows import build_raw_dataframe
+from integrations.co_paris.eudonet.regulations import compute_regulation_fields
 from integrations.co_paris.eudonet.vehicles import compute_vehicle_fields
 from tests.co_paris.test_eudonet_transform import make_frame, make_row, pipeline
 
@@ -452,6 +457,66 @@ def test_a_pedestrian_access_list_with_a_time_drops_the_act():
     assert discard_unread_texts(make_frame(row)).height == 0
 
 
+# Texts of the measures DiaLog does not publish.
+
+
+def test_a_text_not_understood_on_a_measure_dialog_does_not_publish_drops_the_act(
+    captured_logs,
+):
+    published = make_row(m_file_id=10, l_file_id=100)
+    free = make_row(
+        m_file_id=11,
+        l_file_id=None,
+        m_type="Mesure libre",
+        m_paragraph="Le double sens de circulation générale est rétabli rue Cadet.",
+    )
+    other_act = make_row(a_file_id=2, a_identifier="2024P10002", m_file_id=20, l_file_id=200)
+    out = discard_unread_texts(make_frame(published, free, other_act))
+    assert out["a_identifier"].unique().to_list() == ["2024P10002"]
+    assert any("on a measure DiaLog does not publish" in line for line in captured_logs)
+
+
+def test_a_location_text_not_understood_on_a_measure_dialog_does_not_publish_drops_the_act():
+    published = make_row(m_file_id=10, l_file_id=100)
+    parking = make_row(
+        m_file_id=11,
+        l_file_id=110,
+        m_type="stationnement réservé",
+        l_point_location_complement="devant les bâtiments occupés par la Cour de cassation",
+    )
+    assert discard_unread_texts(make_frame(published, parking)).height == 0
+
+
+def test_places_on_a_section_of_a_measure_dialog_does_not_publish_change_nothing_else():
+    """The places narrow the reserved parking itself, never published."""
+    published = make_row(m_file_id=10, l_file_id=100)
+    parking = make_row(
+        m_file_id=11,
+        l_file_id=110,
+        m_type="stationnement réservé",
+        l_scope="Une section",
+        l_article_details="8",
+    )
+    out = discard_unread_texts(make_frame(published, parking))
+    assert sorted(out["m_file_id"].to_list()) == [10, 11]
+
+
+def test_the_pedestrian_access_list_of_a_free_measure_goes_to_the_act_s_pedestrian_area():
+    area = make_row(m_file_id=10, l_file_id=100, m_type=PEDESTRIAN_AREA, l_scope="Une section")
+    free = make_row(m_file_id=11, l_file_id=None, m_type="Mesure libre", m_paragraph=ACCESS)
+    out = (
+        make_frame(area, free)
+        .pipe(compute_regulation_fields)
+        .pipe(compute_measure_fields)
+        .pipe(discard_unread_texts)
+        .pipe(discard_measures_out_of_model)
+        .pipe(compute_vehicle_fields)
+    )
+    assert out["vehicle_exempted_types"].to_list() == [
+        ["emergencyServices", "localResident", "other"]
+    ]
+
+
 # Locations.
 
 
@@ -572,19 +637,19 @@ def test_reserved_places_and_a_length_on_a_point_keep_it():
 def test_each_article_reaches_its_own_regulation_or_measure():
     tables = {
         "1100": [{"FileId": 1, "1101": "2024P10001", "1108": "Permanent", "1107": "En vigueur"}],
-        "1200": [{"FileId": 10, "1101_fid": 1, "1202": "stationnement réservé"}],
+        "1200": [{"FileId": 10, "1101_fid": 1, "1202": "voie réservée"}],
         "2200": [
             {"1101_fid": 1, "2205": "Sont abrogés : …"},
             {"1101_fid": 1, "2205": ""},
             {"1101_fid": 2, "2205": "Article d'un autre arrêté"},
         ],
-        "3200": [{"1202_fid": 10, "3204": "Des emplacements sont réservés"}],
+        "3200": [{"1202_fid": 10, "3204": "Une voie est réservée"}],
         # The nightly copy is no longer read.
         "1400": [{"1101_fid": 1, "1402": "Article complémentaire", "1405": "Copie périmée"}],
     }
     row = build_raw_dataframe(tables).row(0, named=True)
     assert row["a_articles"] == ["Sont abrogés : …"]
-    assert row["m_article"] == "Des emplacements sont réservés"
+    assert row["m_article"] == "Une voie est réservée"
 
 
 # Acts cited by another act.

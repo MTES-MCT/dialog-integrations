@@ -29,6 +29,7 @@ from integrations.co_paris.eudonet.measures import (
     PEDESTRIAN_OR_CYCLE_MEASURES,
     add_pedestrian_area_speed,
     compute_measure_fields,
+    discard_measures_out_of_model,
 )
 from integrations.co_paris.eudonet.published_elsewhere import (
     discard_published_elsewhere,
@@ -76,6 +77,7 @@ def clean(raw):
     return (
         raw.pipe(compute_regulation_fields)
         .pipe(compute_measure_fields)
+        .pipe(discard_measures_out_of_model)
         .pipe(compute_vehicle_fields)
         .pipe(compute_period_fields, FIXTURE_EXTRACTED_ON)
     )
@@ -124,6 +126,7 @@ def pipeline(*rows: dict[str, Any], today: date = FIXTURE_EXTRACTED_ON) -> pl.Da
         make_frame(*rows)
         .pipe(compute_regulation_fields)
         .pipe(compute_measure_fields)
+        .pipe(discard_measures_out_of_model)
         .pipe(compute_vehicle_fields)
         .pipe(compute_period_fields, today)
     )
@@ -347,7 +350,9 @@ def test_every_label_of_catalog_1202_maps_as_decided(label, expected):
         m_params=params,
         l_direction="dans les deux sens" if label == "sens interdit (ou sens unique)" else None,
     )
-    df = compute_measure_fields(compute_regulation_fields(make_frame(row)))
+    df = discard_measures_out_of_model(
+        compute_measure_fields(compute_regulation_fields(make_frame(row)))
+    )
     if expected is None:
         assert df.height == 0
     else:
@@ -359,24 +364,28 @@ def test_the_catalog_table_is_complete():
     assert len(MEASURE_TYPE_BY_LABEL) == 32
 
 
-def test_an_unknown_measure_label_is_dropped_with_a_warning(captured_logs):
-    """Paris can enrich the catalog: a new value is never guessed, nor stops the run."""
+def test_an_unknown_measure_label_drops_its_act_with_a_warning(captured_logs):
+    """Paris can enrich the catalog: a new value is never guessed, nor stops the run, and what
+    it does to the act's other measures is not known."""
     unknown = make_row(m_file_id=11, m_type="interdiction de klaxonner", l_file_id=None)
-    known = make_row()
+    beside = make_row()
+    other_act = make_row(a_file_id=2, a_identifier="2024P10002", m_file_id=20, l_file_id=200)
 
-    df = compute_measure_fields(compute_regulation_fields(make_frame(unknown, known)))
+    df = compute_measure_fields(compute_regulation_fields(make_frame(unknown, beside, other_act)))
 
-    assert df.get_column("m_file_id").to_list() == [10]
+    assert df.get_column("m_file_id").to_list() == [20]
     dropped = [line for line in captured_logs if "unknown to catalog 1202" in line]
     assert len(dropped) == 1
     assert "'interdiction de klaxonner': 1" in dropped[0]
 
 
-def test_measures_outside_the_model_are_dropped_and_counted(raw, captured_logs):
-    compute_measure_fields(compute_regulation_fields(raw))
+def test_measures_outside_the_model_are_read_then_dropped_and_counted(raw, captured_logs):
+    kept = compute_measure_fields(compute_regulation_fields(raw))
+    assert "Mesure libre" in kept.get_column("m_type").to_list()
+    discard_measures_out_of_model(kept)
     dropped = [line for line in captured_logs if "without a DiaLog equivalent" in line]
     assert len(dropped) == 1
-    assert "'stationnement réservé': 6" in dropped[0]
+    assert "'Mesure libre': 1" in dropped[0]
 
 
 def test_rows_without_any_measure_are_dropped_and_counted(captured_logs):
@@ -1126,10 +1135,12 @@ def test_the_canonical_keys_this_step_owns_are_all_produced(clean):
 
 
 def test_the_funnel_of_the_fixture_is_the_one_we_expect(raw, clean):
-    assert raw.height == 79
+    # The unpublished measures are read too, but the 6 reserved parkings and the traffic light
+    # (180 locations) get no row at all.
+    assert raw.height == 75
     after_state = compute_regulation_fields(raw)
-    assert after_state.height == 76  # 1 Abrogé + 1 Non signé + 1 Périmé
-    after_type = compute_measure_fields(after_state)
+    assert after_state.height == 72  # 1 Abrogé + 1 Non signé + 1 Périmé
+    after_type = discard_measures_out_of_model(compute_measure_fields(after_state))
     assert after_type.height == 64  # the 3 one-way streets are oriented further on
     assert clean.height == 61  # 2025T15489 and 2026T17998, by the date controls
     assert dict(

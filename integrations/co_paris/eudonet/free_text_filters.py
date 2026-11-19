@@ -4,7 +4,9 @@ row goes.
 Every free text of an act (its notes and complementary articles, its measures' paragraphs,
 notes and articles, its locations' complements, mail-merge details and notes) goes through the
 same reading, `free_text.read_text`. A text not understood drops the record it qualifies: the
-act, the measure or the location (decided 2026-11-18). A text understood may carry an effect,
+act, the measure or the location (decided 2026-11-18). On a measure DiaLog does not publish, or
+one of its locations, it drops the act: what such a text does to the other measures is not
+known (decided 2026-11-19). A text understood may carry an effect,
 applied here: an exemption, bicycles against the flow of the act's one-way streets, the list
 of vehicles a pedestrian area lets in, places on a single point.
 
@@ -38,6 +40,7 @@ from .vocabulary import (
     LABEL_ONE_WAY,
     LABEL_PEDESTRIAN_AREA,
     LABEL_ZONE_30,
+    MEASURE_TYPE_BY_LABEL,
     MULTI_VALUE_SEPARATOR,
     PARAGRAPH_EXEMPTION_LABELS,
     PARAGRAPH_EXEMPTION_PARAMETER,
@@ -113,6 +116,7 @@ LOCATION_PRINTED_COLUMNS = (
     "l_road_name",
     "l_district",
     "l_side",
+    "l_direction",
     *BOUND_NUMBER_COLUMNS,
     "l_from_number_complement",
     "l_to_number_complement",
@@ -125,6 +129,10 @@ LOCATION_PRINTED_COLUMNS = (
     "l_displayed_length",
 )
 _DIGITS = re.compile(r"\d+")
+# A measure DiaLog does not publish: read like the others, dropped after the arbitration.
+_UNPUBLISHED = pl.col("m_type").is_not_null() & pl.col("m_type").is_in(
+    [label for label, kind in MEASURE_TYPE_BY_LABEL.items() if kind is None]
+)
 
 
 @dataclass(frozen=True)
@@ -373,6 +381,10 @@ class Outcome:
 
 
 def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcome:
+    """What the readings do. A text understood on a measure DiaLog does not publish, or on one
+    of its locations, qualifies that record only, except for what reaches the act's other
+    measures: riders against the flow, the vehicles let into its pedestrian areas. Its
+    exemptions are kept on it, for whoever reads who uses a lane."""
     measures = (
         df.filter(pl.col("m_file_id").is_not_null())
         .unique("m_file_id")
@@ -380,11 +392,13 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
     )
     measure_type = dict(zip(measures["m_file_id"], measures["m_type"]))
     act_of_measure = dict(zip(measures["m_file_id"], measures["a_file_id"]))
+    unpublished = set(measures.filter(_UNPUBLISHED)["m_file_id"])
     measures_of_act: dict[int, list[int]] = defaultdict(list)
     for measure, act in act_of_measure.items():
         measures_of_act[act].append(measure)
     locations = df.filter(pl.col("l_file_id").is_not_null()).unique("l_file_id")
     scope = dict(zip(locations["l_file_id"], locations["l_scope"]))
+    measure_of_location = dict(zip(locations["l_file_id"], locations["m_file_id"]))
 
     dropped: dict[Level, dict[int, str]] = {level: {} for level in Level}
     added: dict[int, list[list[str]]] = defaultdict(list)
@@ -395,6 +409,8 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
         problems = [] if reading.understood else [label]
         if text.level == Level.LOCATION:
             for effect in reading.effects:
+                if measure_of_location.get(text.record) in unpublished:
+                    continue
                 if effect.code != Code.RESERVED_PLACES:
                     problems.append(f"{label}: {effect.code}")
                 elif scope.get(text.record) != SCOPE_POINT:
@@ -402,7 +418,8 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
         elif reading.understood:
             is_act = text.level == Level.REGULATION
             act = text.record if is_act else act_of_measure[text.record]
-            own = measures_of_act[act] if is_act else [text.record]
+            is_unpublished = not is_act and text.record in unpublished
+            own = measures_of_act[act] if is_act or is_unpublished else [text.record]
             for effect in reading.effects:
                 if effect.code == Code.AGAINST_THE_FLOW:
                     against_the_flow[act] += effect.values
@@ -414,6 +431,12 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
                         added[area] += [
                             [PEDESTRIAN_ACCESS_PARAMETER, exemption_label(category)]
                             for category in effect.values
+                        ]
+                elif is_unpublished:
+                    if effect.code == Code.EXEMPTION:
+                        added[text.record] += [
+                            [PARAGRAPH_EXEMPTION_PARAMETER, _exemption(value)]
+                            for value in effect.values
                         ]
                 elif effect.code == Code.AMENDMENT_WORDING and is_act:
                     continue
@@ -458,6 +481,21 @@ def _report(readings: list[tuple[FreeText, Reading]], alerts: list[str] | None) 
         report_recurring_formulas(by_record.values(), texts, team_label, alerts)
 
 
+def _drop_acts_of_unpublished_measures(df: pl.DataFrame, outcome: Outcome) -> None:
+    """A text not understood on a measure DiaLog does not publish, or on one of its locations,
+    drops the act instead."""
+    unpublished = df.filter(_UNPUBLISHED)
+    act_of_measure = dict(zip(unpublished["m_file_id"], unpublished["a_file_id"]))
+    located = unpublished.filter(pl.col("l_file_id").is_not_null())
+    act_of_location = dict(zip(located["l_file_id"], located["a_file_id"]))
+    for level, act_of in ((Level.MEASURE, act_of_measure), (Level.LOCATION, act_of_location)):
+        for record in [record for record in outcome.dropped[level] if record in act_of]:
+            reason = outcome.dropped[level].pop(record)
+            outcome.dropped[Level.REGULATION].setdefault(
+                act_of[record], f"{reason}, on a measure DiaLog does not publish"
+            )
+
+
 def discard_unread_texts(
     df: pl.DataFrame, alerts: list[str] | None = None, all_rows: pl.DataFrame | None = None
 ) -> pl.DataFrame:
@@ -467,6 +505,7 @@ def discard_unread_texts(
     readings = [(text, read_text(text.text, text.explained)) for text in texts]
     _report(readings, alerts)
     outcome = _apply(df, readings)
+    _drop_acts_of_unpublished_measures(df, outcome)
 
     against = (pl.col("m_type") == LABEL_ONE_WAY) & pl.col("a_file_id").is_in(
         list(outcome.against_the_flow)

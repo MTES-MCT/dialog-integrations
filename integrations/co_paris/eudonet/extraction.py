@@ -18,7 +18,7 @@ from .raw_rows import (
     TABLE_MEASURE_ARTICLES,
     TABLE_MEASURES,
     TABLE_REGULATIONS,
-    needs_locations,
+    is_read,
 )
 from .vocabulary import (
     ACCEPTED_STATES_BY_TYPE,
@@ -27,7 +27,7 @@ from .vocabulary import (
     TYPE_TEMPORARY_LABEL,
 )
 
-# Measured at 2.2 % on the 2026-09-08 dump; well above means the locations went missing.
+# Measured at 1.5 % of all the measures on 2026-11-17; well above means the locations went missing.
 MAX_UNLOCATED_MEASURES_SHARE = 0.25
 
 
@@ -62,7 +62,10 @@ def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[st
     """The five tables of the perimeter, as flat rows keyed by table number.
 
     The API filters on a parent's fields one level up, not two: locations and the measures'
-    articles are fetched by batches of identifiers of the measures DiaLog can carry.
+    articles are fetched by batches of measure identifiers, for every measure DiaLog does not
+    publish too: a bus lane against the flow changes the one-way street of the same act, and
+    their texts are read like the others. Only the measures that can change nothing else
+    (`UNREAD_MEASURE_LABELS`) are left aside.
     """
     where = perimeter_criteria(today)
 
@@ -81,28 +84,28 @@ def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[st
         raise EudonetError(
             "Eudonet returned no article for the perimeter: their texts could not be checked"
         )
-    dialog_measures = [row for row in measures if needs_locations(row)]
+    read = [row for row in measures if is_read(row)]
     logger.info(
-        f"Fetching the locations of {len(dialog_measures)} measures out of {len(measures)}: "
-        "the others have no DiaLog equivalent, or a label the catalog table does not know"
+        f"Fetching the locations and articles of {len(read)} measures out of {len(measures)}"
     )
+    measure_ids = [row["FileId"] for row in read]
     locations = client.search_by_ids(
         TABLE_LOCATIONS,
         LOCATION_QUERY_FIELDS,
         FILTER_MEASURE_OF_LOCATION,
-        [row["FileId"] for row in dialog_measures],
+        measure_ids,
         label="locations",
     )
 
-    check_extraction_completeness(dialog_measures, locations)
+    check_extraction_completeness(read, locations)
     measure_articles = client.search_by_ids(
         TABLE_MEASURE_ARTICLES,
         MEASURE_ARTICLE_QUERY_FIELDS,
         TABLE_MEASURES,
-        [row["FileId"] for row in dialog_measures],
+        measure_ids,
         label="measure articles",
     )
-    if dialog_measures and not measure_articles:
+    if read and not measure_articles:
         raise EudonetError(
             "Eudonet returned no measure article for the perimeter: their texts could not be "
             "checked"

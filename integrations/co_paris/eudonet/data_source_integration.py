@@ -28,7 +28,9 @@ from .measures import (
     PEDESTRIAN_OR_CYCLE_MEASURES,
     add_pedestrian_area_speed,
     compute_measure_fields,
+    discard_measures_out_of_model,
 )
+from .one_way_exceptions import arbitrate_one_way_streets
 from .published_elsewhere import (
     ELSEWHERE_STATE_FILE,
     discard_published_elsewhere,
@@ -111,15 +113,15 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(discard_superseded_regulations)
             .pipe(discard_published_elsewhere, self.numbers_published_elsewhere)
             # Before the period and vehicle fields: no other rule can be judged yet.
-            .pipe(
-                self.apply_rules,
-                TITLE_SAYS_REPEALED,
-                PEDESTRIAN_OR_CYCLE_MEASURES,
-                ONE_DIRECTION,
-            )
+            .pipe(self.apply_rules, TITLE_SAYS_REPEALED)
+            # Every measure is read, those DiaLog does not publish included, before any is
+            # dropped: they may change the act's other measures.
             .pipe(compute_measure_fields)
             # The raw rows: an article also prints the locations an earlier rule dropped.
             .pipe(discard_unread_texts, self.alerts, raw_data)
+            .pipe(arbitrate_one_way_streets)
+            .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_MEASURES, ONE_DIRECTION)
+            .pipe(discard_measures_out_of_model)
             .pipe(self.apply_rules, PEDESTRIAN_OR_CYCLE_VEHICLES)
             .pipe(compute_vehicle_fields)
             .pipe(self.apply_rules, EXEMPTION_IN_TITLE_ONLY)

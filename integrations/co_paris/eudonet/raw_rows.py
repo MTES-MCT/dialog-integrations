@@ -1,3 +1,4 @@
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -6,7 +7,7 @@ from typing import Any
 import polars as pl
 from loguru import logger
 
-from .vocabulary import MEASURE_TYPE_BY_LABEL
+from .vocabulary import UNREAD_MEASURE_LABELS
 
 TABLE_REGULATIONS = 1100
 TABLE_MEASURES = 1200
@@ -172,11 +173,9 @@ RAW_COLUMNS: dict[str, Any] = {
 }
 
 
-def needs_locations(measure: dict[str, Any]) -> bool:
-    """True for a measure whose label maps to a DiaLog type; the others are dropped later,
-    so their locations are not fetched."""
-    label = displayed_value(measure, MEASURE_NAME.descid)
-    return label is not None and MEASURE_TYPE_BY_LABEL.get(label) is not None
+def is_read(measure: dict[str, Any]) -> bool:
+    """False for a measure of `UNREAD_MEASURE_LABELS`: neither fetched nor read."""
+    return displayed_value(measure, MEASURE_NAME.descid) not in UNREAD_MEASURE_LABELS
 
 
 def count_unreadable_measures(tables: dict[str, list[dict[str, Any]]]) -> int:
@@ -262,9 +261,9 @@ def _group_by_parent(
 def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame:
     """One row per location, carrying its measure and its regulation.
 
-    Childless parents are kept with null children so that the funnel counts them. A measure
-    out of the model gets one row without location even if a frozen dump has its locations,
-    so the dump and the online extraction give the same rows.
+    Childless parents are kept with null children so that the funnel counts them. The
+    measures of `UNREAD_MEASURE_LABELS` get no row at all, with or without locations in the
+    tables, so a frozen dump and the online extraction give the same rows.
     """
     regulations = tables.get(str(TABLE_REGULATIONS), [])
     measures = tables.get(str(TABLE_MEASURES), [])
@@ -276,6 +275,14 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
         tables.get(str(TABLE_MEASURE_ARTICLES), []), FIELD_MEASURE_LINK
     )
 
+    unread = [row for row in measures if not is_read(row)]
+    if unread:
+        kinds = Counter(displayed_value(row, MEASURE_NAME.descid) for row in unread)
+        logger.info(
+            f"Leaving aside {len(unread)} measures that change nothing else in their act: "
+            f"{dict(kinds)}"
+        )
+    measures = [row for row in measures if is_read(row)]
     measures_by_regulation, _ = _group_by_parent(measures, FIELD_REGULATION_LINK)
     unreadable = count_unreadable_measures(tables)
     if unreadable:
@@ -309,10 +316,8 @@ def build_raw_dataframe(tables: dict[str, list[dict[str, Any]]]) -> pl.DataFrame
                 measure,
                 _texts(articles_by_measure.get(measure["FileId"], []), MEASURE_ARTICLE_TEXT),
             )
-            own_locations = []
-            if needs_locations(measure):
-                own_locations = locations_by_measure.get(measure["FileId"], [])
-                measures_without_location += not own_locations
+            own_locations = locations_by_measure.get(measure["FileId"], [])
+            measures_without_location += not own_locations
             for location in own_locations or [None]:
                 rows.append({**regulation_fields, **measure_fields, **_location_fields(location)})
 

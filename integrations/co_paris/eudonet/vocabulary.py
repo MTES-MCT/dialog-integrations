@@ -77,6 +77,19 @@ MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
     "zone de rencontre": None,
 }
 
+# Measures neither fetched (locations, article) nor read: none of them can widen or narrow
+# another measure of the act, and their 51 000 locations are two thirds of the base (2026-11-17).
+# Every other unpublished measure is read before being dropped, in case it does.
+UNREAD_MEASURE_LABELS: dict[str, str] = {
+    "stationnement réservé": "a few places kept for some users, no restriction on traffic",
+    "suppression stationnement réservé": "the end of such places",
+    "feux d'intersection": "priority at a crossing",
+    "Feux piéton": "priority at a crossing",
+    "cédez le passage": "priority at a crossing",
+    "stop": "priority at a crossing",
+}
+assert set(UNREAD_MEASURE_LABELS) <= {k for k, v in MEASURE_TYPE_BY_LABEL.items() if v is None}
+
 # `1203`, the formula that opens the measure's article: one per measure name on the 10 781
 # measures of 2026-11-17. The catalog holds richer ones, never used ("… interdit tous les
 # jours, sauf dérogation…"): any other drops the measure (decided 2026-11-18).
@@ -98,6 +111,32 @@ LABEL_ONE_WAY = "sens interdit (ou sens unique)"
 # text is these words around the bounds, so traffic goes from the first bound to the second.
 ONE_WAY_FROM_COMPLEMENTS = frozenset({"depuis", "dans sa partie comprise entre"})
 ONE_WAY_TO_COMPLEMENTS = frozenset({"vers", "jusqu'à"})
+# The measures of an act that may open a one-way street the other way (`one_way_exceptions`).
+LANE_LABELS = frozenset({"voie réservée", "voie cyclable", "voie verte"})
+LABEL_CYCLE_LANE = "voie cyclable"
+LABEL_GREENWAY = "voie verte"
+LABEL_MEETING_ZONE = "zone de rencontre"
+LABEL_NO_CONTRAFLOW_CYCLES = "interdiction double sens pour les cyclistes"
+LABEL_BOTH_WAYS_RESTORED = "rétablissement double sens"
+# `2711` on a lane: its way against the act's general traffic.
+LANE_SAME_WAY = "dans le sens de la circulation générale"
+LANE_OTHER_WAY = "dans le sens inverse de la circulation générale"
+LANE_BOTH_WAYS = "dans les deux sens"
+LANE_DIRECTION_PARAMETER = "Direction"
+LANE_TWO_WAY_VALUE = "bidirectionnelle"
+LANE_USERS_PARAMETER = "véhicule concerné (2)"
+# Every value of `véhicule concerné (2)` on the reserved lanes of 2026-11-17, as exemption
+# labels (`EXEMPTION_BY_LABEL`) or words published as `other`. Any other drops the one-way street.
+LANE_USERS_BY_LABEL: dict[str, tuple[str, ...]] = {
+    "des véhicules de transports en commun": ("véhicules de transports en commun",),
+    "des véhicules de transports en commun et cycles": (
+        "véhicules de transports en commun",
+        "aux cycles",
+    ),
+    "des cycles": ("aux cycles",),
+    "des taxis": ("aux taxis",),
+    "des riverains": ("des riverains",),
+}
 LABEL_ZONE_30 = "zone 30"
 LABEL_PEDESTRIAN_AREA = "aire piétonne"
 LABEL_DIMENSION_LIMIT = "limitation dimensionnelle"

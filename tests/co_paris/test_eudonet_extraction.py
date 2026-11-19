@@ -18,7 +18,7 @@ from integrations.co_paris.eudonet.raw_rows import (
     MEASURE_PARAMETER_PAIRS,
     RAW_COLUMNS,
     build_raw_dataframe,
-    needs_locations,
+    is_read,
 )
 from integrations.co_paris.eudonet.schema import EudonetRawDataSchema
 from tests.co_paris.eudonet_fixture import load_fixture, read_eudonet_from_the_fixture
@@ -71,11 +71,13 @@ def test_the_raw_dataframe_matches_the_column_contract(raw):
 
 
 def test_there_is_one_row_per_location_plus_the_childless_parents(raw, tables):
-    carried = {m["FileId"] for m in tables["1200"] if needs_locations(m)}
+    read = [m for m in tables["1200"] if is_read(m)]
+    carried = {m["FileId"] for m in read}
     carried_locations = [row for row in tables["2700"] if row["1202_fid"] in carried]
     measures_with_location = {row["1202_fid"] for row in carried_locations}
-    locationless_measures = [m for m in tables["1200"] if m["FileId"] not in measures_with_location]
-    regulations_with_measure = {m["1101_fid"] for m in tables["1200"]}
+    locationless_measures = [m for m in read if m["FileId"] not in measures_with_location]
+    # An act whose every measure is left aside is childless too.
+    regulations_with_measure = {m["1101_fid"] for m in read}
     childless_regulations = [
         a for a in tables["1100"] if a["FileId"] not in regulations_with_measure
     ]
@@ -237,13 +239,6 @@ def test_credentials_are_read_from_the_organization_settings(source, monkeypatch
     assert seen["today"] == datetime.now(ZoneInfo("Europe/Paris")).date()
 
 
-def test_only_the_measures_dialog_can_carry_need_their_locations():
-    assert needs_locations({"1202": "interdiction de stationnement"})
-    assert needs_locations({"1202": "aire piétonne"})
-    assert not needs_locations({"1202": "stationnement réservé"})
-    assert not needs_locations({"1202": "interdiction de klaxonner"})
-
-
 class StubEudonet:
     """Answers each table from a dict; the articles may be missing."""
 
@@ -254,6 +249,7 @@ class StubEudonet:
         return self.tables.get(str(table), [])
 
     def search_by_ids(self, table, columns, id_field, ids, label=""):
+        self.asked = {**getattr(self, "asked", {}), str(table): list(ids)}
         return self.tables.get(str(table), [])
 
 
@@ -278,6 +274,36 @@ def test_both_kinds_of_articles_are_extracted_with_the_perimeter(tables):
     assert extracted["2200"] == [COMPLEMENTARY_ARTICLE]
     assert extracted["3200"] == [MEASURE_ARTICLE]
     assert "1400" not in extracted
+
+
+def test_the_measures_that_change_nothing_else_are_neither_fetched_nor_read(tables):
+    """Reserved parking places and traffic lights: two thirds of the locations of the base,
+    none of which bears on another measure of the act."""
+    stub = StubEudonet({**tables, "2200": [COMPLEMENTARY_ARTICLE], "3200": [MEASURE_ARTICLE]})
+    extract_tables(stub, date(2026, 9, 8))  # type: ignore[arg-type]
+    left_aside = {m["FileId"] for m in tables["1200"] if not is_read(m)}
+    assert left_aside
+    assert not left_aside & set(stub.asked["2700"])
+    assert not left_aside & set(stub.asked["3200"])
+
+    raw = build_raw_dataframe(tables)
+    assert not raw.filter(pl.col("m_file_id").is_in(list(left_aside))).height
+    assert "stationnement réservé" not in raw["m_type"].to_list()
+
+
+@pytest.mark.parametrize(
+    "label, read",
+    [
+        ("interdiction de stationnement", True),
+        ("voie réservée", True),
+        ("Mesure libre", True),
+        ("stationnement réservé", False),
+        ("feux d'intersection", False),
+        ("cédez le passage", False),
+    ],
+)
+def test_which_measures_are_read(label, read):
+    assert is_read({"1202": label}) is read
 
 
 def test_a_link_to_an_act_the_account_cannot_see_is_read_from_its_database_value():

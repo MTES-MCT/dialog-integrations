@@ -27,7 +27,10 @@ PEDESTRIAN_OR_CYCLE_MEASURES = pedestrians_or_cycles_named(pl.col("m_type"))
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     """`measure_type_`, `measure_max_speed`, and `measure_group_key`: the Eudonet measure, so
-    its locations collapse into one DiaLog measure."""
+    its locations collapse into one DiaLog measure.
+
+    A measure DiaLog does not publish stays, `measure_type_` empty: its texts are read and it may
+    change the act's other measures, until `discard_measures_out_of_model`."""
     return (
         df.pipe(map_measure_types)
         .pipe(discard_unexpected_openings)
@@ -38,9 +41,12 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+_PUBLISHED = pl.col("measure_type_").is_not_null()
+
+
 def map_measure_types(df: pl.DataFrame) -> pl.DataFrame:
-    """`measure_type_`; a label new to catalog `1202` is dropped with a warning until a human
-    qualifies it, never guessed and never stopping the run."""
+    """`measure_type_`. A label new to catalog `1202` drops its whole act with a warning until a
+    human qualifies it: what it does to the act's other measures is not known."""
     no_measure = df.filter(pl.col("m_type").is_null())
     if no_measure.height:
         logger.warning(
@@ -52,25 +58,29 @@ def map_measure_types(df: pl.DataFrame) -> pl.DataFrame:
     known = pl.col("m_type").is_in(list(MEASURE_TYPE_BY_LABEL))
     unknown = df.filter(~known)
     if unknown.height:
+        acts = unknown["a_file_id"].unique()
         logger.warning(
-            f"Dropping {unknown.height} measures with a label unknown to catalog 1202 "
-            f"({unknown['a_identifier'].n_unique()} regulations): "
-            f"{count_by(unknown, 'm_type')}. "
-            "Qualify them in vocabulary.MEASURE_TYPE_BY_LABEL."
+            f"Dropping {acts.len()} regulations holding a measure with a label unknown to "
+            f"catalog 1202: {count_by(unknown.unique('m_file_id'), 'm_type')}. "
+            "Qualify it in vocabulary.MEASURE_TYPE_BY_LABEL."
         )
-    df = df.filter(known).with_columns(
+        df = df.filter(~pl.col("a_file_id").is_in(acts.implode()))
+    return df.with_columns(
         pl.col("m_type")
         .replace_strict(MEASURE_TYPE_BY_LABEL, return_dtype=pl.Utf8)
         .alias("measure_type_")
     )
 
-    out_of_model = df.filter(pl.col("measure_type_").is_null())
+
+def discard_measures_out_of_model(df: pl.DataFrame) -> pl.DataFrame:
+    """Drop the measures without a DiaLog equivalent, once read: last of the measure rules."""
+    out_of_model = df.filter(~_PUBLISHED)
     if out_of_model.height:
         logger.warning(
-            f"Dropping {out_of_model.height} measures without a DiaLog equivalent: "
-            f"{count_by(out_of_model, 'm_type')}"
+            f"Dropping {out_of_model['m_file_id'].n_unique()} measures without a DiaLog "
+            f"equivalent: {count_by(out_of_model.unique('m_file_id'), 'm_type')}"
         )
-    return df.filter(pl.col("measure_type_").is_not_null())
+    return df.filter(_PUBLISHED)
 
 
 def discard_unexpected_openings(df: pl.DataFrame) -> pl.DataFrame:
@@ -79,7 +89,9 @@ def discard_unexpected_openings(df: pl.DataFrame) -> pl.DataFrame:
     nothing."""
     expected = pl.col("m_type").replace_strict(OPENING_BY_LABEL, default=None, return_dtype=pl.Utf8)
     opening = pl.col("m_opening").str.strip_chars()
-    unexpected = opening.is_not_null() & (opening != "") & (opening != expected).fill_null(True)
+    unexpected = (
+        _PUBLISHED & opening.is_not_null() & (opening != "") & (opening != expected).fill_null(True)
+    )
     dropped = df.filter(unexpected)
     if dropped.height:
         logger.warning(
@@ -132,7 +144,7 @@ def discard_narrowed_measures(df: pl.DataFrame) -> pl.DataFrame:
         ),
     )
     for names, motive in narrowings:
-        narrowed = has_filled_parameter(df, names)
+        narrowed = has_filled_parameter(df, names) & df.select(_PUBLISHED).to_series()
         dropped = df.filter(narrowed)
         if dropped.height:
             logger.warning(
@@ -154,10 +166,13 @@ def discard_unknown_parameters(df: pl.DataFrame) -> pl.DataFrame:
         ]
         for params in df.get_column("m_params").to_list()
     ]
-    unknown = pl.Series([bool(found) for found in names], dtype=pl.Boolean)
+    unknown = (
+        pl.Series([bool(found) for found in names], dtype=pl.Boolean)
+        & df.select(_PUBLISHED).to_series()
+    )
     dropped = df.filter(unknown)
     if dropped.height:
-        counted = Counter(name for found in names for name in found)
+        counted = Counter(name for found, kept in zip(names, unknown) if kept for name in found)
         logger.warning(
             f"Dropping {dropped.height} rows of {dropped['m_file_id'].n_unique()} measures "
             f"carrying a filled parameter of an unknown name, which may narrow them: "
