@@ -91,7 +91,7 @@ def apply_rules(
     """Leave out the rows a dropping rule cannot validate, log those a flagging one cannot."""
     verdicts = rule_verdicts(df, rules, rule_inputs, canonical)
     result = RulesResult(df, unevaluated=verdicts.unevaluated)
-    left_out = pl.Series([False] * df.height)
+    left_out = pl.Series([False] * df.height, dtype=pl.Boolean)
     for code, (rule, fails) in verdicts.fails.items():
         if not (failed := int(fails.sum())):
             continue

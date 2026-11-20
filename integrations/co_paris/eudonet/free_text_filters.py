@@ -187,14 +187,15 @@ def _cited_by_another_act(
         return found
 
     acts = set(citations_of)
-    in_force = following = acts - no_longer
+    previous = in_force = acts - no_longer
     for _ in range(MAX_REPEAL_ROUNDS):
         following = acts - no_longer - hit(in_force, repeals_only=True)
         if following == in_force:
             break
-        in_force = following
+        previous, in_force = in_force, following
     else:
-        in_force |= following
+        # A cycle swings between two sets, whatever the parity of the rounds: both are kept.
+        in_force = previous | in_force
     return hit(in_force, repeals_only=False)
 
 

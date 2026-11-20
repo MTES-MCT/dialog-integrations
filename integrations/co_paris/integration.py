@@ -96,6 +96,9 @@ class SharedRun:
         self.error: Exception | None = None
         self.decided: pl.DataFrame | None = None
         self.decision: Decision | None = None
+        # The rules judged once for both: the second view checks its canonical rows against
+        # them too, instead of applying them again.
+        self.applied_codes: set[str] = set()
 
     def view(self, authority: str, label: str | None = None) -> type[Eudonet]:
         shared = self
@@ -118,7 +121,9 @@ class SharedRun:
                 if shared.decided is None:
                     shared.decided = super().decided_rows(raw_data)
                     shared.decision = self.decision
+                    shared.applied_codes = set(self._applied_codes)
                 self.decision = shared.decision
+                self._applied_codes |= shared.applied_codes
                 return shared.decided
 
         View.authority = authority
@@ -145,12 +150,27 @@ def combine(city: IntegrationOutcome, prefecture: IntegrationOutcome) -> Integra
     # The same read and the same texts: its alerts and metrics are the city's.
     out.source_alerts = list(dict.fromkeys([*city.source_alerts, *prefecture.source_alerts]))
     out.datasets = [*city.datasets, *prefecture.datasets]
-    out.total_shift = city.total_shift or prefecture.total_shift
+    out.total_shift = city.total_shift
+    if shift := prefecture.total_shift:
+        out.source_alerts.append(_prefecture_shift(shift))
     out.frozen_sources = {**city.frozen_sources, **_apart(prefecture.frozen_sources)}
     out.volume_drops = {**city.volume_drops, **_apart(prefecture.volume_drops)}
     out.source_errors = {**city.source_errors, **_apart(prefecture.source_errors)}
     out.report = f"{city.report}\n\n{PREFECTURE_LABEL}\n{prefecture.report}"
     return out
+
+
+def _prefecture_shift(shift: dict) -> str:
+    """The prefecture's own total moved: said apart, under its name (team-facing, French)."""
+    (dialog_before, dialog_now), (produced_before, produced_now) = (
+        shift["dialog"],
+        shift["produced"],
+    )
+    return (
+        f"{PREFECTURE_LABEL} : changement important du nombre total d'arrêtés de "
+        f"l'organisation dans DiaLog : {dialog_before} → {dialog_now} (produits par la "
+        f"pipeline : {produced_before} → {produced_now})"
+    )
 
 
 def _apart(by_source: dict) -> dict:

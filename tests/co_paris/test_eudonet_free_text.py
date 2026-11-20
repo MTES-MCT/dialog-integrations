@@ -1082,6 +1082,8 @@ def test_an_act_cited_inside_another_one_named_by_dans_is_still_cited():
     }
 
 
-def test_a_cycle_of_repeals_keeps_both_citing():
+@pytest.mark.parametrize("rounds", [20, 21])
+def test_a_cycle_of_repeals_keeps_both_citing(rounds, monkeypatch):
+    monkeypatch.setattr(free_text_filters, "MAX_REPEAL_ROUNDS", rounds)
     texts = {1: ["L'arrêté n° 2021P10002 est abrogé."], 2: ["L'arrêté n° 2020P10001 est abrogé."]}
     assert cited(texts) == {1, 2}

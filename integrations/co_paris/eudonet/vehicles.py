@@ -151,7 +151,7 @@ def read_vehicle_set(
         rejection = EXEMPTIONS_TOO_LONG
     else:
         tally.kept_as_other.update(kept_as_other)
-        tally.sized.update(sizes)
+        tally.sized.update(sizes.keys())
         tally.unknown_exemptions.update(unknown_exemptions)
     has_access_list = any(
         len(pair) == 2 and pair[0].strip() == PEDESTRIAN_ACCESS_PARAMETER for pair in params or []

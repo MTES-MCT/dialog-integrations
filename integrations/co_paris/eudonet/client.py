@@ -199,7 +199,8 @@ class EudonetClient:
 
         A location cannot be filtered on its regulation, two levels up (error 204), hence
         reading it by its measures. `sparse`: most identifiers have no row (a measure's
-        article, on 2 747 of 8 822 measures on 2026-11-17), an empty batch is believed.
+        article, on 2 747 of 8 822 measures on 2026-11-17), a large empty batch is read again
+        but then believed.
         """
         name = label or f"table {table}"
         identifiers = list(ids)
@@ -209,7 +210,8 @@ class EudonetClient:
             batch = identifiers[start : start + chunk]
             where = criterion(id_field, IN_LIST, ";".join(str(value) for value in batch))
             batch_rows = self.search_all(table, columns, where, label=f"{name} batch {index}")
-            if not batch_rows and not sparse:
+            large = len(batch) >= EMPTY_BATCH_DISBELIEVED_FROM
+            if not batch_rows and (large or not sparse):
                 # On 2026-09-08 a batch of 50 measures answered 0 rows once, then 64 on every
                 # replay: an empty batch is read twice before being believed.
                 logger.warning(
@@ -218,7 +220,7 @@ class EudonetClient:
                 )
                 time.sleep(EMPTY_BATCH_PAUSE_SECONDS)
                 batch_rows = self.search_all(table, columns, where, label=f"{name} batch {index}")
-                if not batch_rows and len(batch) >= EMPTY_BATCH_DISBELIEVED_FROM:
+                if not batch_rows and large and not sparse:
                     raise EudonetError(
                         f"Eudonet {name} batch {index}: still empty for {len(batch)} "
                         "identifiers after a second read; the extraction is not complete"
