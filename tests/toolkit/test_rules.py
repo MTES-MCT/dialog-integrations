@@ -35,6 +35,15 @@ def test_a_decision_leaves_its_rows_out_and_keeps_the_others_in_order():
     assert result.applied == {"FAST": 1}
 
 
+def test_an_empty_frame_comes_back_empty():
+    df = rows(["A"], measure_max_speed=[30]).clear()
+
+    result = apply_rules(df, [rule("FAST", Outcome.DROP, SPEED_UP_TO_40)])
+
+    assert result.frame.equals(df)
+    assert result.applied == {}
+
+
 def test_a_signal_changes_nothing_but_is_counted():
     df = rows(["A", "B"], measure_max_speed=[30, 50])
 

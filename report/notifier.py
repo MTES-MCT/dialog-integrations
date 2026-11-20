@@ -182,6 +182,10 @@ class Notifier:
                 )
             lines.append(line)
 
+        alerts = result.get("source_alerts")
+        if isinstance(alerts, list):
+            lines += [f"⚠️ {alert}" for alert in alerts if isinstance(alert, str) and alert]
+
         # Counts only: the motives are in the run's log (team decision, 2026-10-01).
         left_out = []
         if rejected := cls._count(result.get("rejected")):

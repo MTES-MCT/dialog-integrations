@@ -15,12 +15,12 @@ from integrations.co_paris.eudonet.locations import (
     ONE_DIRECTION,
     Bound,
     city_codes,
-    compute_location_fields,
     parse_bound,
     parse_house_number,
     parse_house_number_range,
 )
 from payloads.measures import build_location
+from tests.co_paris.steps import compute_location_fields
 from toolkit.rules.apply import apply_rules
 
 INPUT_COLUMNS = {
@@ -298,15 +298,17 @@ def test_section_from_the_2017_migration():
     )
 
 
-def test_sections_without_both_bounds_are_dropped():
+def test_a_section_with_a_single_bound_is_dropped():
     out = compute_location_fields(
-        frame(
-            section(),  # the 2017 migration left 4 466 of these: bounds only in the PDF
-            section(l_from_house_number="2"),  # a single bound
-            section(l_to_road_name="Rue Malar"),
-        )
+        frame(section(l_from_house_number="2"), section(l_to_road_name="Rue Malar"))
     )
     assert out.height == 0
+
+
+def test_a_section_named_by_its_street_alone_is_the_whole_street():
+    row = compute_location_fields(frame(section())).row(0, named=True)
+    assert row["location_road_name"] == "Rue Galande"
+    assert row["location_from_point_type"] is None and row["location_to_point_type"] is None
 
 
 def test_whole_street():

@@ -87,6 +87,7 @@ def run_all(integration: BaseIntegration, outcome: IntegrationOutcome, limit_to)
 
         metrics = source_metrics(source)
         outcome.source.update(metrics)
+        outcome.source_alerts.extend(source.alerts)
         production.funnels.append(
             SourceFunnel(
                 name=name,

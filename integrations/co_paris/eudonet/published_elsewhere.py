@@ -20,6 +20,7 @@ from dialog.calls import DialogApi, PublicExportUnreadable
 
 from .locations import CITY_CODE_BY_DISTRICT
 from .regulations import IDENTIFIER_PREFIX
+from .verdicts import PUBLISHED_ELSEWHERE, refusal
 
 OTHER_CHANNEL_PREFIX = re.compile(r"^paris_", re.IGNORECASE)
 PUBLIC_EXPORT_CITY_CODES = ("75056", *CITY_CODE_BY_DISTRICT.values())
@@ -123,24 +124,13 @@ def index_by_eudonet_number(identifiers: Iterable[tuple[str, str]]) -> dict[str,
     return numbers
 
 
-def discard_published_elsewhere(df: pl.DataFrame, numbers: dict[str, str] | None) -> pl.DataFrame:
-    """Drop the regulations whose `1101` number another channel already published.
+def judge_published_elsewhere(df: pl.DataFrame, numbers: dict[str, str] | None) -> pl.DataFrame:
+    """Refuse the regulations whose `1101` number another channel already published.
 
     `None` is a list never loaded (`fetch_raw_data` did not run): said, not passed over.
     """
     if numbers is None:
         logger.warning("The numbers published elsewhere were never loaded, none held back")
-        return df
-    if not numbers:
-        return df
-    published = pl.col("a_identifier").is_in(list(numbers))
-    held_back = df.filter(published)
-    if held_back.height:
-        collisions = sorted(
-            f"{number} ({numbers[number]})" for number in held_back["a_identifier"].unique()
-        )
-        logger.warning(
-            f"Dropping {held_back.height} rows of {len(collisions)} regulations already "
-            f"published by another channel: {collisions}"
-        )
-    return df.filter(~published)
+        numbers = {}
+    found = pl.col("a_identifier").replace_strict(numbers, default=None, return_dtype=pl.String)
+    return df.with_columns(refusal(found).alias(PUBLISHED_ELSEWHERE.column))
