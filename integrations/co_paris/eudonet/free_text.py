@@ -37,6 +37,9 @@ class Code(StrEnum):
     # A few words without a number: understood only as a zone's name, in the paragraph of
     # its measure (`free_text_filters.ZONE_NAME_MEASURES`).
     ZONE_NAME = "zone name"
+    # Values: the dimension alone ("longueur"), the one the gauge value of a dimension limit
+    # bounds: the catalog value says "plus de 10 mètres", never of what.
+    DIMENSION = "dimension"
     # A number of places: how many the location holds, neutral on a point or a section.
     RESERVED_PLACES = "reserved places"
     # This act amends another one and quotes the new wording ("… est ainsi modifié : - le
@@ -280,6 +283,7 @@ FORMULAS: tuple[Formula, ...] = (
     ),
     _formula("entered in the software", r"injecté dans gacs"),
     _formula("film shooting", r"^tournage de film$"),
+    _formula("names the dimension", r"^(longueur|largeur|hauteur)$", Code.DIMENSION),
     # A few words without a number ("Quartier Vert « Censier »"): only a zone 30 has a name.
     _formula(
         "zone name",
@@ -484,6 +488,8 @@ def _values(formula: Formula, clause: str) -> tuple[str, ...]:
         listed = clause.split(":", 1)[1] if ":" in clause else ""
         items = (item.strip(" .;-–") for item in re.split(r"\s*;\s*|\s*-\s+|^-|;-", listed))
         return tuple(item for item in items if item)
+    if formula.code == Code.DIMENSION:
+        return (clause.lower(),)
     return ()
 
 

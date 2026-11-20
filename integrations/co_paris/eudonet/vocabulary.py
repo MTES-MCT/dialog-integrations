@@ -205,6 +205,15 @@ RESTRICTION_PARAMETERS = frozenset(
 # text. It takes the place of the local access exemption (decided 2026-11-18).
 PEDESTRIAN_ACCESS_PARAMETER = "desserte de l'aire piétonne"
 
+# Not a parameter of Eudonet either: the dimension the paragraph of a dimension limit names
+# alone ("longueur"), and the column it fills with the gauge value of `GAUGE_METRES`.
+DIMENSION_PARAMETER = "dimension de la limite"
+DIMENSION_COLUMNS = {
+    "longueur": "vehicle_max_length",
+    "largeur": "vehicle_max_width",
+    "hauteur": "vehicle_max_height",
+}
+
 EXEMPTION_PARAMETERS = frozenset(
     {
         "dérogation pour véhicule",
@@ -281,6 +290,12 @@ RESTRICTIONS_KEPT_AS_OTHER = frozenset(
         "aux autocars",
     }
 )
+
+# The gauge values of the catalog, in metres; published as a size once the dimension is known.
+GAUGE_METRES = {
+    "aux véhicules de plus de 2 mètres": 2.0,
+    "aux véhicules de plus de 10 mètres": 10.0,
+}
 
 RESTRICTION_BY_LABEL: dict[str, VehicleRestriction] = {
     "aux véhicules de plus de 3,5 T": VehicleRestriction(RESTRICTED_HEAVY_GOODS, 3.5),

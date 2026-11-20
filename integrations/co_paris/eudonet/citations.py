@@ -21,6 +21,14 @@ _IN_PART = re.compile(
 )
 # "… sont abrogées par l'arrêté n° X": X repeals, it is not repealed.
 _BY_ACT = re.compile(r"\bpar (?:l['’]\s?)?arrêtés?\b[^.;:]*$", re.IGNORECASE)
+# The verb right before: X is the act that repeals or amends, not a cited one. An old act's
+# note names its successor this way ("cet arrêté est abrogé par le n° X", "… abrogé dans
+# l'arrêté n° X"). Looser, "celles prévues par l'arrêté n° X sont remplacées" cites X.
+_AUTHOR = re.compile(
+    r"\b(?:abrog|modifi|remplac|suspend|supprim)\w*\s+(?:par|dans)\s+"
+    r"(?:(?:l['’]\s?|les?\s+)?arrêtés?\b(?:(?!n\s?°)[^.;:])*|les?\s+)$",
+    re.IGNORECASE,
+)
 _NUMBER_PARTS = re.compile(r"P?(\d{4}|\d{2})(?:[-.]|(?=[A-Z]))([A-Z]?)0*(\d+)(?:-\d+)?")
 # "arrêté municipal n° 2011-104" is not the prefect's "2011-00104", which reads the same once
 # the zeros are dropped: the adjective before a number, or before the list it ends, says whose.
@@ -47,7 +55,8 @@ def act_number_key(number: str) -> tuple[int, str, int] | None:
 def citations(texts: list[str]) -> set[tuple[tuple[int, str, int], Authority | None, bool]]:
     """The act numbers a sentence of `texts` repeals, amends, replaces or suspends, whether the
     sentence is otherwise understood or not: with the authority the citation names, if any, and
-    whether the sentence repeals or replaces (the cited act no longer holds)."""
+    whether the sentence repeals or replaces (the cited act no longer holds). The act named as
+    the one that repeals or amends is not cited."""
     found = set()
     for text in texts:
         for sentence in clauses(text) or [plain_text(text)]:
@@ -56,8 +65,8 @@ def citations(texts: list[str]) -> set[tuple[tuple[int, str, int], Authority | N
             repeals = _REPEALS.search(sentence) is not None and not _IN_PART.search(sentence)
             for match in _CITED_NUMBER.finditer(sentence):
                 key = act_number_key(match.group(1))
-                if key is not None:
-                    before = sentence[: match.start()]
+                before = sentence[: match.start()]
+                if key is not None and not _AUTHOR.search(before):
                     found.add((key, _authority(before), repeals and not _BY_ACT.search(before)))
     return found
 

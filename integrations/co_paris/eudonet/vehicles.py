@@ -11,13 +11,17 @@ from api.dia_log_client.models import (
 from toolkit.rules.rule import Nature, Outcome, Rule
 from toolkit.rules.vehicles import pedestrians_or_cycles_named
 from toolkit.transforms.titles import truncate_text
+from toolkit.transforms.vehicle_types import DIMENSIONS
 
 from .verdicts import PARAMS, VEHICLE_REJECTION, among, refusals
 from .vocabulary import (
     ALL_VEHICLES_LABELS,
+    DIMENSION_COLUMNS,
+    DIMENSION_PARAMETER,
     EXEMPTED_OTHER,
     EXEMPTION_BY_LABEL,
     EXEMPTION_PARAMETERS,
+    GAUGE_METRES,
     LABEL_CATEGORY_LIMIT,
     LABEL_DIMENSION_LIMIT,
     LABEL_PEDESTRIAN_AREA,
@@ -53,7 +57,7 @@ VEHICLE_COLUMNS: dict[str, Any] = {
     "vehicle_restricted_types": pl.List(pl.Utf8),
     "vehicle_exempted_types": pl.List(pl.Utf8),
     "vehicle_heavyweight_max_weight": pl.Float64,
-    # No catalog value carries a length, height or width: always empty.
+    # Filled only when the paragraph names the dimension a gauge value bounds.
     "vehicle_max_length": pl.Float64,
     "vehicle_max_height": pl.Float64,
     "vehicle_max_width": pl.Float64,
@@ -71,6 +75,7 @@ class VehicleTally:
     """Values counted on every row, for the warnings."""
 
     kept_as_other: Counter[str] = field(default_factory=Counter)
+    sized: Counter[str] = field(default_factory=Counter)
     unknown_exemptions: Counter[str] = field(default_factory=Counter)
     outside_restrictions: Counter[str] = field(default_factory=Counter)
 
@@ -87,6 +92,22 @@ def read_vehicle_set(
     outside = False
     kept_as_other: list[str] = []
     unknown_exemptions: list[str] = []
+    # Exactly one dimension and one gauge value, or the label goes as "other", as written.
+    dimensions = {
+        pair[1].strip()
+        for pair in params or []
+        if len(pair) == 2 and pair[0] == DIMENSION_PARAMETER
+    }
+    gauges = {
+        part.strip()
+        for pair in params or []
+        if len(pair) == 2 and pair[0].strip() in RESTRICTION_PARAMETERS
+        for part in pair[1].split(MULTI_VALUE_SEPARATOR)
+        if part.strip() in GAUGE_METRES
+    }
+    sizes: dict[str, float] = {}
+    if len(dimensions) == 1 and len(gauges) == 1:
+        sizes[DIMENSION_COLUMNS[dimensions.pop()]] = GAUGE_METRES[gauges.pop()]
 
     for pair in params or []:
         if len(pair) != 2:
@@ -105,6 +126,8 @@ def read_vehicle_set(
                 if known is not None:
                     _append_unique(restricted, known.restricted_type)
                     weight = _keep_stricter(weight, known.heavyweight_max_weight)
+                elif sizes and value in GAUGE_METRES:
+                    _append_unique(restricted, DIMENSIONS)
                 elif value in RESTRICTIONS_KEPT_AS_OTHER:
                     kept_as_other.append(value)
                     _append_unique(restricted, RESTRICTED_OTHER)
@@ -128,6 +151,7 @@ def read_vehicle_set(
         rejection = EXEMPTIONS_TOO_LONG
     else:
         tally.kept_as_other.update(kept_as_other)
+        tally.sized.update(sizes)
         tally.unknown_exemptions.update(unknown_exemptions)
     has_access_list = any(
         len(pair) == 2 and pair[0].strip() == PEDESTRIAN_ACCESS_PARAMETER for pair in params or []
@@ -143,9 +167,9 @@ def read_vehicle_set(
         "vehicle_restricted_types": restricted or None,
         "vehicle_exempted_types": exempted or None,
         "vehicle_heavyweight_max_weight": weight,
-        "vehicle_max_length": None,
-        "vehicle_max_height": None,
-        "vehicle_max_width": None,
+        "vehicle_max_length": sizes.get("vehicle_max_length"),
+        "vehicle_max_height": sizes.get("vehicle_max_height"),
+        "vehicle_max_width": sizes.get("vehicle_max_width"),
         "vehicle_other_restricted_type_text": _restricted_text(restricted_texts)
         if RESTRICTED_OTHER in restricted
         else None,
@@ -175,6 +199,11 @@ def judge_vehicle_fields(df: pl.DataFrame, alive: pl.Series) -> pl.DataFrame:
         logger.warning(
             f"{sum(tally.kept_as_other.values())} restriction values of the closed list kept "
             f"as 'other' + free text: {dict(tally.kept_as_other)}"
+        )
+    if tally.sized:
+        logger.info(
+            f"{sum(tally.sized.values())} gauge limits published as a size, the dimension "
+            f"read in their paragraph: {dict(tally.sized)}"
         )
     if tally.unknown_exemptions:
         logger.warning(

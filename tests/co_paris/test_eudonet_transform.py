@@ -832,7 +832,7 @@ def test_hazardous_materials_have_their_own_type():
 
 def test_a_length_in_metres_is_not_turned_into_a_dimension():
     """The label never says which dimension, and none of the 26 325 measures of 2026-09-08
-    carries a length, height or width beside it."""
+    carries a length, height or width beside it: without a paragraph naming it, "other"."""
     row = make_row(
         m_type="limitation dimensionnelle",
         m_params=[

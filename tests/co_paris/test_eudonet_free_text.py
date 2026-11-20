@@ -183,6 +183,7 @@ def test_the_mail_merge_clauses_are_read_apart_even_without_a_full_stop():
         ("1 place.s ZL permanente", Code.RESERVED_PLACES),
         ("sur 2 places.,", Code.RESERVED_PLACES),
         ('Quartier Vert " Censier "', Code.ZONE_NAME),
+        ("Longueur", Code.DIMENSION),
         ("sauf aux véhicules de secours", Code.EXEMPTION),
         (
             "L'arrêté n° 2013-01231 du 9 décembre 2013 susvisé est ainsi modifié : « 14 places » "
@@ -472,6 +473,34 @@ def test_cycles_bound_to_a_track_ride_against_the_flow_with_the_condition_in_wor
     assert out["vehicle_other_exempted_type_text"].to_list() == [
         "cycles tenus d'emprunter la piste cyclable"
     ]
+
+
+@pytest.mark.parametrize(
+    "paragraph, value, column, metres",
+    [
+        ("<br />longueur<br />", "aux véhicules de plus de 10 mètres", "vehicle_max_length", 10.0),
+        ("largeur", "aux véhicules de plus de 2 mètres", "vehicle_max_width", 2.0),
+    ],
+)
+def test_a_gauge_whose_paragraph_names_the_dimension_is_a_size(paragraph, value, column, metres):
+    row = make_row(
+        m_type="limitation dimensionnelle",
+        m_paragraph=paragraph,
+        m_params=[
+            ["valeur de la limite", value],
+            ["véhicule concerné (1)", "à tous les véhicules"],
+        ],
+    )
+    df = pipeline(row).pipe(discard_unread_texts).pipe(compute_vehicle_fields)
+    assert df.get_column("vehicle_restricted_types").to_list() == [["dimensions"]]
+    assert df.get_column(column).to_list() == [metres]
+    assert df.get_column("vehicle_other_restricted_type_text").to_list() == [None]
+    assert df.get_column("vehicle_all_vehicles").to_list() == [False]
+
+
+def test_a_dimension_alone_on_another_measure_is_not_understood():
+    row = make_row(m_type="circulation interdite", m_paragraph="longueur")
+    assert pipeline(row).pipe(discard_unread_texts).height == 0
 
 
 ACCESS = (
@@ -1033,6 +1062,24 @@ def test_the_act_that_repeals_is_not_repealed():
         2: ["L'arrêté n° 2020P10001 est abrogé."],
     }
     assert 1 in cited(texts)
+
+
+@pytest.mark.parametrize(
+    "note",
+    [
+        "Attention cet arrêté est abrogé par le n° 2021P10002",
+        "Aire piétonne, cet arrêté est abrogé dans l'arrêté n° 2021P10002",
+        "Cet arrêté a été abrogé par l'arrêté municipal n° 2021P10002.",
+    ],
+)
+def test_an_old_act_naming_its_successor_does_not_cite_it(note):
+    assert cited({1: [note]}) == set()
+
+
+def test_an_act_cited_inside_another_one_named_by_dans_is_still_cited():
+    assert cited({2: ["Les dispositions prévues dans l'arrêté n° 2020P10001 sont abrogées."]}) == {
+        1
+    }
 
 
 def test_a_cycle_of_repeals_keeps_both_citing():

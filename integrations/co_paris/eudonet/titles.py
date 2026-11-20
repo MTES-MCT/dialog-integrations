@@ -23,14 +23,17 @@ import polars as pl
 
 from toolkit.transforms.pedestrian_area import PEDESTRIAN_AREA_SPEED
 
-from .free_text import Explained, clauses, cut, cut_street_names, says_nothing
+from .free_text import Code, Explained, clauses, cut, cut_street_names, read_text, says_nothing
 from .locations import street_key
 from .printed import bound_numbers, location_spans, narrower_than_the_street, parameter_spans
 from .text import plain_text
 from .verdicts import UNREAD_TITLE, among, by_key
 from .vocabulary import (
+    GAUGE_METRES,
     IMPLIED_MAX_SPEED_BY_LABEL,
+    LABEL_DIMENSION_LIMIT,
     LABEL_PEDESTRIAN_AREA,
+    MULTI_VALUE_SEPARATOR,
     PEDESTRIAN_AREA_SPEED_BY_KEY,
     SPEED_PARAMETER,
     TYPE_TEMPORARY_LABEL,
@@ -42,6 +45,7 @@ class Says(StrEnum):
     FAMILY = "family"
     SPEED = "speed"
     WEIGHT = "weight"
+    GAUGE = "gauge"
     PROVISIONAL = "provisional"
     BOUNDS = "bounds"
 
@@ -66,6 +70,10 @@ _VERB = (
     r"|interdisant|limitant|fixant|relatif (?:à|aux)|relative (?:à|aux)|concernant|désignant"
     r"|réservant|autorisant|supprimant|rétablissant|neutralisant)"
 )
+
+# "de plus de dix mètres de long": the gauge values of the catalog, in words.
+NUMBER_WORDS = {"deux": 2.0, "trois": 3.0, "quatre": 4.0, "cinq": 5.0, "dix": 10.0}
+_DIMENSION_OF = {"long": "longueur", "large": "largeur", "haut": "hauteur"}
 
 # Longest and most specific first: a formula is taken out of the clause before the next is tried.
 TITLE_FORMULAS: tuple[TitleFormula, ...] = (
@@ -92,6 +100,13 @@ TITLE_FORMULAS: tuple[TitleFormula, ...] = (
         r"(?:dont le )?poids total (?:autorisé )?(?:en charge )?(?:excède|est supérieur à|"
         r"supérieur à|de plus de)\s*\d+(?:[,.]\d+)?\s*(?:tonnes|t)\b",
         Says.WEIGHT,
+    ),
+    _formula(
+        "gauge",
+        rf"(?:dont la (?P<before>longueur|largeur|hauteur) (?:excède|dépasse|est supérieure à)"
+        rf"|de plus de)\s*(?P<metres>\d+(?:[,.]\d+)?|{'|'.join(NUMBER_WORDS)})\s*(?:mètres|m)\b"
+        rf"(?: de (?P<after>long|longueur|large|largeur|haut|hauteur)\b)?",
+        Says.GAUGE,
     ),
     _formula("speed", r"(?:à )?\d{1,3}\s?km\s?/?\s?h(?:eure)?\b", Says.SPEED),
     _formula(
@@ -225,6 +240,8 @@ class TitleReading:
     provisional: bool = False
     bounds: tuple[tuple[str, str], ...] = ()
     unread: tuple[str, ...] = ()
+    # (dimension or None, metres).
+    gauges: frozenset[tuple[str | None, float]] = frozenset()
 
 
 def read_title(title: str | None, explained: Explained) -> TitleReading:
@@ -232,6 +249,7 @@ def read_title(title: str | None, explained: Explained) -> TitleReading:
     families: set[str] = set()
     speeds: set[int] = set()
     weights: set[float] = set()
+    gauges: set[tuple[str | None, float]] = set()
     bounds: list[tuple[str, str]] = []
     provisional = False
     unread: list[str] = []
@@ -249,6 +267,8 @@ def read_title(title: str | None, explained: Explained) -> TitleReading:
                     weights.update(
                         float(n.replace(",", ".")) for n in _NUMBER.findall(match.group())
                     )
+                elif formula.says == Says.GAUGE:
+                    gauges.add(_gauge(match))
                 elif formula.says == Says.PROVISIONAL:
                     provisional = True
                 elif formula.says == Says.BOUNDS:
@@ -268,7 +288,16 @@ def read_title(title: str | None, explained: Explained) -> TitleReading:
         provisional,
         tuple(bounds),
         tuple(unread),
+        frozenset(gauges),
     )
+
+
+def _gauge(match: re.Match[str]) -> tuple[str | None, float]:
+    metres = match.group("metres").lower()
+    dimension = match.group("before") or match.group("after")
+    if dimension:
+        dimension = _DIMENSION_OF.get(dimension.lower(), dimension.lower())
+    return dimension, NUMBER_WORDS.get(metres) or float(metres.replace(",", "."))
 
 
 @dataclass
@@ -279,6 +308,8 @@ class Act:
     narrower_than_the_street: bool = False
     speeds: set[int] = field(default_factory=set)
     weights: set[float] = field(default_factory=set)
+    # (dimension the paragraph names, or None; metres of the gauge value).
+    gauges: set[tuple[str | None, float]] = field(default_factory=set)
     bound_keys: set[str] = field(default_factory=set)
     numbers: set[str] = field(default_factory=set)
 
@@ -325,6 +356,9 @@ def disagreement(reading: TitleReading, act: Act) -> str | None:
         return "title speed not in the act"
     if reading.weights - act.weights:
         return "title weight not in the act"
+    if reading.gauges - act.gauges:
+        # The dimension too: the title confirms the paragraph's, it never supplies one.
+        return "title gauge not in the act"
     for start, end in reading.bounds:
         matched = _bound_matches(start, act) and _bound_matches(end, act)
         if not (matched or act.narrower_than_the_street):
@@ -375,6 +409,8 @@ def _acts(rows: pl.DataFrame) -> dict[int, tuple[str | None, Act, Explained]]:
                 act.weights.update(
                     float(n.replace(",", ".")) for n in _WEIGHT_IN_PARAMETER.findall(pair[1])
                 )
+            if name == LABEL_DIMENSION_LIMIT:
+                act.gauges |= _measure_gauges(row)
             spans[regulation] += [name, row["m_opening"] or "", *parameter_spans(row)]
         if row["l_file_id"] is not None:
             narrower[regulation].append(narrower_than_the_street(row))
@@ -400,6 +436,22 @@ def _acts(rows: pl.DataFrame) -> dict[int, tuple[str | None, Act, Explained]]:
         )
         for regulation, (title, act, _) in acts.items()
     }
+
+
+def _measure_gauges(row: dict) -> set[tuple[str | None, float]]:
+    """The gauge values of a dimension limit, with the dimension its paragraph names alone, and
+    without any dimension: a title that names none says no more than the field."""
+    metres = {
+        GAUGE_METRES[part.strip()]
+        for pair in row["m_params"] or []
+        if len(pair) == 2
+        for part in pair[1].split(MULTI_VALUE_SEPARATOR)
+        if part.strip() in GAUGE_METRES
+    }
+    effects = read_text(row["m_paragraph"]).effects
+    named = {value for e in effects if e.code == Code.DIMENSION for value in e.values}
+    dimensions: set[str | None] = {None, *named} if len(named) == 1 else {None}
+    return {(dimension, m) for dimension in dimensions for m in metres}
 
 
 def judge_unread_titles(rows: pl.DataFrame, alive: pl.Series) -> pl.DataFrame:

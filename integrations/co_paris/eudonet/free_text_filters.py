@@ -66,6 +66,8 @@ from .verdicts import (
 )
 from .vocabulary import (
     CYCLES_EXEMPTION_LABEL,
+    DIMENSION_PARAMETER,
+    LABEL_DIMENSION_LIMIT,
     LABEL_NO_CONTRAFLOW_CYCLES,
     LABEL_ONE_WAY,
     LABEL_PEDESTRIAN_AREA,
@@ -478,6 +480,14 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
                         text.column == "m_paragraph"
                         and measure_type.get(text.record) in ZONE_NAME_MEASURES
                     ):
+                        problems.append(f"{label}: {effect.code}")
+                elif effect.code == Code.DIMENSION:
+                    if (
+                        text.column == "m_paragraph"
+                        and measure_type.get(text.record) == LABEL_DIMENSION_LIMIT
+                    ):
+                        added[text.record] += [[DIMENSION_PARAMETER, v] for v in effect.values]
+                    else:
                         problems.append(f"{label}: {effect.code}")
                 elif is_unpublished:
                     if effect.code == Code.EXEMPTION:

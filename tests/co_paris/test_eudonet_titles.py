@@ -73,6 +73,30 @@ def test_a_speed_in_the_title_is_one_of_the_act():
     assert disagreement(reading, act) is None
 
 
+@pytest.mark.parametrize(
+    "title, gauge",
+    [
+        (
+            "interdisant la circulation des véhicules de plus de dix mètres de long",
+            ("longueur", 10),
+        ),
+        (
+            "interdisant la circulation des véhicules dont la largeur excède 2 mètres",
+            ("largeur", 2),
+        ),
+        ("interdisant la circulation des véhicules de plus de 10 m", (None, 10)),
+    ],
+)
+def test_a_gauge_in_the_title_is_one_of_the_act_dimension_included(title, gauge):
+    reading = read_title(title + " rue de Rivoli", RIVOLI)
+    assert reading.gauges == {gauge}
+    act = Act(temporary=False, gauges={(None, 10.0)})
+    expected = None if gauge == (None, 10) else "title gauge not in the act"
+    assert disagreement(reading, act) == expected
+    act.gauges |= {("longueur", 10.0), ("largeur", 2.0)}
+    assert disagreement(reading, act) is None
+
+
 def test_bounds_in_the_title_are_the_act_s_bounds_however_written():
     reading = read_title(
         "limitant la vitesse à 30 km/h dans la rue Erlanger, entre la rue d'Auteuil et la rue "
