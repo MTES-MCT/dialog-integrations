@@ -7,7 +7,7 @@ from loguru import logger
 from api.dia_log_client import Client
 from canonical.regulation_measure import RegulationMeasure, unknown_canonical_columns
 from settings import OrganizationSettings
-from toolkit.rules.apply import RulesResult, apply_rules
+from toolkit.rules.apply import RulesResult, apply_rules, log_rule, rule_verdicts
 from toolkit.rules.common import COMMON_RULES, CONTRACT_RULES
 from toolkit.rules.rule import Outcome, Rule
 
@@ -50,6 +50,7 @@ class BaseDataSourceIntegration:
         # By "label (nature)": rows each rule applied to, for the report.
         self.rule_counts: dict[str, int] = {}
         self._applied_codes: set[str] = set()
+        self.alerts: list[str] = []
 
     @property
     def organization(self) -> str:
@@ -101,6 +102,20 @@ class BaseDataSourceIntegration:
         self._applied_codes |= {r.code for r in rules if r.code not in result.unevaluated}
         return result.frame
 
+    def rule_fails(
+        self, df: pl.DataFrame, rules: list[Rule], among: pl.Series
+    ) -> dict[str, tuple[Rule, pl.Series]]:
+        """`apply_rules` without leaving any row out: the rows failing each rule, by code.
+        Counted and logged on the rows `among` only, those still in
+        its run."""
+        verdicts = rule_verdicts(df, rules, self.rule_inputs)
+        self._applied_codes |= {r.code for r in rules if r.code not in verdicts.unevaluated}
+        for rule, fails in verdicts.fails.values():
+            if failed := int((fails & among).sum()):
+                log_rule(self.name or "", rule, failed, verdicts.view.filter(fails & among))
+                self._count_rule(rule, failed)
+        return verdicts.fails
+
     def _apply_rules_to_canonical(self, df: pl.DataFrame) -> pl.DataFrame:
         """Apply the rules to the canonical rows; a decision already applied must find nothing."""
         rules = [
@@ -120,8 +135,11 @@ class BaseDataSourceIntegration:
     def _count(self, result: RulesResult, rules: list[Rule]) -> None:
         for rule in rules:
             if applied := result.applied.get(rule.code):
-                key = f"{rule.label} ({rule.nature.value}, {rule.outcome.value})"
-                self.rule_counts[key] = self.rule_counts.get(key, 0) + applied
+                self._count_rule(rule, applied)
+
+    def _count_rule(self, rule: Rule, rows: int) -> None:
+        key = f"{rule.label} ({rule.nature.value}, {rule.outcome.value})"
+        self.rule_counts[key] = self.rule_counts.get(key, 0) + rows
 
     def fetch_raw_data(self) -> pl.DataFrame:
         raise NotImplementedError("Subclasses must implement fetch_raw_data method")

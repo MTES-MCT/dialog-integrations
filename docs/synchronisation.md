@@ -76,3 +76,7 @@ Calcule tout — extraction, transformation, lots — et **n'écrit rien**, ni d
 ## Volumétries source
 
 Une source de données peut publier ses propres volumétries en renseignant `self.metrics: dict[str, int]` pendant `fetch_raw_data` (par exemple `{"arrêtés du périmètre": 5297, "mesures": 11230}`). `BaseIntegration` les lit si elles existent, les affiche dans le rapport et les fait remonter dans le message Tchap. Aucune source ne s'en sert aujourd'hui.
+
+## Alertes d'une source
+
+Une source peut ajouter à `self.alerts: list[str]` une phrase en français, destinée à l'équipe. Chaque alerte part dans le résultat (`"source_alerts"`) et s'affiche dans le message Tchap, précédée de ⚠️. À réserver à ce qui demande une action : le message doit rester court. Paris s'en sert pour les formules de texte libre répétées plus de 100 fois sans statut (`integrations/co_paris/eudonet/recurring_formulas.py`).

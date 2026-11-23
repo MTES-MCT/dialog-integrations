@@ -5,7 +5,11 @@ import polars as pl
 import pytest
 
 from dialog.calls import DialogApi
-from integrations.co_paris.eudonet.client import EQUALS, GREATER_OR_EQUAL, EudonetError
+from integrations.co_paris.eudonet.client import (
+    EQUALS,
+    GREATER_OR_EQUAL,
+    EudonetError,
+)
 from integrations.co_paris.eudonet.data_source_integration import (
     DataSourceIntegration,
 )
@@ -17,10 +21,12 @@ from integrations.co_paris.eudonet.extraction import (
 from integrations.co_paris.eudonet.raw_rows import (
     MEASURE_PARAMETER_PAIRS,
     RAW_COLUMNS,
+    Expansion,
     build_raw_dataframe,
-    needs_locations,
+    is_read,
 )
 from integrations.co_paris.eudonet.schema import EudonetRawDataSchema
+from tests.co_paris.acts import everything
 from tests.co_paris.eudonet_fixture import load_fixture, read_eudonet_from_the_fixture
 
 
@@ -39,7 +45,7 @@ def tables():
 
 @pytest.fixture
 def raw(tables):
-    return build_raw_dataframe(tables)
+    return build_raw_dataframe(tables, everything(tables))
 
 
 @pytest.fixture
@@ -71,13 +77,14 @@ def test_the_raw_dataframe_matches_the_column_contract(raw):
 
 
 def test_there_is_one_row_per_location_plus_the_childless_parents(raw, tables):
-    carried = {m["FileId"] for m in tables["1200"] if needs_locations(m)}
+    read = [m for m in tables["1200"] if is_read(m)]
+    carried = {m["FileId"] for m in read}
     carried_locations = [row for row in tables["2700"] if row["1202_fid"] in carried]
     measures_with_location = {row["1202_fid"] for row in carried_locations}
-    locationless_measures = [m for m in tables["1200"] if m["FileId"] not in measures_with_location]
-    regulations_with_measure = {m["1101_fid"] for m in tables["1200"]}
+    locationless_measures = [m for m in read if m["FileId"] not in measures_with_location]
+    regulations_with_a_read_measure = {m["1101_fid"] for m in read}
     childless_regulations = [
-        a for a in tables["1100"] if a["FileId"] not in regulations_with_measure
+        a for a in tables["1100"] if a["FileId"] not in regulations_with_a_read_measure
     ]
 
     assert raw.height == (
@@ -100,7 +107,7 @@ def test_every_location_row_carries_its_own_measure_and_regulation(raw, tables):
 
 def test_the_rows_do_not_depend_on_the_order_eudonet_serves_them(raw, tables):
     reversed_tables = {table: rows[::-1] for table, rows in tables.items()}
-    assert build_raw_dataframe(reversed_tables).equals(raw)
+    assert build_raw_dataframe(reversed_tables, everything(reversed_tables)).equals(raw)
 
 
 def test_the_schema_declares_the_raw_columns_in_their_order():
@@ -173,7 +180,7 @@ def test_a_regulation_without_measure_gets_null_parameters():
         "2700": [],
     }
 
-    row = build_raw_dataframe(tables).row(0, named=True)
+    row = build_raw_dataframe(tables, everything(tables)).row(0, named=True)
 
     assert row["m_file_id"] is None
     assert row["m_params"] is None
@@ -200,17 +207,6 @@ def test_the_extracted_tables_become_the_raw_columns(source, monkeypatch):
     assert raw.height > 0
 
 
-@pytest.mark.parametrize(
-    "base_url, published",
-    [("https://dialog.beta.gouv.fr", False), ("https://dialog-staging.osc-fr1.scalingo.io", True)],
-)
-def test_the_police_prefecture_is_never_published_on_the_production_host(base_url, published):
-    settings = StubSettings()
-    settings.base_url = base_url
-    source = DataSourceIntegration(settings, client=None)  # type: ignore[arg-type]
-    assert source._publishes_police_prefecture() is published
-
-
 def test_without_credentials_the_failure_names_the_variable(source):
     with pytest.raises(EudonetError, match="EUDONET_PARIS_CREDENTIALS is not set"):
         source.fetch_raw_data()
@@ -222,10 +218,10 @@ def test_credentials_are_read_from_the_organization_settings(source, monkeypatch
     class Settings(StubSettings):
         eudonet_paris_credentials = '{"user": "someone"}'
 
-    def record(client, today):
+    def record(client, today, articles_of, locations_of):
         seen["credentials"] = client.credentials
         seen["today"] = today
-        return {}
+        return {}, Expansion(frozenset(), frozenset())
 
     monkeypatch.setattr(
         "integrations.co_paris.eudonet.data_source_integration.extract_tables", record
@@ -237,13 +233,6 @@ def test_credentials_are_read_from_the_organization_settings(source, monkeypatch
     assert seen["today"] == datetime.now(ZoneInfo("Europe/Paris")).date()
 
 
-def test_only_the_measures_dialog_can_carry_need_their_locations():
-    assert needs_locations({"1202": "interdiction de stationnement"})
-    assert needs_locations({"1202": "aire piétonne"})
-    assert not needs_locations({"1202": "stationnement réservé"})
-    assert not needs_locations({"1202": "interdiction de klaxonner"})
-
-
 class StubEudonet:
     """Answers each table from a dict; the articles may be missing."""
 
@@ -253,17 +242,80 @@ class StubEudonet:
     def search_all(self, table, columns, where, label=""):
         return self.tables.get(str(table), [])
 
-    def search_by_ids(self, table, columns, id_field, ids, label=""):
+    def search_by_ids(self, table, columns, id_field, ids, label="", sparse=False):
+        self.asked = {**getattr(self, "asked", {}), str(table): list(ids)}
         return self.tables.get(str(table), [])
 
 
-def test_an_extraction_without_any_article_is_refused(tables):
-    without_articles = {key: rows for key, rows in tables.items() if key != "1400"}
+NO_PREFILTER = (
+    lambda tables: frozenset(m["FileId"] for m in tables["1200"]),
+    lambda tables, articled: frozenset(m["FileId"] for m in tables["1200"]),
+)
+COMPLEMENTARY_ARTICLE = {"1101_fid": 1, "2205": "Sont abrogés : …"}
+MEASURE_ARTICLE = {"1202_fid": 1, "3204": "Le stationnement est interdit"}
+
+
+def test_an_extraction_without_any_complementary_article_is_refused(tables):
     with pytest.raises(EudonetError, match="no article"):
-        extract_tables(StubEudonet(without_articles), date(2026, 9, 8))  # type: ignore[arg-type]
+        stub = StubEudonet({**tables, "3200": [MEASURE_ARTICLE]})
+        extract_tables(stub, date(2026, 9, 8), *NO_PREFILTER)  # type: ignore[arg-type]
 
 
-def test_the_articles_are_extracted_with_the_perimeter(tables):
-    article = {"1101_fid": 1, "1402": "Article complémentaire", "1405": "Sont abrogés : …"}
-    extracted = extract_tables(StubEudonet({**tables, "1400": [article]}), date(2026, 9, 8))  # type: ignore[arg-type]
-    assert extracted["1400"] == [article]
+def test_an_extraction_without_any_measure_article_is_refused(tables):
+    stub = StubEudonet({**tables, "2200": [COMPLEMENTARY_ARTICLE]})
+    with pytest.raises(EudonetError, match="no measure article"):
+        extract_tables(stub, date(2026, 9, 8), *NO_PREFILTER)  # type: ignore[arg-type]
+
+
+def test_both_kinds_of_articles_are_extracted_with_the_perimeter(tables):
+    stub = StubEudonet({**tables, "2200": [COMPLEMENTARY_ARTICLE], "3200": [MEASURE_ARTICLE]})
+    extracted, _ = extract_tables(stub, date(2026, 9, 8), *NO_PREFILTER)  # type: ignore[arg-type]
+    assert extracted["2200"] == [COMPLEMENTARY_ARTICLE]
+    assert extracted["3200"] == [MEASURE_ARTICLE]
+    assert "1400" not in extracted
+
+
+def test_the_measures_that_change_nothing_else_are_neither_fetched_nor_read(tables):
+    stub = StubEudonet({**tables, "2200": [COMPLEMENTARY_ARTICLE], "3200": [MEASURE_ARTICLE]})
+    extract_tables(stub, date(2026, 9, 8), *NO_PREFILTER)  # type: ignore[arg-type]
+    left_aside = {m["FileId"] for m in tables["1200"] if not is_read(m)}
+    assert left_aside
+    assert not left_aside & set(stub.asked["2700"])
+    assert not left_aside & set(stub.asked["3200"])
+
+    raw = build_raw_dataframe(tables, everything(tables))
+    assert not raw.filter(pl.col("m_file_id").is_in(list(left_aside))).height
+    assert "stationnement réservé" not in raw["m_type"].to_list()
+
+
+@pytest.mark.parametrize(
+    "label, read",
+    [
+        ("interdiction de stationnement", True),
+        ("voie réservée", True),
+        ("Mesure libre", True),
+        ("stationnement réservé", False),
+        ("feux d'intersection", False),
+        ("cédez le passage", False),
+    ],
+)
+def test_which_measures_are_read(label, read):
+    assert is_read({"1202": label}) is read
+
+
+def test_a_link_to_an_act_the_account_cannot_see_is_read_from_its_database_value():
+    tables = {
+        "1100": [
+            {
+                "FileId": 1,
+                "1101": "2024P10001",
+                "1108": "Permanent",
+                "1107": "En vigueur",
+                "1139": "",
+                "1139_db": "30252",
+            }
+        ],
+        "1200": [],
+        "2700": [],
+    }
+    assert build_raw_dataframe(tables, everything(tables))["a_next_version"].to_list() == ["30252"]

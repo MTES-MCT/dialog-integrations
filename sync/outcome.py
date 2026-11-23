@@ -42,6 +42,7 @@ class IntegrationOutcome:
     planned: dict[str, int] = field(default_factory=dict)
     held: dict[str, int] = field(default_factory=dict)
     source: dict[str, int] = field(default_factory=dict)
+    source_alerts: list[str] = field(default_factory=list)
     # Rows read from the sources; `regulations` and `measures` are those in DiaLog after
     # the run: produced, minus held, refused or failed creations.
     raw_rows: int | None = None
@@ -101,6 +102,8 @@ class IntegrationOutcome:
             result["held"] = self.held
         if self.source:
             result["source"] = self.source
+        if self.source_alerts:
+            result["source_alerts"] = self.source_alerts
         result["integrated"] = {"regulations": self.regulations, "measures": self.measures}
         if self.raw_rows is not None:
             result["integrated"]["rows"] = self.raw_rows

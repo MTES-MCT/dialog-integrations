@@ -30,20 +30,26 @@ class RulesResult:
     unevaluated: list[str] = field(default_factory=list)
 
 
-def apply_rules(
+@dataclass
+class RuleVerdicts:
+    fails: dict[str, tuple[Rule, pl.Series]] = field(default_factory=dict)
+    unevaluated: list[str] = field(default_factory=list)
+    view: pl.DataFrame = field(default_factory=pl.DataFrame)
+
+
+def rule_verdicts(
     df: pl.DataFrame,
     rules: list[Rule],
     rule_inputs: dict[str, pl.Expr] | None = None,
-    source: str = "",
     canonical: bool = False,
-) -> RulesResult:
-    """Leave out the rows a dropping rule cannot validate, log those a flagging one cannot.
+) -> RuleVerdicts:
+    """Which rows fail each rule, every row of `df` judged, none left out.
 
     On `canonical` rows, a canonical column the source does not produce is read as null: it
     is judged like any missing value, not skipped.
     """
     if not rules or df.is_empty():
-        return RulesResult(df)
+        return RuleVerdicts()
     view = canonical_view(df, rule_inputs or {})
     if canonical:
         view = view.with_columns(
@@ -53,34 +59,43 @@ def apply_rules(
         )
     evaluable = [rule for rule in rules if rule.reads <= set(view.columns)]
     evaluated = {rule.code for rule in evaluable}
-    result = RulesResult(df, unevaluated=[r.code for r in rules if r.code not in evaluated])
+    result = RuleVerdicts(unevaluated=[r.code for r in rules if r.code not in evaluated], view=view)
     if not evaluable:
         return result
 
     verdicts = view.select(rule.expression().alias(str(i)) for i, rule in enumerate(evaluable))
     # Rules sharing a code are one rule read from several columns (the common one on the
     # canonical, a source's own on its columns): a row fails it once.
-    rule_by_code: dict[str, Rule] = {}
-    fails_by_code: dict[str, pl.Series] = {}
     for i, rule in enumerate(evaluable):
         # A rule validates: what it cannot say is valid, a missing or unreadable value
         # included, fails it. A rule fed the wrong column fails every row, and shows.
         fails = ~verdicts[str(i)].fill_null(False)
-        rule_by_code.setdefault(rule.code, rule)
-        if rule.code in fails_by_code:
-            fails = fails | fails_by_code[rule.code]
-        fails_by_code[rule.code] = fails
+        if rule.code in result.fails:
+            first, earlier = result.fails[rule.code]
+            result.fails[rule.code] = (first, earlier | fails)
+        else:
+            result.fails[rule.code] = (rule, fails)
+    return result
 
-    left_out = pl.Series([False] * df.height)
-    for code, fails in fails_by_code.items():
-        rule = rule_by_code[code]
+
+def apply_rules(
+    df: pl.DataFrame,
+    rules: list[Rule],
+    rule_inputs: dict[str, pl.Expr] | None = None,
+    source: str = "",
+    canonical: bool = False,
+) -> RulesResult:
+    """Leave out the rows a dropping rule cannot validate, log those a flagging one cannot."""
+    verdicts = rule_verdicts(df, rules, rule_inputs, canonical)
+    result = RulesResult(df, unevaluated=verdicts.unevaluated)
+    left_out = pl.Series([False] * df.height, dtype=pl.Boolean)
+    for code, (rule, fails) in verdicts.fails.items():
         if not (failed := int(fails.sum())):
             continue
-        result.applied[rule.code] = failed
-        _log(source, rule, failed, view.filter(fails))
+        result.applied[code] = failed
+        log_rule(source, rule, failed, verdicts.view.filter(fails))
         if rule.outcome is Outcome.DROP:
             left_out = left_out | fails
-
     result.frame = df.filter(~left_out)
     return result
 
@@ -130,7 +145,7 @@ def _canonical_types() -> dict[str, pl.DataType]:
 CANONICAL_TYPES = _canonical_types()
 
 
-def _log(source: str, rule: Rule, failed: int, rows: pl.DataFrame) -> None:
+def log_rule(source: str, rule: Rule, failed: int, rows: pl.DataFrame) -> None:
     sample = ""
     if "regulation_identifier" in rows.columns:
         identifiers = rows["regulation_identifier"].cast(pl.String).unique().sort().to_list()

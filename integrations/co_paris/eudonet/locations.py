@@ -25,6 +25,7 @@ from loguru import logger
 from api.dia_log_client.models import DirectionEnum, RoadTypeEnum
 from toolkit.rules.location import one_direction
 
+from .verdicts import LOCATION_REJECTED, ONE_WAY_UNREADABLE, Status, refusal
 from .vocabulary import LABEL_ONE_WAY, ONE_WAY_FROM_COMPLEMENTS, ONE_WAY_TO_COMPLEMENTS
 
 SCOPE_POINT = "Un point"
@@ -326,7 +327,9 @@ def _bounds(row: dict, road_name: str) -> tuple[Bound | None, Bound | None] | st
     )
     end = parse_bound(row["l_to_house_number"], row["l_to_road_name"], row["l_to_address_label"])
     if start is None and end is None:
-        return "section without bounds"
+        # Paris's form refuses a section it cannot place: a street named alone is the whole
+        # street (the Ville, 2026-11-18).
+        return None, None
     if start is None or end is None:
         return "section with a single bound"
     bound_labels = (
@@ -340,9 +343,9 @@ def _bounds(row: dict, road_name: str) -> tuple[Bound | None, Bound | None] | st
     return start, end
 
 
-def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
-    """Named-street fields (`roadType = lane`) for every location that DiaLog can geocode;
-    the others are dropped and counted by reason."""
+def judge_location_fields(df: pl.DataFrame) -> pl.DataFrame:
+    """Named-street fields (`roadType = lane`) for every location; those DiaLog cannot
+    geocode are refused, with the reason."""
     number_columns = ["l_from_house_number", "l_to_house_number", "l_point_house_number"]
     suffixed = df.select(
         pl.any_horizontal(
@@ -362,15 +365,11 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
     )
     df = df.with_columns(resolved).unnest("resolved")
 
-    rejected = df.filter(pl.col("_location_rejection").is_not_null())
-    if rejected.height:
-        reasons = dict(
-            rejected.get_column("_location_rejection").value_counts(sort=True).iter_rows()
-        )
-        logger.warning(f"Dropping {rejected.height} locations DiaLog cannot take: {reasons}")
-    df = df.filter(pl.col("_location_rejection").is_null()).drop("_location_rejection")
-
-    deduced = df.filter(pl.col("_location_district_source") != DISTRICT_FROM_SOURCE)
+    df = df.with_columns(
+        refusal(pl.col("_location_rejection")).alias(LOCATION_REJECTED.column)
+    ).drop("_location_rejection")
+    accepted = pl.col(LOCATION_REJECTED.column).struct.field("status") == Status.OK.value
+    deduced = df.filter(accepted & (pl.col("_location_district_source") != DISTRICT_FROM_SOURCE))
     if deduced.height:
         sources = dict(
             deduced.get_column("_location_district_source").value_counts(sort=True).iter_rows()
@@ -381,18 +380,19 @@ def compute_location_fields(df: pl.DataFrame) -> pl.DataFrame:
         )
     df = df.drop("_location_district_source")
 
-    if df.height:
-        shapes = dict(df.get_column("l_scope").value_counts(sort=True).iter_rows())
-        logger.info(f"Kept {df.height} named-street locations: {shapes}")
+    kept = df.filter(accepted)
+    if kept.height:
+        shapes = dict(kept.get_column("l_scope").value_counts(sort=True).iter_rows())
+        logger.info(f"{kept.height} named-street locations DiaLog can take: {shapes}")
     return df
 
 
-def orient_one_way_streets(df: pl.DataFrame) -> pl.DataFrame:
+def judge_one_way_orientation(df: pl.DataFrame) -> pl.DataFrame:
     """A one-way street « depuis A vers B » carries traffic from A to B: entry is forbidden from
     B to A, `B_TO_A` on the section DiaLog draws from its first bound (back, 2026-11-04).
 
     Without both words, or on a location without bounds (a whole street, a point), which way
-    is unknown: dropped rather than closed both ways.
+    is unknown: refused rather than closed both ways.
     """
     one_way = pl.col("m_type") == LABEL_ONE_WAY
     readable = (
@@ -400,20 +400,12 @@ def orient_one_way_streets(df: pl.DataFrame) -> pl.DataFrame:
         & pl.col("l_to_number_complement").is_in(list(ONE_WAY_TO_COMPLEMENTS))
         & pl.col("location_from_point_type").is_not_null()
     ).fill_null(False)
-    unreadable = one_way & ~readable
-    dropped = df.filter(unreadable)
-    if dropped.height:
-        logger.warning(
-            f"Dropping {dropped.height} one-way street locations whose bounds do not say "
-            f"which way (no « depuis … vers »): {dropped['a_identifier'].n_unique()} "
-            "regulations touched"
-        )
-    oriented = df.filter(one_way & readable).height
-    if oriented:
-        logger.info(f"{oriented} one-way street locations published from B to A")
-    return df.filter(~unreadable).with_columns(
+    return df.with_columns(
+        refusal(pl.when(one_way & ~readable).then(pl.lit("no « depuis … vers »"))).alias(
+            ONE_WAY_UNREADABLE.column
+        ),
         pl.when(one_way)
         .then(pl.lit(DirectionEnum.B_TO_A.value))
         .otherwise(pl.col("location_direction"))
-        .alias("location_direction")
+        .alias("location_direction"),
     )

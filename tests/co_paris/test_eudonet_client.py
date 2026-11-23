@@ -186,6 +186,20 @@ def test_a_large_batch_still_empty_after_a_second_read_stops_the_extraction(monk
         client.search_by_ids(2700, [2705], 1200, list(range(1, 21)))
 
 
+def test_an_empty_batch_of_a_sparse_table_is_read_again_then_believed(monkeypatch):
+    monkeypatch.setattr(client_module.time, "sleep", lambda seconds: None)
+    empty = rows_response([], total_rows=0, total_pages=1)
+    client = make_client([token_response(), empty, empty])
+    assert client.search_by_ids(3200, [3204], 1200, list(range(1, 21)), sparse=True) == []
+
+
+def test_a_lost_answer_of_a_sparse_table_is_recovered(monkeypatch):
+    monkeypatch.setattr(client_module.time, "sleep", lambda seconds: None)
+    empty = rows_response([], total_rows=0, total_pages=1)
+    client = make_client([token_response(), empty, rows_response([7], total_rows=1, total_pages=1)])
+    assert len(client.search_by_ids(3200, [3204], 1200, list(range(1, 21)), sparse=True)) == 1
+
+
 def test_an_expired_token_is_renewed_and_the_call_replayed():
     client = make_client(
         [

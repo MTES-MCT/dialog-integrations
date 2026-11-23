@@ -1,0 +1,211 @@
+from typing import Any
+
+import polars as pl
+import pytest
+
+from integrations.co_paris.eudonet.one_way_exceptions import lane_users
+from tests.co_paris.acts import make_frame, make_row
+from tests.co_paris.steps import (
+    arbitrate_one_way_streets,
+    compute_measure_fields,
+    compute_regulation_fields,
+    compute_vehicle_fields,
+    discard_measures_out_of_model,
+)
+
+ONE_WAY = "sens interdit (ou sens unique)"
+BUS_USERS = [["véhicule concerné (2)", "des véhicules de transports en commun"]]
+
+
+def one_way(**overrides: Any) -> dict[str, Any]:
+    return make_row(
+        **{
+            "m_file_id": 10,
+            "m_type": ONE_WAY,
+            "m_params": [],
+            "l_file_id": 100,
+            "l_scope": "Une section",
+            "l_road_name": "Rue Baudricourt",
+            "l_district": "13ème arrondissement",
+            "l_point_house_number": None,
+            "l_from_number_complement": "depuis",
+            "l_from_road_name": "Rue Nationale",
+            "l_to_number_complement": "jusqu'à",
+            "l_to_road_name": "Rue de Tolbiac",
+            **overrides,
+        }
+    )
+
+
+def lane(**overrides: Any) -> dict[str, Any]:
+    return one_way(
+        **{
+            "m_file_id": 20,
+            "m_type": "voie réservée",
+            "m_params": BUS_USERS,
+            "l_file_id": 200,
+            "l_from_road_name": "Rue de Tolbiac",
+            "l_to_road_name": "Rue Nationale",
+            **overrides,
+        }
+    )
+
+
+def published(*rows: dict[str, Any]) -> pl.DataFrame:
+    return (
+        make_frame(*rows)
+        .pipe(compute_regulation_fields)
+        .pipe(compute_measure_fields)
+        .pipe(arbitrate_one_way_streets)
+        .pipe(discard_measures_out_of_model)
+        .pipe(compute_vehicle_fields)
+    )
+
+
+def exemptions(df: pl.DataFrame) -> list:
+    return df.select("vehicle_exempted_types", "vehicle_other_exempted_type_text").rows()
+
+
+def test_a_bus_lane_the_other_way_exempts_the_buses_from_the_one_way_street():
+    out = published(one_way(), lane())
+    assert exemptions(out) == [(["other"], "véhicules de transports en commun")]
+
+
+def test_a_lane_said_against_the_general_traffic_is_the_other_way_whatever_its_bounds():
+    other_way = lane(
+        l_direction="dans le sens inverse de la circulation générale",
+        l_from_number_complement="dans sa partie comprise entre",
+        l_to_number_complement="et le",
+    )
+    assert exemptions(published(one_way(), other_way)) == [
+        (["other"], "véhicules de transports en commun")
+    ]
+
+
+def test_a_two_way_cycle_track_exempts_the_cycles():
+    track = lane(
+        m_type="voie cyclable",
+        m_params=[["Direction", "bidirectionnelle"]],
+        l_from_number_complement="dans sa partie comprise entre",
+        l_to_number_complement="et le",
+    )
+    assert exemptions(published(one_way(), track)) == [(["bicycle"], None)]
+
+
+def test_a_lane_going_the_same_way_changes_nothing():
+    same_way = lane(l_from_road_name="Rue Nationale", l_to_road_name="Rue de Tolbiac")
+    assert exemptions(published(one_way(), same_way)) == [(None, None)]
+
+
+def test_a_lane_on_another_street_changes_nothing():
+    elsewhere = lane(l_road_name="Rue Nationale")
+    assert exemptions(published(one_way(), elsewhere)) == [(None, None)]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"l_from_road_name": "Rue Charcot"}, id="another_section"),
+        pytest.param(
+            {
+                "l_from_number_complement": "dans sa partie comprise entre",
+                "l_to_number_complement": "et le",
+            },
+            id="bounds_without_a_way",
+        ),
+        pytest.param({"m_params": [["véhicule concerné (2)", "du tramway"]]}, id="unknown_users"),
+        pytest.param({"m_params": []}, id="no_users"),
+        pytest.param(
+            {
+                "l_file_id": None,
+                "l_scope": None,
+                "l_road_name": None,
+                "l_from_road_name": None,
+                "l_to_road_name": None,
+            },
+            id="no_location",
+        ),
+    ],
+)
+def test_a_lane_whose_extent_way_or_users_cannot_be_read_drops_the_one_way_street(
+    overrides, captured_logs
+):
+    assert published(one_way(), lane(**overrides)).height == 0
+    assert any("may open the other way" in line for line in captured_logs)
+
+
+def test_a_meeting_zone_changes_nothing_to_the_one_way_street():
+    zone = lane(m_type="zone de rencontre", m_params=[], l_scope="La totalité de la voie")
+    assert exemptions(published(one_way(), zone)) == [(None, None)]
+
+
+def test_cycles_both_let_against_the_flow_and_kept_from_it_drop_the_one_way_street():
+    track = lane(m_type="voie cyclable", m_params=[])
+    kept_out = lane(
+        m_file_id=30,
+        l_file_id=300,
+        m_type="interdiction double sens pour les cyclistes",
+        m_params=[],
+        l_from_road_name="Rue Nationale",
+        l_to_road_name="Rue de Tolbiac",
+    )
+    assert published(one_way(), track, kept_out).height == 0
+
+
+def test_cycles_kept_from_the_contraflow_on_another_section_change_nothing():
+    kept_out = lane(
+        m_type="interdiction double sens pour les cyclistes",
+        m_params=[],
+        l_from_road_name="Rue Charcot",
+    )
+    assert exemptions(published(one_way(), kept_out)) == [(None, None)]
+
+
+def test_two_way_traffic_restored_on_the_street_drops_the_one_way_street():
+    restored = lane(m_type="rétablissement double sens", m_params=[])
+    assert published(one_way(), restored).height == 0
+
+
+def test_sections_of_one_measure_with_different_exemptions_become_two_dialog_measures():
+    beside = one_way(
+        l_file_id=101, l_road_name="Rue Jeanne d'Arc", l_from_road_name="Rue Nationale"
+    )
+    out = published(one_way(), beside, lane()).sort("l_file_id")
+    keys = out["measure_group_key"].to_list()
+    assert len(set(keys)) == 2
+    assert exemptions(out) == [(["other"], "véhicules de transports en commun"), (None, None)]
+
+
+def test_the_users_of_a_lane_are_its_named_vehicles_and_its_exemptions():
+    params = [
+        ["véhicule concerné (2)", "des  véhicules de transports en commun et cycles"],
+        ["dérogation pour véhicule", "aux taxis"],
+    ]
+    assert lane_users("voie réservée", params) == [
+        "véhicules de transports en commun",
+        "aux cycles",
+        "aux taxis",
+    ]
+
+
+def test_a_one_way_measure_is_split_among_its_published_sections_only():
+    import polars as pl
+
+    from integrations.co_paris.eudonet.one_way_exceptions import (
+        LANE_EXEMPTIONS,
+        split_one_way_measures,
+    )
+
+    kept = pl.DataFrame(
+        {
+            "m_file_id": [10, 10, 11, 11],
+            "measure_group_key": ["10", "10", "11", "11"],
+            LANE_EXEMPTIONS: ["aux cycles", "aux cycles", "aux cycles", ""],
+        }
+    )
+    assert split_one_way_measures(kept)["measure_group_key"].to_list() == [
+        "10",
+        "10",
+        "11-aux cycles",
+        "11-",
+    ]

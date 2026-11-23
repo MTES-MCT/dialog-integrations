@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
@@ -5,18 +6,21 @@ from loguru import logger
 
 from .client import EQUALS, GREATER_OR_EQUAL, EudonetClient, EudonetError, all_of, any_of, criterion
 from .raw_rows import (
-    ARTICLE_QUERY_FIELDS,
+    COMPLEMENTARY_ARTICLE_QUERY_FIELDS,
     FIELD_MEASURE_LINK,
     FILTER_MEASURE_OF_LOCATION,
     LOCATION_QUERY_FIELDS,
+    MEASURE_ARTICLE_QUERY_FIELDS,
     MEASURE_QUERY_FIELDS,
     REGULATION_FIELDS,
     REGULATION_QUERY_FIELDS,
-    TABLE_ARTICLES,
+    TABLE_COMPLEMENTARY_ARTICLES,
     TABLE_LOCATIONS,
+    TABLE_MEASURE_ARTICLES,
     TABLE_MEASURES,
     TABLE_REGULATIONS,
-    needs_locations,
+    Expansion,
+    is_read,
 )
 from .vocabulary import (
     ACCEPTED_STATES_BY_TYPE,
@@ -25,7 +29,7 @@ from .vocabulary import (
     TYPE_TEMPORARY_LABEL,
 )
 
-# Measured at 2.2 % on the 2026-09-08 dump; well above means the locations went missing.
+# Measured at 1.5 % of all the measures on 2026-11-17; well above means the locations went missing.
 MAX_UNLOCATED_MEASURES_SHARE = 0.25
 
 
@@ -56,11 +60,20 @@ def perimeter_criteria(today: date) -> dict[str, Any]:
     )
 
 
-def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[str, Any]]]:
-    """The three tables of the perimeter, as flat rows keyed by table number.
+Tables = dict[str, list[dict[str, Any]]]
 
-    The API filters on a parent's fields one level up, not two: locations are fetched by
-    batches of identifiers of the measures DiaLog can carry.
+
+def extract_tables(
+    client: EudonetClient,
+    today: date,
+    articles_of: Callable[[Tables], frozenset[int]],
+    locations_of: Callable[[Tables, frozenset[int]], frozenset[int]],
+) -> tuple[Tables, Expansion]:
+    """The five tables of the perimeter, as flat rows keyed by table number, and the measures
+    whose articles and locations were read.
+
+    The API filters on a parent's fields one level up, not two: locations and the measures'
+    articles are fetched by batches of measure identifiers.
     """
     where = perimeter_criteria(today)
 
@@ -69,32 +82,65 @@ def extract_tables(client: EudonetClient, today: date) -> dict[str, list[dict[st
     )
     measures = client.search_all(TABLE_MEASURES, MEASURE_QUERY_FIELDS, where, "measures")
     # The complementary articles may exclude a street or add a time: read to drop the act.
-    articles = client.search_all(TABLE_ARTICLES, ARTICLE_QUERY_FIELDS, where, "articles")
+    articles = client.search_all(
+        TABLE_COMPLEMENTARY_ARTICLES,
+        COMPLEMENTARY_ARTICLE_QUERY_FIELDS,
+        where,
+        "complementary articles",
+    )
     if regulations and not articles:
         raise EudonetError(
             "Eudonet returned no article for the perimeter: their texts could not be checked"
         )
-    dialog_measures = [row for row in measures if needs_locations(row)]
+    read = [row for row in measures if is_read(row)]
+    act_tables = {
+        str(TABLE_REGULATIONS): regulations,
+        str(TABLE_MEASURES): measures,
+        str(TABLE_COMPLEMENTARY_ARTICLES): articles,
+    }
+    articles_chosen = articles_of(act_tables)
+    articled = [row for row in read if row["FileId"] in articles_chosen]
+    measure_articles = client.search_by_ids(
+        TABLE_MEASURE_ARTICLES,
+        MEASURE_ARTICLE_QUERY_FIELDS,
+        TABLE_MEASURES,
+        [row["FileId"] for row in articled],
+        label="measure articles",
+        sparse=True,
+    )
+    if articled and not measure_articles:
+        raise EudonetError(
+            "Eudonet returned no measure article for the perimeter: their texts could not be "
+            "checked"
+        )
+    locations_chosen = locations_of(
+        {**act_tables, str(TABLE_MEASURE_ARTICLES): measure_articles}, articles_chosen
+    )
+    located = [row for row in read if row["FileId"] in locations_chosen]
     logger.info(
-        f"Fetching the locations of {len(dialog_measures)} measures out of {len(measures)}: "
-        "the others have no DiaLog equivalent, or a label the catalog table does not know"
+        f"Fetching the locations of {len(located)} measures out of {len(measures)}, their "
+        f"articles read for {len(articled)}: the others' acts are refused already"
     )
     locations = client.search_by_ids(
         TABLE_LOCATIONS,
         LOCATION_QUERY_FIELDS,
         FILTER_MEASURE_OF_LOCATION,
-        [row["FileId"] for row in dialog_measures],
+        [row["FileId"] for row in located],
         label="locations",
     )
+    check_extraction_completeness(located, locations)
 
-    check_extraction_completeness(dialog_measures, locations)
-
-    return {
+    tables = {
         str(TABLE_REGULATIONS): regulations,
         str(TABLE_MEASURES): measures,
         str(TABLE_LOCATIONS): locations,
-        str(TABLE_ARTICLES): articles,
+        str(TABLE_COMPLEMENTARY_ARTICLES): articles,
+        str(TABLE_MEASURE_ARTICLES): measure_articles,
     }
+    expansion = Expansion(
+        frozenset(row["FileId"] for row in located), frozenset(row["FileId"] for row in articled)
+    )
+    return tables, expansion
 
 
 def check_extraction_completeness(

@@ -35,3 +35,28 @@ def test_without_ban_nothing_is_added():
     assert add_pedestrian_area_speed(
         df, is_ban=pl.col("measure_group_key") == "AREA", twin_group_key=pl.lit("x")
     ).equals(df)
+
+
+def test_the_twin_takes_the_speed_the_act_sets():
+    df = pl.DataFrame(
+        {
+            "measure_type_": ["noEntry"],
+            "measure_group_key": ["AREA"],
+            "measure_max_speed": [None],
+            "vehicle_exempted_types": [["desserteLocale"]],
+            "vehicle_other_exempted_type_text": [None],
+        },
+        schema_overrides={
+            "measure_max_speed": pl.Int32,
+            "vehicle_other_exempted_type_text": pl.String,
+        },
+    )
+
+    result = add_pedestrian_area_speed(
+        df,
+        is_ban=pl.col("measure_group_key") == "AREA",
+        twin_group_key=pl.lit("AREA-V15"),
+        speed=pl.lit(15),
+    )
+
+    assert result.get_column("measure_max_speed").to_list() == [None, 15]
