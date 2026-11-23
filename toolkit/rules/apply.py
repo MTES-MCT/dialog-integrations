@@ -32,11 +32,8 @@ class RulesResult:
 
 @dataclass
 class RuleVerdicts:
-    # By rule code: the rule (the first of that code) and the rows that fail it.
     fails: dict[str, tuple[Rule, pl.Series]] = field(default_factory=dict)
-    # Rules reading a column the view lacks.
     unevaluated: list[str] = field(default_factory=list)
-    # The view the rules were read on, for the log.
     view: pl.DataFrame = field(default_factory=pl.DataFrame)
 
 

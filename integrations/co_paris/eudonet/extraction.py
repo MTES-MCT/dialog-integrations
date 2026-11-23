@@ -73,11 +73,7 @@ def extract_tables(
     whose articles and locations were read.
 
     The API filters on a parent's fields one level up, not two: locations and the measures'
-    articles are fetched by batches of measure identifiers, for every measure DiaLog does not
-    publish too: a bus lane against the flow changes the one-way street of the same act, and
-    their texts are read like the others. Only the measures that can change nothing else
-    (`UNREAD_MEASURE_LABELS`) are left aside, and those `articles_of` and `locations_of` do not
-    name: the articles first, then the locations of the acts they do not refuse already.
+    articles are fetched by batches of measure identifiers.
     """
     where = perimeter_criteria(today)
 

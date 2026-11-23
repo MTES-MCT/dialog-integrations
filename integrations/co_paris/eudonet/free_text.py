@@ -1,16 +1,3 @@
-"""One reading for every free text of Eudonet: understood in full, or not.
-
-A text is cut into clauses. A clause is understood when what is left of it, once the words the
-record's own fields explain are cut out, is only punctuation and linking words, or matches one
-of the `FORMULAS`. A formula carries a code: `NEUTRAL`, or an effect the caller applies to the
-published measure (an exemption, bicycles on a one-way street…). A clause nothing explains makes
-the text not understood, and the caller drops the record the text qualifies.
-
-The formulas are closed lists, read on the published regulations of 2026-09-08, 2026-11-16 and
-2026-11-17: a sentence about something DiaLog does not publish (barriers, penalties) counts as
-neutral; a time, a day, a vehicle, an exemption or an excluded street never does.
-"""
-
 import json
 import re
 import unicodedata
@@ -26,25 +13,14 @@ from .text import plain_text
 
 class Code(StrEnum):
     NEUTRAL = "neutral"
-    # Values: the exempted vehicle labels of `vocabulary.EXEMPTION_BY_LABEL`.
     EXEMPTION = "exemption"
-    # Values: who may ride against the flow, exempted on the act's one-way streets; a vehicle
-    # without an exemption type of the API (buses, scooters) goes as `other` with its words
-    # (decided 2026-11-19).
     AGAINST_THE_FLOW = "against the flow"
-    # Values: the categories of vehicles that may enter a pedestrian area.
     PEDESTRIAN_ACCESS = "pedestrian access"
-    # A few words without a number: understood only as a zone's name, in the paragraph of
-    # its measure (`free_text_filters.ZONE_NAME_MEASURES`).
     ZONE_NAME = "zone name"
     # Values: the dimension alone ("longueur"), the one the gauge value of a dimension limit
     # bounds: the catalog value says "plus de 10 mètres", never of what.
     DIMENSION = "dimension"
-    # A number of places: how many the location holds, neutral on a point or a section.
     RESERVED_PLACES = "reserved places"
-    # This act amends another one and quotes the new wording ("… est ainsi modifié : - le
-    # trottoir côté impair…"): the other act's business in an article, this measure's own
-    # extent in a paragraph.
     AMENDMENT_WORDING = "amendment wording"
 
 
@@ -57,9 +33,7 @@ class Effect:
 @dataclass(frozen=True)
 class Reading:
     effects: tuple[Effect, ...] = ()
-    # The clauses nothing explains, as written.
     unread: tuple[str, ...] = ()
-    # Among them, those a formula of `BLOCKING_FORMULAS` names.
     blocking: tuple[str, ...] = ()
 
     @property
@@ -72,17 +46,9 @@ class Reading:
 
 @dataclass(frozen=True)
 class Explained:
-    """What the record's own fields print into a generated text: the locations (`spans`), the
-    template's wording (formulas, parameter values), and house numbers.
-
-    The wording is cut to tell a clause says nothing more, not before the formulas are tried:
-    "Tout stationnement … considéré comme" + "gênant" still reads as the penal qualification."""
-
     spans: tuple[str, ...] = ()
     numbers: frozenset[str] = field(default_factory=frozenset)
     wording: tuple[str, ...] = ()
-    # Every location of the record is a point or a bounded section: a street the text sets
-    # it "entre" or "au croisement de" narrows nothing the location does not.
     narrower_than_the_street: bool = False
 
 
@@ -91,21 +57,16 @@ class Formula:
     name: str
     pattern: re.Pattern[str]
     code: Code = Code.NEUTRAL
-    # A repeal quotes the other act's days ("les jours du marché"): not a time of this act.
     names_times: bool = False
-    # The formula is a whole sentence: what follows the match must say nothing more.
     whole: bool = False
 
 
-# A time or a day narrows the measure, whatever the clause around it.
 _TIME_OR_DAY = re.compile(
     r"\b\d{1,2}\s?h\s?\d{0,2}\b|\bheures?\b|\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|"
     r"dimanche|week-end|fériés?|nuit|marchés?)s?\b",
     re.IGNORECASE,
 )
 
-# Splits a text into sentences; a list ("sont abrogés : - l'arrêté n°…") stays with its head,
-# and an initial ("R. 417-10") ends no sentence.
 _SENTENCE_END = re.compile(r"(?<=[.;!?])(?<!\b[A-Z]\.)\s+(?!-)")
 # The mail merge glues its clauses without a full stop: a clause starts at each formula of the
 # catalogs `1236`, `1204` and `1207` (2026-11-18).
@@ -125,14 +86,12 @@ _CLAUSE_START = re.compile(
 # Printed before the opening formula of a temporary act's measure.
 TEMPLATE_PREFIX = "A titre provisoire"
 
-# Linking words, as `_tokens` writes them: no accent, no apostrophe.
 LINKING_WORDS = frozenset(
     {
         *("le", "la", "les", "l", "un", "une", "de", "du", "des", "d", "a", "au", "aux"),
         *("et", "ni", "en", "sur", "entre", "n", "no", "jusqu", "bis", "ter", "quater"),
     }
 )
-# "n°21", "21bis", "13b"; not "10h", a time.
 _NUMBER_TOKEN = re.compile(r"(?:n|no)?0*(\d+)(?:bis|ter|quater|[a-gi-z])?")
 
 REPEAL_SENTENCE = (
@@ -140,14 +99,11 @@ REPEAL_SENTENCE = (
     r"abrogée?s?\b|^(sont|est) (également |partiellement )?abrogée?s?\b"
     r"|\bénumérés ci-après sont abrogés"
 )
-# This act amends another one ("l'annexe de l'arrêté n° 2010-00831 est modifiée…"): its own
-# measures stay as published, and the days or places quoted are the other act's.
 AMENDS_ANOTHER_ACT = (
     r"^(?!.*présent arrêté).*\b(de l'|l'|l’|de l’)arrêté (préfectoral |municipal )?"
     r"(n° ?[\w./-]+|du \d)"
     r".*\b(modifiée?s?|complétée?s?|remplacée?s?|ajoutée?s?|deviennent|inchangée?s?)\b"
 )
-# Says the whole location, as the location itself does.
 WHOLE_LOCATION = (
     r"sur (toute la longueur( de la voie)?|toutes les places|tout le stationnement"
     r"|l'intégralité de la voie|la totalité de la voie)"
@@ -164,7 +120,7 @@ COMPLETES_ANOTHER_ACT = r"\bcompl[èe]t\w* (le |les )?(paragraphes?|l'arrêté)"
 _CYCLES = r"(cycl\w*|vélos|cyclistes)"
 _AGAINST_THE_FLOW = r"(contre[- ]?sens|sens inverse|deux sens|double sens)"
 _OTHERS = r"(autobus|\bbus\b|taxis?|transports? en commun|engins|trottinettes)"
-# Who rides against the flow: the catalog label of its exemption, or its own words.
+# A rider without an exemption type of the API goes as `other` with its words (2026-11-19).
 _AGAINST_THE_FLOW_RIDERS = (
     (re.compile(r"\b(cycl\w*|vélos|cyclistes)\b", re.IGNORECASE), "aux cycles"),
     (re.compile(r"\btaxis?\b", re.IGNORECASE), "aux taxis"),
@@ -186,9 +142,7 @@ def _formula(name: str, pattern: str, code: Code = Code.NEUTRAL, **options) -> F
     return Formula(name, re.compile(pattern, re.IGNORECASE), code, **options)
 
 
-# Tried in order, the first that matches wins: the formulas that carry an effect come before
-# the neutral ones that would match the same clause ("l'arrêté n° … est modifié en ce sens que
-# les cycles sont autorisés à double sens").
+# Closed lists: what DiaLog does not publish is neutral; a time, a day or a vehicle never is.
 FORMULAS: tuple[Formula, ...] = (
     _formula(
         "cycles may not ride against the flow",
@@ -226,7 +180,6 @@ FORMULAS: tuple[Formula, ...] = (
     ),
     _formula(
         "reserved places",
-        # The kind of place may follow ("payant", "ZL permanente"), not who may use it.
         r"^(?!.*\b(sauf|pas|ni|hors|except\w*|réservée?s? aux|uniquement|seulement)\b)"
         r"\(?(sur )?(\d+|une?) (places?(\.s)?|emplacements?)\b[^\d;:]{0,60}\)?$|^\(?\d+\)?$",
         Code.RESERVED_PLACES,
@@ -284,7 +237,6 @@ FORMULAS: tuple[Formula, ...] = (
     _formula("entered in the software", r"injecté dans gacs"),
     _formula("film shooting", r"^tournage de film$"),
     _formula("names the dimension", r"^(longueur|largeur|hauteur)$", Code.DIMENSION),
-    # A few words without a number ("Quartier Vert « Censier »"): only a zone 30 has a name.
     _formula(
         "zone name",
         r"^(?!.*\b(sauf|pas|exclu\w*|inclus\w*|autoris\w*|interdit\w*)\b)"
@@ -293,14 +245,10 @@ FORMULAS: tuple[Formula, ...] = (
     ),
 )
 
-# Formulas arbitrated as blocking: the record is dropped, as for any clause no formula covers,
-# even if a formula matches too. Listed, they leave the count of `recurring_formulas`.
 BLOCKING_FORMULAS: dict[str, str] = {}
 
 
 def _fold(text: str) -> str:
-    """Lower case, without accents, and the same length as `text`: an offset of one is an
-    offset of the other."""
     folded = []
     for char in text.lower():
         base = "".join(
@@ -314,19 +262,15 @@ def _tokens(text: str) -> list[tuple[str, int, int]]:
     return [(m.group(), m.start(), m.end()) for m in re.finditer(r"[a-z0-9]+", _fold(text))]
 
 
-# A line ends a sentence: a break or a paragraph in HTML, a new line in plain text.
 _HTML_LINE_END = re.compile(r"<br\s*/?>|</p>|</div>|</li>", re.IGNORECASE)
 _LINE_MARK = "\x00"
 
 
-# A line that goes on with the one before: a list item ("- l'arrêté n°…", "« rue … »") after a
-# colon or another item, or the rest of a sentence cut in two ("à Paris 8ème, est abrogé").
 _LIST_ITEM = re.compile(r"^([-–•·«\"“]|l['’]arrêté|les arrêtés|n\s?°|\d)", re.IGNORECASE)
 _GOES_ON = re.compile(r"^[a-zàâçéèêëîïôûù(,]")
 
 
 def _lines(text: str) -> list[str]:
-    """The lines of a text, a list kept with its head and a cut sentence made whole."""
     marked = _HTML_LINE_END.sub(_LINE_MARK, text) if "<" in text else text.replace("\n", _LINE_MARK)
     lines: list[str] = []
     in_list = False
@@ -388,17 +332,13 @@ def _without(clause: str, tokens: list[tuple[str, int, int]], cut: list[bool]) -
     return " ".join(kept)
 
 
-# The street is the locations' business (decided 2026-11-19): a street of the Paris referential
-# named in a free text says nothing more. Where it bounds another one ("entre … et …", "au
-# croisement de", "à l'intersection avec", "à l'angle de"), only if the location is narrower than
-# the whole street too: on a whole street, the text would narrow what is published.
+# A street named in a free text says nothing: the locations carry it (decided 2026-11-19).
 _CROSSING_WORDS = frozenset({"entre", "croisement", "intersection", "angle"})
 _BEFORE_A_NAME = frozenset({"de", "du", "des", "d", "la", "le", "l", "les", "avec", "et"})
 
 
 @cache
 def _street_names_by_head() -> dict[tuple[str, str], list[tuple[str, ...]]]:
-    """The referential's names as words, indexed by their first two, longest first."""
     index: dict[tuple[str, str], list[tuple[str, ...]]] = defaultdict(list)
     for name in json.loads(STREET_NAMES_FILE.read_text(encoding="utf-8")):
         words = tuple(word for word, _, _ in _tokens(name))
@@ -410,8 +350,6 @@ def _street_names_by_head() -> dict[tuple[str, str], list[tuple[str, ...]]]:
 
 
 def _crossing_word(words: list[str], named: list[bool], start: int) -> int | None:
-    """Where the "entre", "croisement"… the name at `start` follows is, maybe after another
-    name; None if it follows none."""
     before = start - 1
     while before >= 0 and (words[before] in _BEFORE_A_NAME or named[before]):
         before -= 1

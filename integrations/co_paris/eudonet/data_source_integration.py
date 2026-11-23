@@ -58,8 +58,7 @@ from .verdicts import STATUS, Check, Status, among, rule_check, rule_status
 
 CREDENTIALS_ENV_VAR = "EUDONET_PARIS_CREDENTIALS"
 
-# The police prefecture signs about a third of the acts, under its own authority: published
-# everywhere, production included, while a contact with the prefecture is set up (2026-11-19).
+# Published everywhere, production included, until a contact with the prefecture (2026-11-19).
 PUBLISH_POLICE_PREFECTURE = True
 
 # Every location is a named street geocoded on the BD TOPO by DiaLog: past about a hundred,
@@ -74,11 +73,8 @@ class DataSourceIntegration(BaseDataSourceIntegration):
     group_locations_by_measure = True
     max_locations_per_regulation = MAX_LOCATIONS_PER_REGULATION
     numbers_published_elsewhere: dict[str, str] | None = None
-    # The last run's decision: every reason, for the report and the analyses.
     decision: Decision | None = None
-    # The rules judged in the run, by verdict column, with their labels for the reasons.
     rule_checks: dict[str, Check] = {}
-    # The acts of one authority only (`regulations.CITY`, `PREFECTURE`); None for all.
     authority: str | None = None
     # DiaLog orients a bounded street since 2026-11-04: Paris publishes the one-way streets
     # whose bounds say which way (decided 2026-11-16). The `Sens` field stays frozen by the
@@ -128,17 +124,11 @@ class DataSourceIntegration(BaseDataSourceIntegration):
         return self.decision.kept.pipe(split_one_way_measures).pipe(add_pedestrian_area_speed)
 
     def judge(self, raw_data: pl.DataFrame) -> pl.DataFrame:
-        """Every check adds its verdict, none drops a row. Those that read the act's other
-        records (citations, texts, titles, lanes against one-way streets, vehicles counted,
-        dates by number, copied locations) judge the rows still alive: a refused record no
-        longer speaks."""
+        """Every check adds its verdict, none drops a row."""
         self.rule_checks = {}
         today = today_in_paris()
         rows = judge_head(raw_data, self.numbers_published_elsewhere)
-        # Before the measures' fields, as these rules always were.
         rows = self.judge_rules(rows).pipe(judge_measure_fields)
-        # Every measure is read, those DiaLog does not publish included, before any is
-        # refused: they may change the act's other measures.
         rows = judge_unread_texts(rows, alive_now(rows), self.alerts)
         rows = judge_unread_titles(rows, alive_now(rows))
         rows = judge_one_way_lanes(rows, alive_now(rows))
@@ -156,13 +146,11 @@ class DataSourceIntegration(BaseDataSourceIntegration):
             .pipe(judge_points_beyond_parking)
             .pipe(judge_refused_locations)
         )
-        # Last: a location another check refuses no longer speaks against its measure.
         return judge_copied_locations(rows, alive_now(rows))
 
     def judge_rules(self, rows: pl.DataFrame, *own_rules: Rule) -> pl.DataFrame:
         """The common rules and `own_rules` not judged yet, once their columns are there, as
-        verdicts on the rows still alive: as `apply_rules` left them out, counted and logged
-        the same way."""
+        verdicts on the rows still alive."""
         alive = alive_now(rows)
         fresh = [
             rule

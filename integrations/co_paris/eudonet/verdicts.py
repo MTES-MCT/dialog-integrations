@@ -1,10 +1,3 @@
-"""The checks an act goes through, and the verdict column each one adds to the rows.
-
-Judging adds columns and drops no row; `decision.decide` alone drops, from the verdicts. The
-verdict columns stand in the order they were judged: the first that refuses a row is its
-primary reason.
-"""
-
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
@@ -22,17 +15,11 @@ class Level(StrEnum):
     LOCATION = "location"
 
 
-# Broadest first: a check refuses at its judged level or above.
 LEVEL_RANK = {Level.ACT: 0, Level.MEASURE: 1, Level.LOCATION: 2}
-# The record of each level on a row. A location row is its own record.
 LEVEL_KEY = {Level.ACT: "a_file_id", Level.MEASURE: "m_file_id", Level.LOCATION: "l_file_id"}
 
 
 class Stage(IntEnum):
-    """What a check reads, for the report: the act alone, its measures' fields, the texts, the
-    other measures of the act, the model DiaLog publishes, the locations, the rules, the act as
-    a whole."""
-
     PERIMETER = 0
     PREFILTER = 1
     FIELDS = 2
@@ -48,8 +35,6 @@ class Status(StrEnum):
     OK = "ok"
     REFUSED = "refused"
     FLAGGED = "flagged"
-    # Not read (a location never loaded): never counted as a reason. A null status says the
-    # same, on a row already refused when its check came.
     UNJUDGED = "unjudged"
 
 
@@ -60,15 +45,12 @@ VERDICT = pl.Struct({"status": STATUS, "detail": pl.String})
 @dataclass(frozen=True)
 class Check:
     code: str
-    # In French: it goes to the report.
     label: str
     nature: Nature
     stage: Stage
     judged_on: Level
     refuses: Level
-    # In English, for the log: "Dropping 3 {logged}".
     logged: str
-    # False for the rules, logged by the rules machinery as they are judged.
     reported: bool = True
 
     def __post_init__(self) -> None:
@@ -405,8 +387,6 @@ COPIED_LOCATION = Check(
     "absent from the title",
 )
 
-# Every check, in the order the run judges them, the rules' aside (`rule_check`). The order of
-# the primary reasons is the order of the verdict columns on the rows.
 CHECKS: tuple[Check, ...] = (
     NO_NUMBER,
     UNKNOWN_REGULATION_TYPE,
@@ -443,8 +423,6 @@ CHECKS: tuple[Check, ...] = (
 )
 REGISTRY: dict[str, Check] = {check.column: check for check in CHECKS}
 RULE_PREFIX = "v_rule_"
-# The parameters of a measure as its texts and its act's lanes complete them (`x_*`: an
-# interpretation); `m_params`, the source's, stays as read.
 PARAMS = "x_params"
 
 

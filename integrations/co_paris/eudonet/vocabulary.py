@@ -33,8 +33,7 @@ ACCEPTED_STATES_BY_TYPE: dict[str, dict[str, str]] = {
     TYPE_TEMPORARY_LABEL: {"En vigueur": "8640", "Publié": "13789", "Signé": "8642"},
 }
 
-# Key `1103` of 22 acts of 2005-2008 (2026-11-17): their pedestrian areas are limited to
-# 15 km/h, not walking pace (decided 2026-11-19).
+# Key `1103` of 22 acts: their pedestrian areas are at 15 km/h, not 5 (decided 2026-11-19).
 PEDESTRIAN_AREA_SPEED_BY_KEY: dict[str, int] = {
     "STATIONNEMENT GENANT- LIMITATION VITESSE 15km/h": 15,
 }
@@ -42,8 +41,6 @@ PEDESTRIAN_AREA_SPEED_BY_KEY: dict[str, int] = {
 # All 32 values of catalog `1202`. `None`: outside the five DiaLog types, dropped and
 # counted, never bent into an approaching type.
 MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
-    # The producer names the area, so it is published as `noEntry` + `desserteLocale`
-    # plus a speed twin, 5 km/h unless a key says otherwise (`add_pedestrian_area_speed`).
     "aire piétonne": MeasureTypeEnum.NOENTRY.value,
     "cédez le passage": None,
     "circulation alternée": MeasureTypeEnum.ALTERNATEROAD.value,
@@ -70,7 +67,7 @@ MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
     "périmètre zone": None,
     "rétablissement double sens": None,
     # « Un sens unique de circulation est institué … depuis A vers B » : no entry from B to A,
-    # published only where the bounds say which way (`orient_one_way_streets`).
+    # published only where the bounds say which way (`judge_one_way_orientation`).
     "sens interdit (ou sens unique)": MeasureTypeEnum.NOENTRY.value,
     "stationnement réservé": None,
     "stop": None,
@@ -84,9 +81,6 @@ MEASURE_TYPE_BY_LABEL: dict[str, str | None] = {
     "zone de rencontre": None,
 }
 
-# Measures neither fetched (locations, article) nor read: none of them can widen or narrow
-# another measure of the act, and their 51 000 locations are two thirds of the base (2026-11-17).
-# Every other unpublished measure is read before being dropped, in case it does.
 UNREAD_MEASURE_LABELS: dict[str, str] = {
     "stationnement réservé": "a few places kept for some users, no restriction on traffic",
     "suppression stationnement réservé": "the end of such places",
@@ -97,9 +91,7 @@ UNREAD_MEASURE_LABELS: dict[str, str] = {
 }
 assert set(UNREAD_MEASURE_LABELS) <= {k for k, v in MEASURE_TYPE_BY_LABEL.items() if v is None}
 
-# `1203`, the formula that opens the measure's article: one per measure name on the 10 781
-# measures of 2026-11-17. The catalog holds richer ones, never used ("… interdit tous les
-# jours, sauf dérogation…"): any other drops the measure (decided 2026-11-18).
+# `1203`, the formula opening the measure's article: any other drops the measure (2026-11-18).
 OPENING_BY_LABEL: dict[str, str] = {
     "aire piétonne": "Il est institué une aire piétonne constituée par",
     "circulation interdite": "La circulation est interdite",
@@ -112,10 +104,7 @@ OPENING_BY_LABEL: dict[str, str] = {
     "zone 30": "Les voies constituant la zone 30 sont",
 }
 
-# `1236`, `1204`, `1207`, in that order: the formulas the mail merge prints before the
-# optional parameters 1 to 3, every value of the 10 781 measures of 2026-11-17. Two say the
-# opposite of each other ("ne sont pas applicables" / "sont applicables"): any other drops the
-# measure, like an unexpected opening (decided 2026-11-19).
+# `1236`, `1204`, `1207`, in order: any other formula drops the measure (decided 2026-11-19).
 _PENALTY = (
     "Tout stationnement d'un véhicule en infraction avec cette interdiction est considéré comme"
 )
@@ -143,7 +132,6 @@ LABEL_ONE_WAY = "sens interdit (ou sens unique)"
 # text is these words around the bounds, so traffic goes from the first bound to the second.
 ONE_WAY_FROM_COMPLEMENTS = frozenset({"depuis", "dans sa partie comprise entre"})
 ONE_WAY_TO_COMPLEMENTS = frozenset({"vers", "jusqu'à"})
-# The measures of an act that may open a one-way street the other way (`one_way_exceptions`).
 LANE_LABELS = frozenset({"voie réservée", "voie cyclable", "voie verte"})
 LABEL_CYCLE_LANE = "voie cyclable"
 LABEL_GREENWAY = "voie verte"
@@ -156,8 +144,6 @@ LANE_BOTH_WAYS = "dans les deux sens"
 LANE_DIRECTION_PARAMETER = "Direction"
 LANE_TWO_WAY_VALUE = "bidirectionnelle"
 LANE_USERS_PARAMETER = "véhicule concerné (2)"
-# Every value of `véhicule concerné (2)` on the reserved lanes of 2026-11-17, as exemption
-# labels (`EXEMPTION_BY_LABEL`) or words published as `other`. Any other drops the one-way street.
 LANE_USERS_BY_LABEL: dict[str, tuple[str, ...]] = {
     "des véhicules de transports en commun": ("véhicules de transports en commun",),
     "des véhicules de transports en commun et cycles": (
@@ -201,12 +187,9 @@ RESTRICTION_PARAMETERS = frozenset(
     }
 )
 
-# Not a parameter of Eudonet: the closed list of vehicles a pedestrian area lets in, read in a
-# text. It takes the place of the local access exemption (decided 2026-11-18).
+# Not Eudonet's: a pedestrian area's list read in a text, replacing local access (2026-11-18).
 PEDESTRIAN_ACCESS_PARAMETER = "desserte de l'aire piétonne"
 
-# Not a parameter of Eudonet either: the dimension the paragraph of a dimension limit names
-# alone ("longueur"), and the column it fills with the gauge value of `GAUGE_METRES`.
 DIMENSION_PARAMETER = "dimension de la limite"
 DIMENSION_COLUMNS = {
     "longueur": "vehicle_max_length",
@@ -291,7 +274,6 @@ RESTRICTIONS_KEPT_AS_OTHER = frozenset(
     }
 )
 
-# The gauge values of the catalog, in metres; published as a size once the dimension is known.
 GAUGE_METRES = {
     "aux véhicules de plus de 2 mètres": 2.0,
     "aux véhicules de plus de 10 mètres": 10.0,
@@ -326,21 +308,17 @@ EXEMPTION_BY_LABEL: dict[str, str] = {
     "des véhicules approvisionnement des marchés": EXEMPTED_COMMERCIAL,
     "aux taxis": EXEMPTED_TAXI,
     "des taxis": EXEMPTED_TAXI,
-    # Spellings of the pedestrian areas' lists (2026-11-17): learnt when they have a true DiaLog
-    # value and are used more than ten times; the others go as `other` with their words.
+    # Pedestrian-list spellings with a DiaLog value, learnt past ten uses (2026-11-17).
     "aux véhicules d'intervention urgente et de secours": EXEMPTED_EMERGENCY,
     "aux véhicules d'urgence et de secours": EXEMPTED_EMERGENCY,
     "aux véhicules de secours et de sécurité": EXEMPTED_EMERGENCY,
 }
 
-# One category standing for two exemptions: cycles, and scooters as `other` with their words.
 _CYCLES_AND_SCOOTERS = re.compile(
     r"^cycles et engins de d[ée]placements? personnels?( motoris[ée]s)?$", re.IGNORECASE
 )
 SCOOTERS_LABEL = "engins de déplacement personnels"
 
-# Exemptions a free text may name ("sauf aux véhicules de secours"), published as the
-# parameter "dérogation pour véhicule" would be.
 PARAGRAPH_EXEMPTION_PARAMETER = "dérogation pour véhicule"
 CYCLES_EXEMPTION_LABEL = "aux cycles"
 PARAGRAPH_EXEMPTION_LABELS = frozenset(

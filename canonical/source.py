@@ -50,7 +50,6 @@ class BaseDataSourceIntegration:
         # By "label (nature)": rows each rule applied to, for the report.
         self.rule_counts: dict[str, int] = {}
         self._applied_codes: set[str] = set()
-        # Lines for the team, in French, each shown as a warning in the Tchap message.
         self.alerts: list[str] = []
 
     @property
@@ -106,8 +105,8 @@ class BaseDataSourceIntegration:
     def rule_fails(
         self, df: pl.DataFrame, rules: list[Rule], among: pl.Series
     ) -> dict[str, tuple[Rule, pl.Series]]:
-        """`apply_rules` without leaving any row out: the rows failing each rule, by code, for a
-        source that decides later. Counted and logged on the rows `among` only, those still in
+        """`apply_rules` without leaving any row out: the rows failing each rule, by code.
+        Counted and logged on the rows `among` only, those still in
         its run."""
         verdicts = rule_verdicts(df, rules, self.rule_inputs)
         self._applied_codes |= {r.code for r in rules if r.code not in verdicts.unevaluated}

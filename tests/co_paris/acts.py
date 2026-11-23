@@ -1,5 +1,3 @@
-"""Test helpers: rows of an act written by hand, and readable questions on a decision."""
-
 from datetime import date, datetime
 from typing import Any
 

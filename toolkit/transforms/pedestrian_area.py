@@ -18,8 +18,7 @@ def add_pedestrian_area_speed(
 
     The Code de la route (R. 110-2) defines the area by both (team decision, 2026-09-14).
     A copy of the ban, it inherits its filters; no exemption, as the vehicles let in still
-    drive at walking pace. `twin_group_key` keeps it a measure of its own. `speed`: where the
-    act sets another limit for its area.
+    drive at walking pace. `twin_group_key` keeps it a measure of its own.
     """
     bans = df.filter(is_ban)
     if not bans.height:

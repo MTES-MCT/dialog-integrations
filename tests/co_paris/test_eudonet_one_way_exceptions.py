@@ -18,7 +18,6 @@ BUS_USERS = [["véhicule concerné (2)", "des véhicules de transports en commun
 
 
 def one_way(**overrides: Any) -> dict[str, Any]:
-    """« Un sens unique … rue Baudricourt, depuis rue Nationale jusqu'à rue de Tolbiac »."""
     return make_row(
         **{
             "m_file_id": 10,
@@ -39,7 +38,6 @@ def one_way(**overrides: Any) -> dict[str, Any]:
 
 
 def lane(**overrides: Any) -> dict[str, Any]:
-    """A bus lane of the same act, from Tolbiac to Nationale: the other way."""
     return one_way(
         **{
             "m_file_id": 20,
@@ -107,25 +105,26 @@ def test_a_lane_on_another_street_changes_nothing():
 @pytest.mark.parametrize(
     "overrides",
     [
-        # Another section: how much of the one-way street it opens is not known.
-        {"l_from_road_name": "Rue Charcot"},
-        # « dans sa partie comprise entre … et le … » does not say which way.
-        {
-            "l_from_number_complement": "dans sa partie comprise entre",
-            "l_to_number_complement": "et le",
-        },
-        # Users outside the closed list.
-        {"m_params": [["véhicule concerné (2)", "du tramway"]]},
-        # No users at all.
-        {"m_params": []},
-        # No location: which street is not known.
-        {
-            "l_file_id": None,
-            "l_scope": None,
-            "l_road_name": None,
-            "l_from_road_name": None,
-            "l_to_road_name": None,
-        },
+        pytest.param({"l_from_road_name": "Rue Charcot"}, id="another_section"),
+        pytest.param(
+            {
+                "l_from_number_complement": "dans sa partie comprise entre",
+                "l_to_number_complement": "et le",
+            },
+            id="bounds_without_a_way",
+        ),
+        pytest.param({"m_params": [["véhicule concerné (2)", "du tramway"]]}, id="unknown_users"),
+        pytest.param({"m_params": []}, id="no_users"),
+        pytest.param(
+            {
+                "l_file_id": None,
+                "l_scope": None,
+                "l_road_name": None,
+                "l_from_road_name": None,
+                "l_to_road_name": None,
+            },
+            id="no_location",
+        ),
     ],
 )
 def test_a_lane_whose_extent_way_or_users_cannot_be_read_drops_the_one_way_street(
@@ -136,7 +135,6 @@ def test_a_lane_whose_extent_way_or_users_cannot_be_read_drops_the_one_way_stree
 
 
 def test_a_meeting_zone_changes_nothing_to_the_one_way_street():
-    """Two-way cycling there is published only where the act writes it."""
     zone = lane(m_type="zone de rencontre", m_params=[], l_scope="La totalité de la voie")
     assert exemptions(published(one_way(), zone)) == [(None, None)]
 

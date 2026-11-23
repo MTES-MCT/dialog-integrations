@@ -33,9 +33,8 @@ from .vocabulary import (
     RESTRICTIONS_KEPT_AS_OTHER,
 )
 
-# `otherRestrictedTypeText` / `otherExemptedTypeText`: 300 characters, 422 beyond (measured on
-# the staging, 2026-11-19). A cut restriction list publishes narrower than the act, which is
-# accepted; a cut exemption list would publish wider, so its measure is dropped instead.
+# `otherRestrictedTypeText` / `otherExemptedTypeText`: 300 characters, 422 beyond (2026-11-19).
+# A cut restriction list is accepted (narrower); a cut exemption list drops its measure (wider).
 OTHER_TYPE_TEXT_MAX_LENGTH = 300
 FREE_TEXT_SEPARATOR = " ; "
 
@@ -57,7 +56,6 @@ VEHICLE_COLUMNS: dict[str, Any] = {
     "vehicle_restricted_types": pl.List(pl.Utf8),
     "vehicle_exempted_types": pl.List(pl.Utf8),
     "vehicle_heavyweight_max_weight": pl.Float64,
-    # Filled only when the paragraph names the dimension a gauge value bounds.
     "vehicle_max_length": pl.Float64,
     "vehicle_max_height": pl.Float64,
     "vehicle_max_width": pl.Float64,
@@ -92,7 +90,6 @@ def read_vehicle_set(
     outside = False
     kept_as_other: list[str] = []
     unknown_exemptions: list[str] = []
-    # Exactly one dimension and one gauge value, or the label goes as "other", as written.
     dimensions = {
         pair[1].strip()
         for pair in params or []

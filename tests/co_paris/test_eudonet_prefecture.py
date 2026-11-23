@@ -13,7 +13,6 @@ def test_each_authority_goes_to_its_own_organization(integration, created_by_org
 
     created_by_organization.clear()
     BaseIntegration.integrate_regulations(integration)
-    # Together, the two give what one organization alone publishes.
     assert set(created_by_organization["co_paris"]) == city | prefecture
 
 
@@ -32,7 +31,7 @@ def test_eudonet_is_read_once_for_both(integration, monkeypatch):
 def test_without_its_credentials_the_prefecture_is_left_out(
     integration, created_by_organization, captured_logs
 ):
-    integration.organization_settings.pref_client_id = None
+    integration.organization_settings.paris_prefecture_client_id = None
     integration.integrate_regulations()
     assert list(created_by_organization) == ["co_paris"]
     assert any("left out, rather than published under the city's name" in m for m in captured_logs)
@@ -46,7 +45,6 @@ def test_a_failed_prefecture_run_leaves_the_city_run_whole(
             raise RuntimeError("401")
         return []
 
-    # `from_settings` loads the module afresh: patch the instance's own class.
     monkeypatch.setattr(type(integration), "fetch_regulation_ids", unreadable)
     outcome = integration.integrate_regulations()
     assert list(created_by_organization) == ["co_paris"]

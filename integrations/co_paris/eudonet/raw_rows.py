@@ -168,7 +168,6 @@ RAW_COLUMNS: dict[str, Any] = {
     "m_opening": pl.Utf8,
     "m_option_formulas": pl.List(pl.Utf8),
     "m_params": pl.List(pl.List(pl.Utf8)),
-    # Whether the measure's locations were read (`Expansion.located`).
     "m_located": pl.Boolean,
     "l_file_id": pl.Int64,
     **{name: field.dtype for name, field in LOCATION_FIELDS.items()},
@@ -229,7 +228,6 @@ def _measure_fields(row: dict[str, Any] | None, articles: list[str]) -> dict[str
         "m_type": displayed_value(row, MEASURE_NAME.descid),
         "m_paragraph": displayed_value(row, MEASURE_PARAGRAPH.descid),
         "m_notes": displayed_value(row, MEASURE_NOTES.descid),
-        # One mail merge per measure on 2026-11-17; two would be read as one text.
         "m_article": "\n".join(articles) or None,
         "m_opening": displayed_value(row, MEASURE_OPENING.descid),
         "m_option_formulas": [
@@ -262,8 +260,6 @@ def _group_by_parent(
 
 @dataclass(frozen=True)
 class Expansion:
-    """The measures whose children are read: locations (`2700`), and articles (`3200`)."""
-
     located: frozenset[int]
     articled: frozenset[int]
 
@@ -273,10 +269,9 @@ def build_raw_dataframe(
 ) -> pl.DataFrame:
     """One row per location, carrying its measure and its regulation.
 
-    Childless parents are kept with null children so that the funnel counts them. The
-    measures of `UNREAD_MEASURE_LABELS` get no row at all, with or without locations in the
-    tables, and only the measures of `expansion` get their locations and articles, so a frozen
-    dump and the online extraction give the same rows.
+    Childless parents are kept with null children. The measures of `UNREAD_MEASURE_LABELS` get
+    no row at all, with or without locations in the tables, and only the measures of
+    `expansion` get their locations and articles.
     """
     regulations = tables.get(str(TABLE_REGULATIONS), [])
     measures = tables.get(str(TABLE_MEASURES), [])

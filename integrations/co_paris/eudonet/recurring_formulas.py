@@ -1,17 +1,10 @@
-"""The formulas free texts repeat, counted on every run so a frequent one gets a status.
-
-A formula is a sentence, compared without case, spacing or digits. It is neutral (read as
-already published), blocking (its row is dropped), or not yet arbitrated, which drops the row
-too. A formula not yet arbitrated in more than `LOG_THRESHOLD` records is logged; beyond
-`ALERT_THRESHOLD`, the team is alerted in Tchap (thresholds decided 2026-11-18).
-"""
-
 import re
 from collections import Counter
 from collections.abc import Iterable
 
 from loguru import logger
 
+# An unarbitrated formula is logged past the first, alerted in Tchap past the second (2026-11-18).
 LOG_THRESHOLD = 10
 ALERT_THRESHOLD = 100
 _EXAMPLE_LENGTH = 150

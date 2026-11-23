@@ -1,14 +1,4 @@
-"""A one-way street is published with every exception its act gives it; one that cannot be
-read, and it is not published (decided 2026-11-19).
-
-Other measures of the same act, on the same street, may open the way back: a bus or cycle lane
-against the flow. DiaLog publishes none of them: they are read here, before being dropped. A
-meeting zone or a 30 km/h limit changes nothing: the highway code's two-way cycling there is
-published only where the act writes it (decided 2026-11-19). A lane that covers the one-way
-section adds its users as exemptions; one on another section of the street, or whose way or
-users cannot be read, drops the one-way section, since how much of it the lane opens is not
-known. A restored two-way traffic on the street contradicts it and drops it too.
-"""
+"""A one-way street goes with every exception its act gives it, or not at all (2026-11-19)."""
 
 from collections import defaultdict
 from dataclasses import dataclass
@@ -41,6 +31,7 @@ from .vocabulary import (
     PARAGRAPH_EXEMPTION_PARAMETER,
 )
 
+# Not a meeting zone nor a 30 zone: two-way cycling only where the act writes it (2026-11-19).
 RELATED_LABELS = LANE_LABELS | {
     LABEL_NO_CONTRAFLOW_CYCLES,
     LABEL_BOTH_WAYS_RESTORED,
@@ -69,7 +60,6 @@ class Section:
     start: str | None
     end: str | None
     whole: bool
-    # « depuis A vers B »: the bounds say which way.
     oriented: bool
 
     def covers(self, other: "Section") -> bool:
@@ -126,7 +116,6 @@ def lane_users(label: str, params: list[list[str]] | None) -> list[str] | None:
 
 
 def _lane_way(lane: dict, section: Section, one_way: Section) -> str | None:
-    """`same`, `other` or `both`, against the one-way street it covers; `None` if unknown."""
     if lane["l_direction"] == LANE_SAME_WAY:
         return "same"
     if lane["l_direction"] == LANE_OTHER_WAY:
@@ -152,7 +141,6 @@ def _has_cycles(params: list[list[str]] | None) -> bool:
 
 
 def _judge(one_way: dict, related: list[dict]) -> tuple[list[str], str | None]:
-    """The exemptions the act's other measures give the one-way section, or why it is dropped."""
     section = _section(one_way)
     added: list[str] = []
     no_contraflow_cycles = False
@@ -187,8 +175,6 @@ def _judge(one_way: dict, related: list[dict]) -> tuple[list[str], str | None]:
     return list(dict.fromkeys(added)), None
 
 
-# The exemptions a one-way section takes from its act's lanes, "|"-joined: the key on which
-# its measure is split.
 LANE_EXEMPTIONS = "x_lane_exemptions"
 
 
@@ -253,8 +239,7 @@ def judge_one_way_lanes(df: pl.DataFrame, alive: pl.Series) -> pl.DataFrame:
 
 def split_one_way_measures(kept: pl.DataFrame) -> pl.DataFrame:
     """A measure whose published sections take different exemptions from the act's lanes is
-    split, one DiaLog measure each, keyed by the exemptions themselves: the same from one
-    night to the next. Among the sections published only (decided 2026-11-19)."""
+    split, one DiaLog measure each, keyed by the exemptions themselves."""
     if LANE_EXEMPTIONS not in kept.columns:
         return kept
     exemptions = pl.col(LANE_EXEMPTIONS).fill_null("")

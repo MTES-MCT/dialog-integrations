@@ -35,15 +35,11 @@ IS_PERMANENT = pl.col("a_type") == TYPE_PERMANENT_LABEL
 
 # "ABROGE_par…", "… / Abrogé par l'arrêté …", "article 1er abrogé" : the act itself, still
 # "En vigueur" in Eudonet; not "abrogeant l'arrêté …", nor "l'arrêté n° … abrogé par …".
-# The participle ends where letters do ("abrogeant" goes on).
 _REPEALED = r"abrog[ée]e?s?(?:[\W\d_]|$)"
 TITLE_SAYS_REPEALED = re.compile(
     rf"(?:^|—|/)\s*{_REPEALED}|\barticle\s+\S+\s+{_REPEALED}", re.IGNORECASE
 )
 
-# A title that names a day, an hour or a market: the act holds at those times only, which no
-# field carries ("une aire piétonne les dimanches", "à certaines heures"). Not "km/heure",
-# nor a street ("rue du Marché Saint-Honoré").
 TITLE_NAMES_A_TIME = re.compile(
     r"\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)s?\b|jours? fériés?"
     r"|certaines heures|(?<!km/)\bheures?\b|\bnuits?\b"
@@ -57,7 +53,6 @@ TIME_LIMITED_KEYS = frozenset({"PARIS RESPIRE", "MARCHES"})
 
 # A title that makes the act hold under a condition no field carries ("durant les épisodes de
 # pollution atmosphérique", "en cas d'épisode neigeux"): published, it would hold at all times.
-# Checked before the title formulas, which could take the condition in (decided 2026-11-19).
 TITLE_NAMES_A_CONDITION = re.compile(
     r"\bpollution|\bépisodes?\b|\ben cas d|\blorsque\b|\bintempéries|\bneige|\bverglas"
     r"|\bcrues?\b|\bcanicule",
@@ -166,8 +161,7 @@ def judge_period_fields(df: pl.DataFrame, alive: pl.Series, today: date) -> pl.D
     acts whose dates are not plausible.
 
     A typo on the year leaves the act "En vigueur" in Eudonet until that year comes
-    (`2019T15796` runs to 2109), so the state alone cannot be trusted. Judged by number, the
-    DiaLog identifier, on the acts still alive."""
+    (`2019T15796` runs to 2109), so the state alone cannot be trusted."""
     max_start_year = today.year + 1
     max_end_year = today.year + 5
     invalid = (

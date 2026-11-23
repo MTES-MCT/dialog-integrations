@@ -1,13 +1,3 @@
-"""Which measures are worth reading the articles, then the locations of: those of the acts the
-act, its measures and their articles do not already refuse.
-
-The prefilter is the head of the chain (`judge_head`, then the measures' fields), decided on
-the checks of the stages up to `Stage.PREFILTER`: the chain makes them again, as strictly or
-more, so an act refused here is refused there too and the rows published do not change. The
-act's own texts are read as leniently as they can be (every location taken as narrower than
-the street, none being read yet).
-"""
-
 from typing import Any
 
 import polars as pl
@@ -40,15 +30,14 @@ def judge_head(
     rows: pl.DataFrame, numbers_published_elsewhere: dict[str, str] | None
 ) -> pl.DataFrame:
     """The checks of the act alone: its fields, the citations, links, keys and title, the
-    other channels. The chain judges the measures' fields next, as the prefilter does."""
+    other channels."""
     rows = judge_regulation_fields(rows)
     rows = judge_superseded_regulations(rows, alive_now(rows))
     return judge_published_elsewhere(rows, numbers_published_elsewhere)
 
 
 def measures_whose_articles_to_read(tables: Tables) -> frozenset[int]:
-    """The measures of every act that may cite another: those its own fields keep in scope.
-    Their articles (`3200`) are read before any location, the citations depending on them."""
+    """The measures of every act that may cite another: those its own fields keep in scope."""
     rows = build_raw_dataframe(_act_tables(tables), Expansion(frozenset(), frozenset()), log=False)
     return _measures(rows.filter(alive_now(judge_regulation_fields(rows))))
 

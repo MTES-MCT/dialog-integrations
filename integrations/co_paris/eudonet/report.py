@@ -1,7 +1,3 @@
-"""What the decision dropped, logged by check: the count of each check's primary reasons, and
-of the records it refuses too behind an earlier one (for the GitHub summary; Tchap keeps its
-totals)."""
-
 from collections import Counter
 from typing import TYPE_CHECKING
 
@@ -41,7 +37,6 @@ def _report_check(decision: "Decision", check: Check) -> None:
         logger.warning(f"Dropping {removed['a_file_id'].n_unique()} {check.logged}{said}{behind}")
         return
     if check.refuses is Level.MEASURE:
-        # A row without a measure is a record of its own.
         measures = removed["m_file_id"].drop_nulls().n_unique() + removed["m_file_id"].null_count()
         logger.warning(
             f"Dropping {measures} {check.logged} "
@@ -60,7 +55,6 @@ def _report_check(decision: "Decision", check: Check) -> None:
 
 
 def _behind(decision: "Decision", check: Check) -> str:
-    """The records `check` refuses too, an earlier check having refused them first."""
     also = decision.reasons.filter(
         (pl.col("code") == check.code)
         & (pl.col("status") == Status.REFUSED.value)

@@ -198,9 +198,8 @@ class EudonetClient:
         """Rows whose `id_field` is one of `ids`, queried in `IN_LIST` chunks.
 
         A location cannot be filtered on its regulation, two levels up (error 204), hence
-        reading it by its measures. `sparse`: most identifiers have no row (a measure's
-        article, on 2 747 of 8 822 measures on 2026-11-17), a large empty batch is read again
-        but then believed.
+        reading it by its measures. `sparse`: most identifiers have no row; a large empty
+        batch is read again but then believed.
         """
         name = label or f"table {table}"
         identifiers = list(ids)

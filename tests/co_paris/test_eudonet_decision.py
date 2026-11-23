@@ -38,7 +38,6 @@ ORDER = (ON_ACT, MEASURE_TO_ACT, ON_LOCATION, LOCATION_TO_MEASURE)
 
 @pytest.fixture
 def rows():
-    # A: two measures of two locations; B: one measure of one location.
     return frame(act_rows("A", 1, {10: [100, 101], 11: [110, 111]}), act_rows("B", 2, {20: [200]}))
 
 
@@ -67,7 +66,6 @@ def test_a_measure_can_refuse_its_whole_act(rows):
     decision = decide(with_verdict(rows, MEASURE_TO_ACT, pl.col("m_file_id") == 11), ORDER)
     assert decision.kept["a_identifier"].to_list() == ["B"]
     assert outcome_of(decision, "A") == "refused"
-    # Judged on the measure: one reason, not one per row.
     assert reasons_of(decision, measure=11) == ["MEASURE_TO_ACT"]
 
 
@@ -97,7 +95,6 @@ def test_the_primary_reason_is_the_first_verdict_judged(rows):
     )
     decision = decide(marked, ORDER)
     primary = dict(decision.removed.select("l_file_id", "primary").iter_rows())
-    # Judged first, its column first: ON_LOCATION, though the other refuses 100 too.
     assert primary == {100: "ON_LOCATION", 101: "LOCATION_TO_MEASURE"}
     assert decision.reasons.filter(pl.col("record") == 100)["primary"].to_list() == [True]
 
@@ -256,10 +253,8 @@ def test_the_run_keeps_every_row_until_its_one_decision(monkeypatch):
     assert decision.kept.height + decision.removed.height == raw.height
     assert set(decision.outcomes["outcome"]) <= {"complete", "partial", "refused"}
     assert decision.outcomes.height == raw["a_file_id"].n_unique()
-    # Every row removed has its reason, and the first of them is the primary one.
     assert decision.removed["primary"].null_count() == 0
     assert clean.height >= decision.kept.height
-    # The same reasons, detail by detail, from one run to the next.
     first = decision.reasons
     source.compute_clean_data(raw)
     assert source.decision is not None and source.decision.reasons.equals(first)

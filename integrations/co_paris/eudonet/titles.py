@@ -1,19 +1,3 @@
-"""The act's title, read like its other free texts, then held against the act's fields.
-
-The title is cut into clauses. From each, the title formulas are taken out, each noting what it
-says (a family of measures, a speed, a weight, a provisional act, bounds); then what the act's
-fields print (its locations, its measures) and the streets of the referential. Anything left
-says more than the fields: the act is dropped. What the formulas noted must then hold on the
-act: a value one of its measures has, a temporary act, bounds one of its locations has unless
-they all are narrower than the street anyway (decided 2026-11-19). The families are noted, not
-held: an act narrower than its title, or naming parking for a closure, publishes nothing false.
-A title that amends another act describes that act: the citation rules deal with it, the rest
-of that clause says nothing of this act.
-
-The days, hours, markets and conditions of a title and "abrogé" are checked before it, by
-their own checks; an exemption written in the title alone, after the vehicles are read.
-"""
-
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -71,11 +55,9 @@ _VERB = (
     r"|réservant|autorisant|supprimant|rétablissant|neutralisant)"
 )
 
-# "de plus de dix mètres de long": the gauge values of the catalog, in words.
 NUMBER_WORDS = {"deux": 2.0, "trois": 3.0, "quatre": 4.0, "cinq": 5.0, "dix": 10.0}
 _DIMENSION_OF = {"long": "longueur", "large": "largeur", "haut": "hauteur"}
 
-# Longest and most specific first: a formula is taken out of the clause before the next is tried.
 TITLE_FORMULAS: tuple[TitleFormula, ...] = (
     # The prefecture's working prefixes ("IR_", "MD_ ") and the "gênant" designation act.
     _formula("working prefix", r"^\s*(?:IR|MD|DR|SN|AM|GL|AR)\s*(?:[_;:]\s*|$)"),
@@ -204,7 +186,6 @@ TITLE_FORMULAS: tuple[TitleFormula, ...] = (
     _formula("in", r"\bdans(?: la| le| les| l['’])?(?=\s|$)"),
 )
 
-# A title clause that amends or completes another act describes that act.
 _AMENDS_ANOTHER_ACT = re.compile(
     r"^(?:\w{2}_\s*)?(?:modifiant|complétant)(?: et (?:modifiant|complétant))?"
     r",?(?: dans le \d+\w* arrond\w*)?,?(?: les dispositions de)? (?:l['’]|les )arrêtés? "
@@ -212,8 +193,6 @@ _AMENDS_ANOTHER_ACT = re.compile(
     re.IGNORECASE,
 )
 _NUMBER = re.compile(r"\d+(?:[,.]\d+)?")
-# Once the act's streets are cut, a type of road left alone ("rues X et Y" with X and Y
-# explained) says nothing; an unknown name next to it still does.
 _ROAD_TYPE = re.compile(
     r"\b(?:rues?|avenues?|boulevards?|places?|quais?|passages?|impasses?|villas?|cités?|allées?"
     r"|squares?|voies?|cours|chemins?|routes?|sentiers?|ponts?|portes?|carrefours?|hameaux?"
@@ -240,7 +219,6 @@ class TitleReading:
     provisional: bool = False
     bounds: tuple[tuple[str, str], ...] = ()
     unread: tuple[str, ...] = ()
-    # (dimension or None, metres).
     gauges: frozenset[tuple[str | None, float]] = frozenset()
 
 
@@ -302,13 +280,10 @@ def _gauge(match: re.Match[str]) -> tuple[str | None, float]:
 
 @dataclass
 class Act:
-    """What the title is held against: every measure and location the act has, read or not."""
-
     temporary: bool
     narrower_than_the_street: bool = False
     speeds: set[int] = field(default_factory=set)
     weights: set[float] = field(default_factory=set)
-    # (dimension the paragraph names, or None; metres of the gauge value).
     gauges: set[tuple[str | None, float]] = field(default_factory=set)
     bound_keys: set[str] = field(default_factory=set)
     numbers: set[str] = field(default_factory=set)
@@ -339,13 +314,13 @@ def bound_key(name: str) -> str:
 
 
 def _bound_matches(text: str, act: Act) -> bool:
-    """A bound the title names is one of the act's bounds: a street, or a house number."""
     if bound_key(text) in act.bound_keys:
         return True
     numbers = _NUMBER.findall(text)
     return bool(numbers) and all(n in act.numbers for n in numbers)
 
 
+# Title bounds hold unless every location is narrower than the street (decided 2026-11-19).
 def disagreement(reading: TitleReading, act: Act) -> str | None:
     """Why the act's fields do not hold what its title says, or None."""
     if reading.unread:
@@ -357,7 +332,6 @@ def disagreement(reading: TitleReading, act: Act) -> str | None:
     if reading.weights - act.weights:
         return "title weight not in the act"
     if reading.gauges - act.gauges:
-        # The dimension too: the title confirms the paragraph's, it never supplies one.
         return "title gauge not in the act"
     for start, end in reading.bounds:
         matched = _bound_matches(start, act) and _bound_matches(end, act)
@@ -378,7 +352,6 @@ _BOUND_COLUMNS = (
 
 
 def _acts(rows: pl.DataFrame) -> dict[int, tuple[str | None, Act, Explained]]:
-    """Each act's title, fields and what they print, from every row it has, read or dropped."""
     acts: dict[int, tuple[str | None, Act, Explained]] = {}
     spans: dict[int, list[str]] = defaultdict(list)
     narrower: dict[int, list[bool]] = defaultdict(list)
@@ -439,8 +412,6 @@ def _acts(rows: pl.DataFrame) -> dict[int, tuple[str | None, Act, Explained]]:
 
 
 def _measure_gauges(row: dict) -> set[tuple[str | None, float]]:
-    """The gauge values of a dimension limit, with the dimension its paragraph names alone, and
-    without any dimension: a title that names none says no more than the field."""
     metres = {
         GAUGE_METRES[part.strip()]
         for pair in row["m_params"] or []

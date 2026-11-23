@@ -41,11 +41,7 @@ PEDESTRIAN_OR_CYCLE_MEASURES = pedestrians_or_cycles_named(pl.col("m_type"))
 def judge_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
     """`measure_type_`, `measure_max_speed`, and `measure_group_key`: the Eudonet measure, so
     its locations collapse into one DiaLog measure. And the measures DiaLog cannot take as
-    they are written.
-
-    A measure DiaLog does not publish keeps `measure_type_` empty: its texts are read and it
-    may change the act's other measures, until `judge_out_of_model`. So does a label new to
-    catalog `1202`, read as a free text (`_unread_label`)."""
+    they are written."""
     known = pl.col("m_type").is_in(list(MEASURE_TYPE_BY_LABEL)).fill_null(False)
     df = df.with_columns(
         pl.col("m_type")
@@ -99,23 +95,19 @@ _PUBLISHED = pl.col("measure_type_").is_not_null()
 
 
 def judge_out_of_model(df: pl.DataFrame) -> pl.DataFrame:
-    """Refuse the measures without a DiaLog equivalent, once read: last of the measure rules."""
+    """Refuse the measures without a DiaLog equivalent."""
     return df.with_columns(
         refusal(pl.when(~_PUBLISHED).then(pl.col("m_type"))).alias(OUT_OF_MODEL.column)
     )
 
 
 def _unread_label(label: str) -> str | None:
-    """A label new to catalog `1202` is a free text (decided 2026-11-19): understood and saying
-    nothing, its measure is one DiaLog does not publish; otherwise what it does to the act's
-    other measures is not known, and the act is refused."""
+    """A label new to catalog `1202` is read as a free text (decided 2026-11-19)."""
     reading = read_text(label)
     return None if reading.understood and not reading.effects else label
 
 
 def _unknown_option_formulas(df: pl.DataFrame, published: pl.Series) -> list[str | None]:
-    """The formulas the mail merge prints before an optional parameter that no catalog value
-    is: they may say the opposite of the known ones."""
     found = []
     for row, is_published in zip(df["m_option_formulas"].to_list(), published):
         unknown = [
@@ -128,8 +120,6 @@ def _unknown_option_formulas(df: pl.DataFrame, published: pl.Series) -> list[str
 
 
 def _unknown_parameters(df: pl.DataFrame, published: pl.Series) -> list[str | None]:
-    """The filled parameters of an unknown name: they may narrow the measure like a time slot
-    or a lane does."""
     found = []
     for params, is_published in zip(df["m_params"].to_list(), published):
         names = [

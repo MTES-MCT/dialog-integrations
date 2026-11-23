@@ -1,5 +1,3 @@
-"""The one place that drops rows, from the verdicts the checks added."""
-
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -9,22 +7,14 @@ from .verdicts import LEVEL_KEY, STATUS, Check, Level, Status, check_of
 
 OUTCOME = pl.Enum(["complete", "partial", "refused"])
 ID_COLUMNS = ["a_file_id", "a_identifier", "m_file_id", "l_file_id"]
-# On a row of a measure whose locations were not read (`raw_rows.Expansion`), a check of the
-# location judged nothing: its verdict is not a reason.
 LOCATED = "m_located"
 
 
 @dataclass(frozen=True)
 class Decision:
-    # Rows no check refuses, in their order, verdict columns kept.
     kept: pl.DataFrame
-    # Rows dropped, with the first check (in judging order) that refuses them.
     removed: pl.DataFrame
-    # One row per judged record and check that refuses or flags it; `primary` when that
-    # check is the first to refuse the record's rows.
     reasons: pl.DataFrame
-    # One row per act: complete, partial or refused; for a refused act, the check that
-    # dropped its last rows.
     outcomes: pl.DataFrame
     checks: tuple[Check, ...]
 
@@ -32,9 +22,7 @@ class Decision:
 def judged(
     rows: pl.DataFrame, checks: Sequence[Check] | None = None, named: Sequence[Check] = ()
 ) -> tuple[Check, ...]:
-    """The checks whose verdict the rows carry, in judging order (the order of their columns):
-    those of `checks` alone when given; `named` ones (a rule's, with its label) known by their
-    column."""
+    """The checks whose verdict the rows carry, in judging order (the order of their columns)."""
     if checks is not None:
         given = {check.column: check for check in checks}
         return tuple(given[column] for column in rows.columns if column in given)
@@ -49,7 +37,6 @@ def refused_by(check: Check) -> pl.Expr:
     if check.refuses is Level.LOCATION:
         return hit
     key = LEVEL_KEY[check.refuses]
-    # A null key is no record (an act without measure): the row stands alone.
     return pl.when(pl.col(key).is_null()).then(hit).otherwise(hit.any().over(key))
 
 
@@ -64,8 +51,7 @@ def alive_now(rows: pl.DataFrame) -> pl.Series:
 def decide(
     rows: pl.DataFrame, checks: Sequence[Check] | None = None, named: Sequence[Check] = ()
 ) -> Decision:
-    """Drop the rows a verdict refuses, with every reason. `checks`: decide on those alone (the
-    prefilter); `named`: the rules' checks, with their labels."""
+    """Drop the rows a verdict refuses, with every reason."""
     applied = judged(rows, checks, named)
     rows = _unjudged_where_not_located(rows, applied)
     order = {check.code: index for index, check in enumerate(applied)}
@@ -173,7 +159,6 @@ def _outcomes(marked: pl.DataFrame, order: dict[str, int]) -> pl.DataFrame:
             .otherwise(pl.lit("refused"))
             .cast(OUTCOME)
             .alias("outcome"),
-            # Rows go in judging order: the act empties at the latest of its rows' reasons.
             pl.when(pl.col("_kept") == 0)
             .then(pl.col("_last").replace_strict(codes, default=None, return_dtype=pl.String))
             .alias("emptied_by"),

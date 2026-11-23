@@ -82,10 +82,9 @@ def test_there_is_one_row_per_location_plus_the_childless_parents(raw, tables):
     carried_locations = [row for row in tables["2700"] if row["1202_fid"] in carried]
     measures_with_location = {row["1202_fid"] for row in carried_locations}
     locationless_measures = [m for m in read if m["FileId"] not in measures_with_location]
-    # An act whose every measure is left aside is childless too.
-    regulations_with_measure = {m["1101_fid"] for m in read}
+    regulations_with_a_read_measure = {m["1101_fid"] for m in read}
     childless_regulations = [
-        a for a in tables["1100"] if a["FileId"] not in regulations_with_measure
+        a for a in tables["1100"] if a["FileId"] not in regulations_with_a_read_measure
     ]
 
     assert raw.height == (
@@ -248,8 +247,7 @@ class StubEudonet:
         return self.tables.get(str(table), [])
 
 
-# Every measure's articles and locations read: no prefilter.
-ALL = (
+NO_PREFILTER = (
     lambda tables: frozenset(m["FileId"] for m in tables["1200"]),
     lambda tables, articled: frozenset(m["FileId"] for m in tables["1200"]),
 )
@@ -259,28 +257,27 @@ MEASURE_ARTICLE = {"1202_fid": 1, "3204": "Le stationnement est interdit"}
 
 def test_an_extraction_without_any_complementary_article_is_refused(tables):
     with pytest.raises(EudonetError, match="no article"):
-        extract_tables(StubEudonet({**tables, "3200": [MEASURE_ARTICLE]}), date(2026, 9, 8), *ALL)  # type: ignore[arg-type]
+        stub = StubEudonet({**tables, "3200": [MEASURE_ARTICLE]})
+        extract_tables(stub, date(2026, 9, 8), *NO_PREFILTER)  # type: ignore[arg-type]
 
 
 def test_an_extraction_without_any_measure_article_is_refused(tables):
     stub = StubEudonet({**tables, "2200": [COMPLEMENTARY_ARTICLE]})
     with pytest.raises(EudonetError, match="no measure article"):
-        extract_tables(stub, date(2026, 9, 8), *ALL)  # type: ignore[arg-type]
+        extract_tables(stub, date(2026, 9, 8), *NO_PREFILTER)  # type: ignore[arg-type]
 
 
 def test_both_kinds_of_articles_are_extracted_with_the_perimeter(tables):
     stub = StubEudonet({**tables, "2200": [COMPLEMENTARY_ARTICLE], "3200": [MEASURE_ARTICLE]})
-    extracted, _ = extract_tables(stub, date(2026, 9, 8), *ALL)  # type: ignore[arg-type]
+    extracted, _ = extract_tables(stub, date(2026, 9, 8), *NO_PREFILTER)  # type: ignore[arg-type]
     assert extracted["2200"] == [COMPLEMENTARY_ARTICLE]
     assert extracted["3200"] == [MEASURE_ARTICLE]
     assert "1400" not in extracted
 
 
 def test_the_measures_that_change_nothing_else_are_neither_fetched_nor_read(tables):
-    """Reserved parking places and traffic lights: two thirds of the locations of the base,
-    none of which bears on another measure of the act."""
     stub = StubEudonet({**tables, "2200": [COMPLEMENTARY_ARTICLE], "3200": [MEASURE_ARTICLE]})
-    extract_tables(stub, date(2026, 9, 8), *ALL)  # type: ignore[arg-type]
+    extract_tables(stub, date(2026, 9, 8), *NO_PREFILTER)  # type: ignore[arg-type]
     left_aside = {m["FileId"] for m in tables["1200"] if not is_read(m)}
     assert left_aside
     assert not left_aside & set(stub.asked["2700"])

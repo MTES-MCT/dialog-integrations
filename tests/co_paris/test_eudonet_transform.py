@@ -67,7 +67,7 @@ from tests.co_paris.steps import (
     discard_measures_out_of_model,
     discard_published_elsewhere,
     drop_refused,
-    everyone,
+    every_row_alive,
     orient_one_way_streets,
 )
 from toolkit.rules.apply import apply_rules
@@ -326,8 +326,6 @@ def test_the_catalog_table_is_complete():
 
 
 def test_an_unknown_measure_label_not_understood_drops_its_act_with_a_warning(captured_logs):
-    """Paris can enrich the catalog: a new value is read as a free text, never guessed, nor
-    stops the run; not understood, what it does to the act's other measures is not known."""
     unknown = make_row(m_file_id=11, m_type="interdiction de klaxonner", l_file_id=None)
     beside = make_row()
     other_act = make_row(a_file_id=2, a_identifier="2024P10002", m_file_id=20, l_file_id=200)
@@ -341,8 +339,6 @@ def test_an_unknown_measure_label_not_understood_drops_its_act_with_a_warning(ca
 
 
 def test_an_unknown_measure_label_that_says_nothing_drops_only_its_measure():
-    """Read as a free text and understood as saying nothing to publish ("pose de barrières"),
-    the label leaves the act's other measures as they are: its own is not published."""
     unknown = make_row(m_file_id=11, m_type="pose de barrières", l_file_id=110)
     beside = make_row()
     df = pipeline(unknown, beside)
@@ -541,8 +537,7 @@ def test_a_pedestrian_area_is_a_ban_with_local_access_and_a_walking_pace_twin():
         (["Toutefois ces dispositions ne sont pas applicables", "", ""], True),
         (["", "Ces dispositions sont applicables", ""], True),
         (["", "Ces dispositions sont suspendues", ""], False),
-        # Known in first place only: the third formula is never anything but the exemption one.
-        (["", "", "Ces dispositions sont applicables"], False),
+        pytest.param(["", "", "Ces dispositions sont applicables"], False, id="applicable_third"),
     ],
 )
 def test_an_unknown_formula_before_an_optional_parameter_drops_the_measure(formulas, kept):
@@ -649,7 +644,7 @@ def test_a_copied_location_on_a_street_the_title_does_not_name_drops_its_whole_m
         copied_row(l_file_id=101, l_status="Ajoutée", l_road_name="Rue Pillet Will"),
         copied_row(m_file_id=11, l_file_id=110, l_road_name="Rue Pillet Will"),
     )
-    judged = judge_copied_locations(df, everyone(df))
+    judged = judge_copied_locations(df, every_row_alive(df))
     assert [v["detail"] for v in judged[COPIED_LOCATION.column].to_list()] == [
         "status Maintenue",
         None,
@@ -672,7 +667,7 @@ def test_a_copied_location_on_a_street_the_title_does_not_name_drops_its_whole_m
 )
 def test_a_location_entered_for_the_act_or_named_by_its_title_is_kept(overrides):
     frame = make_frame(copied_row(**overrides))
-    judged = judge_copied_locations(frame, everyone(frame))
+    judged = judge_copied_locations(frame, every_row_alive(frame))
     assert drop_refused(judged, COPIED_LOCATION).height == 1
 
 
@@ -831,8 +826,6 @@ def test_hazardous_materials_have_their_own_type():
 
 
 def test_a_length_in_metres_is_not_turned_into_a_dimension():
-    """The label never says which dimension, and none of the 26 325 measures of 2026-09-08
-    carries a length, height or width beside it: without a paragraph naming it, "other"."""
     row = make_row(
         m_type="limitation dimensionnelle",
         m_params=[
@@ -903,7 +896,7 @@ def test_measures_aimed_at_pedestrians_or_cycles_are_left_out_by_label(label, le
 
 @pytest.mark.parametrize("label", ["limitation dimensionnelle", "limitation catégorielle"])
 def test_an_unreadable_gauge_reaches_the_rules_naming_no_vehicle(label):
-    """Neither a closure for everyone, nor "other" with no threshold: the common rule
+    """Neither a closure for every_row_alive, nor "other" with no threshold: the common rule
     leaves it out."""
     row = make_row(m_type=label, m_params=[["véhicule concerné (1)", "à tous les véhicules"]])
 
@@ -1179,8 +1172,6 @@ def test_the_canonical_keys_this_step_owns_are_all_produced(clean):
 
 
 def test_the_funnel_of_the_fixture_is_the_one_we_expect(raw, clean):
-    # The unpublished measures are read too, but the 6 reserved parkings and the traffic light
-    # (180 locations) get no row at all.
     assert raw.height == 75
     after_state = compute_regulation_fields(raw)
     assert after_state.height == 72  # 1 Abrogé + 1 Non signé + 1 Périmé

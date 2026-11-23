@@ -1,12 +1,8 @@
-"""What a record's own fields print into a text, for the readers of free texts and titles to cut
-before they judge what is left."""
-
 import re
 
 from .locations import SCOPE_POINT, SCOPE_SECTION
 from .vocabulary import MULTI_VALUE_SEPARATOR
 
-# Where the numbers of the bounds are written: a number in a text must be one of them.
 BOUND_NUMBER_COLUMNS = (
     "l_from_house_number",
     "l_from_road_name",

@@ -1,16 +1,4 @@
-"""Refuse the rows whose free text says more than what is published: everything is read, or
-the row goes. And the act-level checks that read the other acts or the act's own fields:
-citations, links, keys and title.
-
-Every free text of an act (its notes and complementary articles, its measures' paragraphs,
-notes and articles, its locations' complements, mail-merge details and notes) goes through the
-same reading, `free_text.read_text`. A text not understood refuses the record it qualifies: the
-act, the measure or the location (decided 2026-11-18). On a measure DiaLog does not publish, or
-one of its locations, it refuses the act: what such a text does to the other measures is not
-known (decided 2026-11-19). A text understood may carry an effect, applied here: an exemption,
-bicycles against the flow of the act's one-way streets, the list of vehicles a pedestrian area
-lets in, the number of places a location holds. The title has its own reader (`titles`).
-"""
+"""An unread text refuses its record, or its act on an unpublished measure (2026-11-19)."""
 
 import re
 from collections import defaultdict
@@ -88,20 +76,15 @@ SUPERSEDING_LINK_COLUMNS = {
     "a_repealed_by_clone": "repealed by a clone",
     "a_repealed_by_multiple": "repealed by a multiple repeal",
 }
-# Structured details that narrow a location; its free texts are read with the others.
 LOCATION_DETAIL_COLUMNS = {
     "l_reserved_space_type": "reserved places",
     "l_reserved_places": "reserved places",
     "l_reserved_length": "reserved length",
     "l_displayed_length": "displayed length",
 }
-# A number of places says how many a point or a bounded section holds, the geometry saying
-# where: nothing narrower. On a whole street, it is (decided 2026-11-19). A length on a single
-# house number is the point itself ("sur 24 mètres", decided 2026-11-16); on a section, a
-# portion of it.
+# Places narrow only a whole street; a length narrows a section, never a single number (2026-11-19).
 PLACE_COLUMNS = ("l_reserved_space_type", "l_reserved_places")
 
-# The free texts read, by the record they qualify.
 TEXT_COLUMNS: dict[Level, tuple[str, ...]] = {
     Level.ACT: ("a_notes", "a_articles"),
     Level.MEASURE: ("m_paragraph", "m_notes", "m_article"),
@@ -125,13 +108,8 @@ TEXT_LABELS = {
     "l_article_details": "mail-merge details",
     "l_notes": "location notes",
 }
-# A few words without a number are a zone's name in the paragraph of its zone 30, or of the
-# cycle contraflow ban that goes with it. Anywhere else, a measure DiaLog does not publish
-# included, they are not understood: "une voie", "voie bus" say a lane, not the carriageway
-# (decided 2026-11-19).
+# A zone's name is neutral only in its zone 30 or its cycle contraflow ban (2026-11-19).
 ZONE_NAME_MEASURES = frozenset({LABEL_ZONE_30, LABEL_NO_CONTRAFLOW_CYCLES})
-# A measure DiaLog does not publish, a label unknown to the catalog included: read like the
-# others, refused after the arbitration.
 _UNPUBLISHED = pl.col("m_type").is_not_null() & ~pl.col("m_type").is_in(
     [label for label, kind in MEASURE_TYPE_BY_LABEL.items() if kind is not None]
 )
@@ -139,8 +117,6 @@ _UNPUBLISHED = pl.col("m_type").is_not_null() & ~pl.col("m_type").is_in(
 
 @dataclass(frozen=True)
 class FreeText:
-    """One free text of an act, with the record it qualifies."""
-
     level: Level
     record: int
     column: str
@@ -148,8 +124,6 @@ class FreeText:
     explained: Explained = Explained()
 
 
-# A cycle of repeals ("A repeals B", "B repeals A") never settles: past this many rounds, both
-# are taken as in force, so that both their citations count.
 MAX_REPEAL_ROUNDS = 20
 
 
@@ -157,12 +131,8 @@ def _cited_by_another_act(
     regulations: list[dict], texts_by_act: dict[int, list[str]], no_longer: set[int]
 ) -> set:
     """`a_file_id` of the acts another act of the perimeter repeals, amends or suspends in one
-    of its texts, while Eudonet still says "En vigueur" (70 of the 922 publishable acts on
-    2026-11-16).
-
-    Only an act still in force cites, published or not: not one of `no_longer` (a link or its
-    title says replaced or repealed), nor one another act in force repeals, to a fixed point.
-    An act only amended or suspended holds in part: it cites (decided 2026-11-19)."""
+    of its texts, while Eudonet still says "En vigueur". An act only amended or suspended
+    holds in part: it cites (decided 2026-11-19)."""
     acts_by_key: dict[tuple, list[dict]] = defaultdict(list)
     for row in regulations:
         if (key := act_number_key(row["a_identifier"] or "")) is not None:
@@ -194,7 +164,6 @@ def _cited_by_another_act(
             break
         previous, in_force = in_force, following
     else:
-        # A cycle swings between two sets, whatever the parity of the rounds: both are kept.
         in_force = previous | in_force
     return hit(in_force, repeals_only=False)
 
@@ -229,7 +198,6 @@ def _title_condition(row: dict) -> str | None:
 
 
 def _texts_by_act(df: pl.DataFrame) -> dict[int, list[str]]:
-    """Every free text of each act, its measures' included."""
     texts: dict[int, list[str]] = defaultdict(list)
     for act, notes, articles in (
         df.unique("a_file_id", maintain_order=True)
@@ -283,7 +251,6 @@ def judge_superseded_regulations(rows: pl.DataFrame, alive: pl.Series) -> pl.Dat
 
 
 def _measure_explained(measure: dict, locations: list[dict]) -> Explained:
-    """What a measure's own fields and its locations print into its article."""
     spans = [
         *(span for location in locations for span in location_spans(location)),
         *(form for location in locations for form in place_forms(location)),
@@ -398,20 +365,12 @@ def unread_act_texts(df: pl.DataFrame) -> dict[int, str]:
 
 @dataclass
 class Outcome:
-    """What the readings do to the rows: records refused (with why), parameters added."""
-
     dropped: dict[Level, dict[int, str]]
     added_params: dict[int, list[list[str]]]
-    # By act: who may ride against the flow of its one-way streets.
     against_the_flow: dict[int, list[str]]
 
 
 def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcome:
-    """What the readings do. A text understood on a measure DiaLog does not publish, or on one
-    of its locations, qualifies that record only, except for what reaches the act's other
-    measures: riders against the flow, the vehicles let into its pedestrian areas. Its
-    exemptions are kept on it, for whoever reads who uses a lane. A problem there refuses the
-    act: what it does to the other measures is not known."""
     measures = (
         df.filter(pl.col("m_file_id").is_not_null())
         .unique("m_file_id", maintain_order=True)
@@ -448,7 +407,6 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
         if text.level is Level.LOCATION:
             for effect in reading.effects:
                 if effect.code == Code.ZONE_NAME:
-                    # See `ZONE_NAME_MEASURES`: on a location, never a name.
                     problems.append(f"{label}: {effect.code}")
                     continue
                 if measure in unpublished:
@@ -456,7 +414,6 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
                 if effect.code != Code.RESERVED_PLACES:
                     problems.append(f"{label}: {effect.code}")
                 elif not narrower.get(text.record, False):
-                    # See `PLACE_COLUMNS`.
                     problems.append(f"{label}: places on the whole street")
         elif reading.understood:
             is_act = text.level is Level.ACT
@@ -504,7 +461,6 @@ def _apply(df: pl.DataFrame, readings: list[tuple[FreeText, Reading]]) -> Outcom
                         labels == [CYCLES_EXEMPTION_LABEL]
                         and measure_type[text.record] == LABEL_ONE_WAY
                     ):
-                        # The one-way street does not bind bicycles: they ride against the flow.
                         against_the_flow[act].append(CYCLES_EXEMPTION_LABEL)
                     elif labels and set(labels) <= PARAGRAPH_EXEMPTION_LABELS:
                         added[text.record] += [[PARAGRAPH_EXEMPTION_PARAMETER, x] for x in labels]

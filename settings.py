@@ -27,13 +27,11 @@ class Settings(BaseSettings):
     base_url: str | None = None
     client_id: str | None = None
     client_secret: str | None = None
-    # Paris only: the police prefecture's acts go to its own DiaLog organization, under
-    # its own client. Outside `DIALOG_`, which names the organization that runs.
-    pref_client_id: str | None = Field(
+    paris_prefecture_client_id: str | None = Field(
         default=None,
         validation_alias="PARIS_PREFECTURE_CLIENT_ID",
     )
-    pref_client_secret: str | None = Field(
+    paris_prefecture_client_secret: str | None = Field(
         default=None,
         validation_alias="PARIS_PREFECTURE_CLIENT_SECRET",
     )
@@ -77,8 +75,8 @@ class OrganizationSettings:
     base_url: str | None = None
     client_id: str | None = None
     client_secret: str | None = None
-    pref_client_id: str | None = None
-    pref_client_secret: str | None = None
+    paris_prefecture_client_id: str | None = None
+    paris_prefecture_client_secret: str | None = None
     eudonet_paris_credentials: str | None = None
 
     REQUIRED_VALUES = ("base_url", "client_id", "client_secret")
@@ -93,8 +91,10 @@ class OrganizationSettings:
         self.client_id = settings.client_id
         self.client_secret = settings.client_secret
         self.eudonet_paris_credentials = getattr(settings, "eudonet_paris_credentials", None)
-        self.pref_client_id = getattr(settings, "pref_client_id", None)
-        self.pref_client_secret = getattr(settings, "pref_client_secret", None)
+        self.paris_prefecture_client_id = getattr(settings, "paris_prefecture_client_id", None)
+        self.paris_prefecture_client_secret = getattr(
+            settings, "paris_prefecture_client_secret", None
+        )
 
         missing_values = [name for name in self.REQUIRED_VALUES if getattr(self, name) is None]
         if missing_values:

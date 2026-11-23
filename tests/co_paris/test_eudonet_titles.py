@@ -111,7 +111,6 @@ def test_bounds_in_the_title_are_the_act_s_bounds_however_written():
     assert disagreement(reading, act) is None
     act.bound_keys = {bound_key("RUE D AUTEUIL")}
     assert disagreement(reading, act) == "title bounds not in the act's locations"
-    # Other bounds, on locations all narrower than the street: nothing published is wider.
     act.narrower_than_the_street = True
     assert disagreement(reading, act) is None
 
@@ -162,7 +161,6 @@ def test_title_bounds_on_a_whole_street_drop_the_act_even_through_a_dropped_loca
     )
     raw = pl.DataFrame([whole_street, bounded], schema=RAW_COLUMNS)
     assert discard_unread_titles(raw)["a_identifier"].unique().to_list() == ["2026T10002"]
-    # A whole-street location refused earlier still counts: the title reads every row.
     other = _row(
         a_file_id=2,
         a_identifier="2026T10002",

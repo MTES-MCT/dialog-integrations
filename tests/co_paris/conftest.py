@@ -10,8 +10,8 @@ class OfflineSettings:
     base_url = "http://offline.invalid"
     client_id = "offline"
     client_secret = "offline"
-    pref_client_id = "offline-prefecture"
-    pref_client_secret = "offline-prefecture"
+    paris_prefecture_client_id = "offline-prefecture"
+    paris_prefecture_client_secret = "offline-prefecture"
 
 
 @pytest.fixture
@@ -38,7 +38,6 @@ def integration(monkeypatch, captured_regulations, created_by_organization, tmp_
         )
         return [regulation.identifier for regulation in regulations], []
 
-    # On the class: the police prefecture's organization is another instance of it.
     monkeypatch.setattr(type(integration), "_integrate_regulations_add", capture)
     monkeypatch.setattr(type(integration), "fetch_regulation_ids", lambda self: [])
     return integration

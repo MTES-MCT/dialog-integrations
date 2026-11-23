@@ -35,7 +35,7 @@ from tests.co_paris.steps import (
     discard_measures_out_of_model,
     discard_superseded_regulations,
     discard_unread_texts,
-    everyone,
+    every_row_alive,
 )
 
 ONE_WAY = "sens interdit (ou sens unique)"
@@ -49,9 +49,6 @@ def kept_measures(*rows: dict[str, Any]) -> list[int]:
 
 def exempted(df) -> list:
     return df.pipe(compute_vehicle_fields)["vehicle_exempted_types"].to_list()
-
-
-# The reading itself.
 
 
 @pytest.mark.parametrize(
@@ -97,9 +94,12 @@ def test_a_text_that_changes_nothing_is_understood_without_effect(article):
         "Dans la portion de voie, la circulation des véhicules dont la longueur excède 10 "
         "mètres est interdite.",
         "L'article 2 du présent arrêté est modifié : la rue Cadet est ajoutée.",
-        # A neutral sentence does not cover the next one, nor the next line.
-        "Les dispositions du présent arrêté abrogent et remplacent toutes les dispositions "
-        "contraires antérieures. Toutefois ces dispositions ne sont pas applicables le dimanche.",
+        pytest.param(
+            "Les dispositions du présent arrêté abrogent et remplacent toutes les dispositions "
+            "contraires antérieures. Toutefois ces dispositions ne sont pas applicables "
+            "le dimanche.",
+            id="neutral_sentence_then_an_exception",
+        ),
         "cycles, cyclomoteurs et motocyclettes sur le trottoir<br />Complète l'arrêté "
         "préfectoral n° 96-10651 du 2 mai 1996",
         "Attention cet arrêté est abrogé par le n° 2013P0806 du 22 août 2013",
@@ -214,9 +214,6 @@ def test_a_blocking_formula_is_not_understood_even_if_a_formula_matches(monkeypa
     assert not reading.understood and reading.blocking == reading.unread
 
 
-# The act and its texts.
-
-
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -257,12 +254,14 @@ def test_a_title_naming_a_street_or_a_speed_unit_keeps_the_act(title):
     [
         {"a_notes": "Partiellement abrogé par 2021P112184 concernant rue de Moscou"},
         {"a_articles": ["Les mesures du présent arrêté ne s'appliquent pas à la rue Cadet."]},
-        # Exempting every measure of the act at once says more than one parameter can.
-        {
-            "a_articles": [
-                "Toutefois ces dispositions ne sont pas applicables aux véhicules de secours."
-            ]
-        },
+        pytest.param(
+            {
+                "a_articles": [
+                    "Toutefois ces dispositions ne sont pas applicables aux véhicules de secours."
+                ]
+            },
+            id="exemption_of_every_measure_at_once",
+        ),
     ],
 )
 def test_an_act_whose_own_text_is_not_understood_is_dropped_whole(overrides, captured_logs):
@@ -290,9 +289,6 @@ def test_the_new_wording_of_another_act_is_its_business_in_an_article_not_in_a_p
     )
     assert discard_unread_texts(make_frame(make_row(a_articles=[wording]))).height == 1
     assert discard_unread_texts(make_frame(make_row(m_paragraph=wording))).height == 0
-
-
-# Measures.
 
 
 def test_a_measure_whose_paragraph_or_notes_narrow_it_is_dropped():
@@ -372,8 +368,6 @@ def test_any_other_exemption_in_a_measure_text_drops_the_measure(paragraph):
     assert pipeline(row).pipe(discard_unread_texts).height == 0
 
 
-# The measure's article, generated from its fields by the mail merge.
-
 GENERATED_LOCATION = {
     "m_type": "interdiction de stationnement",
     "m_opening": "Le stationnement est interdit",
@@ -426,8 +420,6 @@ def test_a_location_an_earlier_rule_dropped_still_explains_the_article():
     judged = judge_unread_texts(raw, alive)
     assert details(judged, UNREAD_MEASURE_TEXT)[0] is None
 
-
-# Bicycles against the flow, pedestrian areas.
 
 CYCLES = "Dans cette voie, les cycles sont autorisés à circuler à double sens."
 
@@ -538,11 +530,11 @@ def test_the_closed_list_of_a_pedestrian_area_takes_the_place_of_the_local_acces
             ["bicycle", "other"],
             "engins de déplacement personnels",
         ),
-        # No DiaLog value: its own words.
-        (
+        pytest.param(
             "véhicules des services publics utilisés dans le cadre de leurs missions",
             ["other"],
             "véhicules des services publics utilisés dans le cadre de leurs missions",
+            id="no_dialog_value",
         ),
     ],
 )
@@ -566,9 +558,6 @@ def test_a_pedestrian_access_list_without_a_pedestrian_area_drops_the_act():
 def test_a_pedestrian_access_list_with_a_time_drops_the_act():
     row = make_row(m_type=PEDESTRIAN_AREA, a_articles=[ACCESS + " - livraisons de 7h à 10h."])
     assert discard_unread_texts(make_frame(row)).height == 0
-
-
-# Texts of the measures DiaLog does not publish.
 
 
 def test_a_text_not_understood_on_a_measure_dialog_does_not_publish_drops_the_act(
@@ -599,7 +588,6 @@ def test_a_location_text_not_understood_on_a_measure_dialog_does_not_publish_dro
 
 
 def test_places_on_a_section_of_a_measure_dialog_does_not_publish_change_nothing_else():
-    """The places narrow the reserved parking itself, never published."""
     published = make_row(m_file_id=10, l_file_id=100)
     parking = make_row(
         m_file_id=11,
@@ -626,9 +614,6 @@ def test_the_pedestrian_access_list_of_a_free_measure_goes_to_the_act_s_pedestri
     assert out["vehicle_exempted_types"].to_list() == [
         ["emergencyServices", "localResident", "other"]
     ]
-
-
-# Locations.
 
 
 def test_a_location_text_that_narrows_the_measure_drops_the_location(captured_logs):
@@ -681,10 +666,9 @@ def test_a_location_complement_that_says_nothing_keeps_the_location(complement, 
         "sur 1 place, sauf aux GIG/GIC",
         "côté pair",
         "du 02/11/2026 au 31/08/2027",
-        # Numbers the bounds do not carry: a second place, or a day without its month.
-        "n° 21 et du n° 47",
-        "le 25",
-        "du 1 au 15",
+        pytest.param("n° 21 et du n° 47", id="second_number"),
+        pytest.param("le 25", id="day_without_month"),
+        pytest.param("du 1 au 15", id="days_without_month"),
     ],
 )
 def test_a_short_complement_that_narrows_the_measure_drops_the_location(complement):
@@ -758,7 +742,7 @@ def test_a_bounded_section_keeps_its_places_not_a_length(overrides, kept):
 def test_places_written_for_a_whole_street_drop_it():
     whole = make_row(l_scope="Une section", l_point_house_number=None, l_article_details="4")
     frame = make_frame(whole)
-    judged = judge_unread_texts(frame, everyone(frame))
+    judged = judge_unread_texts(frame, every_row_alive(frame))
     assert details(judged, UNREAD_LOCATION_TEXT) == [
         "mail-merge details: places on the whole street"
     ]
@@ -772,9 +756,6 @@ def test_reserved_places_and_a_length_on_a_point_keep_it():
     assert discard_location_details(df)["l_file_id"].to_list() == [100, 101]
 
 
-# Raw rows.
-
-
 def test_each_article_reaches_its_own_regulation_or_measure():
     tables = {
         "1100": [{"FileId": 1, "1101": "2024P10001", "1108": "Permanent", "1107": "En vigueur"}],
@@ -785,15 +766,11 @@ def test_each_article_reaches_its_own_regulation_or_measure():
             {"1101_fid": 2, "2205": "Article d'un autre arrêté"},
         ],
         "3200": [{"1202_fid": 10, "3204": "Une voie est réservée"}],
-        # The nightly copy is no longer read.
         "1400": [{"1101_fid": 1, "1402": "Article complémentaire", "1405": "Copie périmée"}],
     }
     row = build_raw_dataframe(tables, everything(tables)).row(0, named=True)
     assert row["a_articles"] == ["Sont abrogés : …"]
     assert row["m_article"] == "Une voie est réservée"
-
-
-# Acts cited by another act.
 
 
 @pytest.mark.parametrize(
@@ -850,9 +827,6 @@ def test_an_act_amending_itself_is_not_dropped():
         a_title_html="Arrêté n° 2014P0160 modifiant les règles de stationnement",
     )
     assert discard_superseded_regulations(make_frame(row)).height == 1
-
-
-# Formulas repeated across records.
 
 
 def acts(count: int, **overrides: Any) -> list[dict[str, Any]]:
@@ -937,8 +911,12 @@ def test_a_recurring_measure_text_is_logged(captured_logs):
     [
         ("L'arrêté municipal n° 2011-104 est abrogé.", "Préfecture de Police", False),
         ("L'arrêté municipal n° 2011-104 est abrogé.", "Mairie de Paris", True),
-        # The prefect's older acts came over to the city's services in 2017.
-        ("L'arrêté préfectoral n° 2011-00104 est abrogé.", "Mairie de Paris - SR", True),
+        pytest.param(
+            "L'arrêté préfectoral n° 2011-00104 est abrogé.",
+            "Mairie de Paris - SR",
+            True,
+            id="prefect_act_now_under_a_city_service",
+        ),
         ("L'arrêté municipal n° 2011-104 est abrogé.", "Conjoint", True),
         ("L'arrêté n° 2011-104 est abrogé.", "Préfecture de Police", True),
         (
@@ -965,7 +943,7 @@ def test_each_superseding_reason_is_its_own_verdict():
         make_row(a_file_id=2, a_identifier="2024P10002", a_key_1="PARIS RESPIRE"),
         make_row(a_file_id=3, a_identifier="2024P10003", a_title_html="les dimanches"),
     )
-    judged = judge_superseded_regulations(df, everyone(df))
+    judged = judge_superseded_regulations(df, every_row_alive(df))
     assert details(judged, SUPERSEDED_BY_LINK) == ["a newer version", None, None]
     assert details(judged, SOME_DAYS_ONLY) == [
         None,
@@ -985,7 +963,7 @@ def test_an_unread_text_says_where_it_was_read():
             l_notes="SUR LA PISTE CYCLABLE",
         ),
     )
-    judged = judge_unread_texts(df, everyone(df))
+    judged = judge_unread_texts(df, every_row_alive(df))
     assert details(judged, UNREAD_MEASURE_TEXT) == ["paragraph", None]
     assert details(judged, UNREAD_LOCATION_TEXT) == [None, "location notes: zone name"]
     assert details(judged, UNREAD_ACT_TEXT) == [None, None]
@@ -1009,7 +987,7 @@ def lane_act(**lane: Any) -> list[dict[str, Any]]:
 )
 def test_a_lane_named_on_a_measure_dialog_does_not_publish_drops_the_act(lane):
     frame = make_frame(*lane_act(**lane))
-    judged = judge_unread_texts(frame, everyone(frame))
+    judged = judge_unread_texts(frame, every_row_alive(frame))
     assert set(details(judged, UNREAD_ACT_TEXT)) == {
         f"{'paragraph' if 'm_paragraph' in lane else 'location complement'}: zone name, "
         "on a measure DiaLog does not publish"

@@ -13,9 +13,6 @@ from .eudonet.data_source_integration import DataSourceIntegration as Eudonet
 from .eudonet.decision import Decision
 from .eudonet.regulations import CITY, IDENTIFIER_PREFIX, PREFECTURE
 
-# The police prefecture's acts go to its own DiaLog organization, under its own client
-# (`PARIS_PREFECTURE_CLIENT_ID`, `PARIS_PREFECTURE_CLIENT_SECRET`); its state is kept under
-# this name.
 PREFECTURE_ORGANIZATION = "co_paris_prefecture"
 PREFECTURE_SUFFIX = " (Préfecture de Police)"
 PREFECTURE_LABEL = f"{Eudonet.name}{PREFECTURE_SUFFIX}"
@@ -46,7 +43,7 @@ class Integration(BaseIntegration):
         credentials, or with `PUBLISH_POLICE_PREFECTURE` off."""
         run = BaseIntegration.integrate_regulations
         shared = SharedRun()
-        city = self.sibling(self.organization_settings, self.client, shared.view(CITY))
+        city = self._for_view(self.organization_settings, self.client, shared.view(CITY))
         outcome = run(city, limit_to, update_existing, dry_run, force_deletions)
         if not PUBLISH_POLICE_PREFECTURE:
             return outcome
@@ -60,7 +57,6 @@ class Integration(BaseIntegration):
         try:
             other = run(prefecture, limit_to, update_existing, dry_run, force_deletions)
         except Exception as error:
-            # The city's run went through: the prefecture's acts stay as DiaLog has them.
             logger.exception("The police prefecture's synchronization failed")
             outcome.frozen_sources[PREFECTURE_LABEL] = FAILED
             outcome.source_errors[PREFECTURE_LABEL] = repr(error)[:300]
@@ -69,49 +65,48 @@ class Integration(BaseIntegration):
 
     def prefecture(self, shared: "SharedRun") -> "Integration | None":
         settings = self.organization_settings
-        if not (settings.pref_client_id and settings.pref_client_secret):
+        if not (settings.paris_prefecture_client_id and settings.paris_prefecture_client_secret):
             return None
         own = copy.copy(settings)
         own.organization = PREFECTURE_ORGANIZATION
-        own.client_id, own.client_secret = settings.pref_client_id, settings.pref_client_secret
+        own.client_id, own.client_secret = (
+            settings.paris_prefecture_client_id,
+            settings.paris_prefecture_client_secret,
+        )
         logger.info(f"DiaLog target for {PREFECTURE_ORGANIZATION}: {own.base_url}")
-        return self.sibling(own, build_client(own), shared.view(PREFECTURE, PREFECTURE_LABEL))
+        return self._for_view(own, build_client(own), shared.view(PREFECTURE, PREFECTURE_LABEL))
 
-    def sibling(self, settings, client, source: type[Eudonet]) -> "Integration":
-        """This organization's synchronization options, on one view of the shared run."""
-        sibling = type(self)(settings, client)
-        sibling.data_sources = [source]
-        sibling.paused_sources = self.paused_sources
-        return sibling
+    def _for_view(self, settings, client, source: type[Eudonet]) -> "Integration":
+        _for_view = type(self)(settings, client)
+        _for_view.data_sources = [source]
+        _for_view.paused_sources = self.paused_sources
+        return _for_view
 
 
 class SharedRun:
     """One Eudonet read and one decision for both organizations: Eudonet refuses a second
-    session, and the acts are judged together, the citations crossing authorities."""
+    session."""
 
     def __init__(self) -> None:
         self.raw: pl.DataFrame | None = None
         self.elsewhere: dict[str, str] | None = None
-        # A failed read is not tried again for the other organization.
-        self.error: Exception | None = None
+        self.failed_read: Exception | None = None
         self.decided: pl.DataFrame | None = None
         self.decision: Decision | None = None
-        # The rules judged once for both: the second view checks its canonical rows against
-        # them too, instead of applying them again.
-        self.applied_codes: set[str] = set()
+        self.rule_codes_already_judged: set[str] = set()
 
     def view(self, authority: str, label: str | None = None) -> type[Eudonet]:
         shared = self
 
         class View(Eudonet):
             def fetch_raw_data(self) -> pl.DataFrame:
-                if shared.error is not None:
-                    raise shared.error
+                if shared.failed_read is not None:
+                    raise shared.failed_read
                 if shared.raw is None:
                     try:
                         shared.raw = super().fetch_raw_data()
                     except Exception as error:
-                        shared.error = error
+                        shared.failed_read = error
                         raise
                     shared.elsewhere = self.numbers_published_elsewhere
                 self.numbers_published_elsewhere = shared.elsewhere
@@ -121,9 +116,9 @@ class SharedRun:
                 if shared.decided is None:
                     shared.decided = super().decided_rows(raw_data)
                     shared.decision = self.decision
-                    shared.applied_codes = set(self._applied_codes)
+                    shared.rule_codes_already_judged = set(self._applied_codes)
                 self.decision = shared.decision
-                self._applied_codes |= shared.applied_codes
+                self._applied_codes |= shared.rule_codes_already_judged
                 return shared.decided
 
         View.authority = authority
@@ -147,12 +142,11 @@ def combine(city: IntegrationOutcome, prefecture: IntegrationOutcome) -> Integra
         for key, count in getattr(prefecture, name).items():
             merged[key] = merged.get(key, 0) + count
         setattr(out, name, merged)
-    # The same read and the same texts: its alerts and metrics are the city's.
     out.source_alerts = list(dict.fromkeys([*city.source_alerts, *prefecture.source_alerts]))
     out.datasets = [*city.datasets, *prefecture.datasets]
     out.total_shift = city.total_shift
     if shift := prefecture.total_shift:
-        out.source_alerts.append(_prefecture_shift(shift))
+        out.source_alerts.append(_prefecture_total_shift_alert(shift))
     out.frozen_sources = {**city.frozen_sources, **_apart(prefecture.frozen_sources)}
     out.volume_drops = {**city.volume_drops, **_apart(prefecture.volume_drops)}
     out.source_errors = {**city.source_errors, **_apart(prefecture.source_errors)}
@@ -160,8 +154,7 @@ def combine(city: IntegrationOutcome, prefecture: IntegrationOutcome) -> Integra
     return out
 
 
-def _prefecture_shift(shift: dict) -> str:
-    """The prefecture's own total moved: said apart, under its name (team-facing, French)."""
+def _prefecture_total_shift_alert(shift: dict) -> str:
     (dialog_before, dialog_now), (produced_before, produced_now) = (
         shift["dialog"],
         shift["produced"],

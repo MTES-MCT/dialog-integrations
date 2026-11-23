@@ -36,8 +36,8 @@ def test_the_prefilter_reads_less_and_publishes_the_same():
 
 
 def test_an_act_text_is_refused_before_its_locations_only_when_no_location_could_explain_it():
-    # A street named after "entre" is understood only on a location narrower than the street:
-    # read leniently, the act is not refused before its locations are read.
-    narrowing = make_row(a_articles=["Entre la rue de Rivoli et la rue Saint-Honoré."])
+    explainable_by_a_location = make_row(
+        a_articles=["Entre la rue de Rivoli et la rue Saint-Honoré."]
+    )
     unread = make_row(a_file_id=2, a_identifier="2024P10002", a_articles=["Les jours de pluie."])
-    assert set(unread_act_texts(make_frame(narrowing, unread))) == {2}
+    assert set(unread_act_texts(make_frame(explainable_by_a_location, unread))) == {2}

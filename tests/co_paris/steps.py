@@ -1,7 +1,3 @@
-"""Test helpers: each step of the chain judged, then decided at once on its own checks, as the
-step used to drop. The run decides once, at the end (`decision.decide`). The steps that read
-the act's other records see every row alive."""
-
 from datetime import date
 
 import polars as pl
@@ -89,7 +85,7 @@ SUPERSEDED = (
 UNREAD_TEXTS = (UNREAD_ACT_TEXT, UNREAD_MEASURE_TEXT, UNREAD_LOCATION_TEXT)
 
 
-def everyone(df: pl.DataFrame) -> pl.Series:
+def every_row_alive(df: pl.DataFrame) -> pl.Series:
     return pl.Series([True] * df.height, dtype=pl.Boolean)
 
 
@@ -116,7 +112,7 @@ def compute_regulation_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def discard_superseded_regulations(df: pl.DataFrame) -> pl.DataFrame:
-    return drop_refused(judge_superseded_regulations(df, everyone(df)), *SUPERSEDED)
+    return drop_refused(judge_superseded_regulations(df, every_row_alive(df)), *SUPERSEDED)
 
 
 def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
@@ -124,11 +120,11 @@ def compute_measure_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def discard_unread_texts(df: pl.DataFrame, alerts: list[str] | None = None) -> pl.DataFrame:
-    return drop_refused(judge_unread_texts(df, everyone(df), alerts), *UNREAD_TEXTS)
+    return drop_refused(judge_unread_texts(df, every_row_alive(df), alerts), *UNREAD_TEXTS)
 
 
 def discard_unread_titles(df: pl.DataFrame) -> pl.DataFrame:
-    return drop_refused(judge_unread_titles(df, everyone(df)), UNREAD_TITLE)
+    return drop_refused(judge_unread_titles(df, every_row_alive(df)), UNREAD_TITLE)
 
 
 def discard_measures_out_of_model(df: pl.DataFrame) -> pl.DataFrame:
@@ -136,11 +132,11 @@ def discard_measures_out_of_model(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_vehicle_fields(df: pl.DataFrame) -> pl.DataFrame:
-    return drop_refused(judge_vehicle_fields(df, everyone(df)), VEHICLE_REJECTION)
+    return drop_refused(judge_vehicle_fields(df, every_row_alive(df)), VEHICLE_REJECTION)
 
 
 def compute_period_fields(df: pl.DataFrame, today: date) -> pl.DataFrame:
-    return drop_refused(judge_period_fields(df, everyone(df), today), IMPLAUSIBLE_DATES)
+    return drop_refused(judge_period_fields(df, every_row_alive(df), today), IMPLAUSIBLE_DATES)
 
 
 def discard_bound_qualifiers(df: pl.DataFrame) -> pl.DataFrame:
@@ -160,7 +156,7 @@ def orient_one_way_streets(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def arbitrate_one_way_streets(df: pl.DataFrame) -> pl.DataFrame:
-    kept = drop_refused(judge_one_way_lanes(df, everyone(df)), ONE_WAY_LANE)
+    kept = drop_refused(judge_one_way_lanes(df, every_row_alive(df)), ONE_WAY_LANE)
     return split_one_way_measures(kept)
 
 
@@ -173,7 +169,7 @@ def discard_refused_locations(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def discard_measures_with_copied_locations(df: pl.DataFrame) -> pl.DataFrame:
-    return drop_refused(judge_copied_locations(df, everyone(df)), COPIED_LOCATION)
+    return drop_refused(judge_copied_locations(df, every_row_alive(df)), COPIED_LOCATION)
 
 
 def discard_published_elsewhere(df: pl.DataFrame, numbers: dict[str, str] | None):

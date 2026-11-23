@@ -87,8 +87,6 @@ jobs:
           DIALOG_CLIENT_SECRET: ${{ secrets.DIALOG_CLIENT_SECRET }}
           # Source credentials, set only in the environments that need them (co_paris).
           EUDONET_PARIS_CREDENTIALS: ${{ secrets.EUDONET_PARIS_CREDENTIALS }}
-          # The police prefecture's own DiaLog organization (co_paris); without them its
-          # acts are left out.
           PARIS_PREFECTURE_CLIENT_ID: ${{ secrets.PARIS_PREFECTURE_CLIENT_ID }}
           PARIS_PREFECTURE_CLIENT_SECRET: ${{ secrets.PARIS_PREFECTURE_CLIENT_SECRET }}
           FORCE: ${{ inputs.force_deletions }}

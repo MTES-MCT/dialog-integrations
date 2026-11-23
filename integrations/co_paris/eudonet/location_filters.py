@@ -36,8 +36,6 @@ ADDED_STATUS = "Ajoutée"
 
 
 def _words(text: str) -> set[str]:
-    """Lowercase words without accents, punctuation or plural: "Pillet-Will" = "pillet will",
-    "Staël" = "stael", "Ier" = "1er" = "1"."""
     ascii_text = unicodedata.normalize("NFKD", text.lower()).encode("ascii", "ignore").decode()
     return {_bare_word(word) for word in re.sub(r"[^a-z0-9]+", " ", ascii_text).split()}
 
@@ -48,7 +46,6 @@ def _bare_word(word: str) -> str:
     return word[:-1] if len(word) > 3 and word[-1] in "sx" else word
 
 
-# Words too common in street names to tell one street from another in a title.
 _GENERIC_STREET_WORDS = _words(
     "rue avenue boulevard bd bld av place quai impasse passage allée square cité villa chemin "
     "route porte pont cours sentier voie galerie rond point carrefour parvis promenade "
@@ -65,8 +62,6 @@ def _title_words(title_html: str) -> frozenset[str]:
 
 
 def _title_names_street(title_html: str | None, road_name: str) -> bool:
-    """Whether the title holds a word that singles the street out. A name made of common
-    words only cannot be judged, and is said named."""
     distinctive = {w for w in _words(road_name) - _GENERIC_STREET_WORDS if len(w) > 1}
     return not distinctive or bool(distinctive & _title_words(title_html or ""))
 
@@ -76,10 +71,7 @@ def judge_copied_locations(df: pl.DataFrame, alive: pl.Series) -> pl.DataFrame:
     replaced: its status is not "Ajoutée" and the title does not name its street.
 
     That street is the older act's, often a kilometre away or more, and the same location
-    travels from act to act (one point in 141 acts of a year, 2026-11-19). The title is the
-    one text written for the new act that the API reads: a street the signed PDF alone names
-    goes too (1 of the 37 locations it drops out of 2 983, 2026-11-19). A location already
-    refused no longer speaks against its measure: judged on the rows still alive.
+    travels from act to act.
     """
     rows = df.select("a_type", "a_title_html", "l_status", "l_road_name").iter_rows()
     statuses = [
@@ -118,7 +110,7 @@ def _bound_qualifier(row: dict) -> str | None:
     parking = row["measure_type_"] == MeasureTypeEnum.PARKINGPROHIBITED.value
     by_measure = set() if parking else {FACING_NUMBER_COMPLEMENT}
     if parking or row["m_type"] in (LABEL_PEDESTRIAN_AREA, LABEL_ONE_WAY):
-        # On a one-way street "vers" is the direction itself, read by `orient_one_way_streets`.
+        # On a one-way street "vers" is the direction itself, read by `judge_one_way_orientation`.
         by_measure.add(TOWARDS_NUMBER_COMPLEMENT)
     for column, neutral in (
         ("l_from_number_complement", NEUTRAL_FROM_NUMBER_COMPLEMENTS | by_measure),
